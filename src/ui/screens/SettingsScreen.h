@@ -28,7 +28,8 @@ class SettingsScreen : public Screen {
     SETTING_PAGE_BUTTONS = 4,
     SETTING_FONT_FAMILY = 5,
     SETTING_FONT_SIZE = 6,
-    SETTING_UI_FONT_SIZE = 7
+    SETTING_UI_FONT_SIZE = 7,
+    SETTING_SWITCH_OTA_PARTITION = 8
   };
 
   // Display and layout constants
@@ -71,9 +72,11 @@ class SettingsScreen : public Screen {
       {ITEM_SETTING, SETTING_PAGE_BUTTONS   },
       {ITEM_SPACER,  0                      },
       {ITEM_SETTING, SETTING_UI_FONT_SIZE   },
+      {ITEM_SPACER,  0                      },
+      {ITEM_SETTING, SETTING_SWITCH_OTA_PARTITION}
   };
-  static constexpr int MENU_ITEM_COUNT = 11;
-  static constexpr int SETTINGS_COUNT = 8;
+  static constexpr int MENU_ITEM_COUNT = 13;
+  static constexpr int SETTINGS_COUNT = 9;
 
   // Menu navigation
   int selectedIndex = 0;
@@ -107,6 +110,7 @@ class SettingsScreen : public Screen {
   String getSettingValue(int settingIndex);
   bool isSpacer(int menuIndex) const;
   int getSettingIndexFromMenu(int menuIndex) const;
+  void switchOTAPartition();
 };
 
 #endif
