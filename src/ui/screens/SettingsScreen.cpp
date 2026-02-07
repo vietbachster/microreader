@@ -5,6 +5,7 @@
 #include <resources/fonts/other/MenuFontBig.h>
 #include <resources/fonts/other/MenuFontSmall.h>
 #include <resources/fonts/other/MenuHeader.h>
+#include <esp_ota_ops.h>
 
 #include "../../core/BatteryMonitor.h"
 #include "../../core/Buttons.h"
@@ -132,8 +133,10 @@ void SettingsScreen::renderSettings() {
 
     int settingIndex = getSettingIndexFromMenu(i);
     String displayName = getSettingName(settingIndex);
-    displayName += ": ";
-    displayName += getSettingValue(settingIndex);
+    if (settingIndex != SETTING_SWITCH_OTA_PARTITION) {
+      displayName += ": ";
+      displayName += getSettingValue(settingIndex);
+    }
 
     int16_t x1, y1;
     uint16_t w, h;
@@ -241,6 +244,9 @@ void SettingsScreen::toggleCurrentSetting() {
     case SETTING_UI_FONT_SIZE:
       uiFontSizeIndex = 1 - uiFontSizeIndex;
       break;
+    case SETTING_SWITCH_OTA_PARTITION:
+      switchOTAPartition();
+      break;
   }
 }
 
@@ -344,6 +350,8 @@ String SettingsScreen::getSettingName(int index) {
       return "Font Size";
     case SETTING_UI_FONT_SIZE:
       return "UI Font Size";
+    case SETTING_SWITCH_OTA_PARTITION:
+      return "Switch OTA Partition";
     default:
       return "";
   }
@@ -442,4 +450,19 @@ int SettingsScreen::getSettingIndexFromMenu(int menuIndex) const {
   if (menuIndex < 0 || menuIndex >= MENU_ITEM_COUNT)
     return 0;
   return menuItems[menuIndex].settingIndex;
+}
+
+void SettingsScreen::switchOTAPartition() {
+  uiManager.prepareForSleep();
+
+  auto running = esp_ota_get_running_partition();
+  auto next = esp_ota_get_next_update_partition(running);
+  Serial.printf("OTA: %s -> %s\n", running->label, next->label);
+  Serial.printf("Switching to next OTA partition at address 0x%08X and restarting...\n", next->address);
+  auto rc = esp_ota_set_boot_partition(next);
+  if (rc != ESP_OK) {
+    Serial.printf("Failed to set boot partition! esp_ota_set_boot_partition() returned %d\n", rc);
+    return;
+  }
+  esp_restart();
 }

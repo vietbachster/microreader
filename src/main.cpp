@@ -2,6 +2,7 @@
 #include <FS.h>
 #include <SD.h>
 #include <esp_sleep.h>
+#include <esp_ota_ops.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
@@ -128,6 +129,19 @@ void enterDeepSleep() {
   esp_deep_sleep_start();
 }
 
+void verifyOta() {
+  const esp_partition_t *running = esp_ota_get_running_partition();
+  esp_ota_img_states_t ota_state;
+  if (esp_ota_get_state_partition(running, &ota_state) == ESP_OK) {
+    Serial.printf("Current OTA partition: %s, state: %d\n", running->label, ota_state);
+    if (ota_state == ESP_OTA_IMG_PENDING_VERIFY) {
+      Serial.println("Marking current OTA partition as valid...");
+      // we currently assume everything was ok if we got this far
+      esp_ota_mark_app_valid_cancel_rollback();
+    }
+  }
+}
+
 void setup() {
   // Only start/wait for serial monitor if USB is connected
   pinMode(UART0_RXD, INPUT);
@@ -146,6 +160,9 @@ void setup() {
   Serial.println("  MicroReader - ESP32-C3 E-Ink");
   Serial.println("=================================");
   Serial.println();
+
+  // Verify OTA state to prevent partition changes on reset
+  verifyOta();
 
   // Initialize buttons
   buttons.begin();
