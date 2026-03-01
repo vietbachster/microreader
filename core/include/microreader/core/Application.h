@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstdint>
-#include <string>
 
 #include "microreader/core/Display.h"
 #include "microreader/core/Input.h"
@@ -23,10 +22,10 @@ class Application {
 
  private:
   DisplayFrame frame_;
-  std::string status_line_;
+  ButtonState buttons_{};
+  Rotation rotation_ = Rotation::Deg0;
   uint64_t ticks_ = 0;
   uint32_t uptime_ms_ = 0;
-  uint32_t last_drawn_second_ = 0;
   bool dirty_ = true;
   bool started_ = false;
   bool running_ = true;

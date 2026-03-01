@@ -4,15 +4,7 @@
 
 namespace microreader {
 
-enum class Button : uint8_t {
-  Back = 0,
-  Confirm = 1,
-  Left = 2,
-  Right = 3,
-  Up = 4,
-  Down = 5,
-  Power = 6
-};
+enum class Button : uint8_t { Button0 = 0, Button1 = 1, Button2 = 2, Button3 = 3, Up = 4, Down = 5, Power = 6 };
 
 struct ButtonState {
   uint8_t current = 0;

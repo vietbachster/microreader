@@ -1,24 +1,22 @@
 #include "microreader/core/Application.h"
 
-#include <cstdio>
-#include <cstring>
+#include "microreader/core/Font.h"
 
 namespace microreader {
 
 const char* Application::build_info() const {
-  return "microreader2 minimal core";
+  return "microreader";
 }
 
 void Application::start(ILogger& logger) {
   ticks_ = 0;
   uptime_ms_ = 0;
-  last_drawn_second_ = 0;
   frame_ = DisplayFrame{};
-  status_line_.clear();
+  buttons_ = ButtonState{};
   dirty_ = true;
   started_ = true;
   running_ = true;
-  logger.log(LogLevel::Info, std::string("boot: ") + build_info());
+  logger.log(LogLevel::Info, build_info());
 }
 
 void Application::update(const ButtonState& buttons, uint32_t dt_ms, ILogger& logger) {
@@ -30,27 +28,28 @@ void Application::update(const ButtonState& buttons, uint32_t dt_ms, ILogger& lo
     return;
   }
 
-  if (buttons.is_pressed(Button::Power)) {
-    running_ = false;
-    dirty_ = true;
-    status_line_ = "power pressed -> sleep";
-    logger.log(LogLevel::Info, status_line_);
-    return;
-  }
-
   ++ticks_;
   uptime_ms_ += dt_ms;
 
-  // Mark frame dirty on first tick and once per second.
-  const uint32_t current_second = uptime_ms_ / 1000;
-  if (ticks_ == 1 || current_second > last_drawn_second_) {
-    last_drawn_second_ = current_second;
+  // Redraw whenever the held button set changes.
+  if (buttons.current != buttons_.current) {
     dirty_ = true;
-    char buffer[128];
-    std::snprintf(buffer, sizeof(buffer), "tick=%llu uptime_ms=%lu", static_cast<unsigned long long>(ticks_),
-                  static_cast<unsigned long>(uptime_ms_));
-    status_line_ = buffer;
-    logger.log(LogLevel::Info, status_line_);
+  }
+  buttons_ = buttons;
+
+  if (buttons_.is_pressed(Button::Power)) {
+    running_ = false;
+    dirty_ = true;
+    logger.log(LogLevel::Info, "power pressed -> sleep");
+    return;
+  }
+
+  // Cycle rotation on Up/Down press.
+  if (buttons_.is_pressed(Button::Up) || buttons_.is_pressed(Button::Down)) {
+    const int step = buttons_.is_pressed(Button::Up) ? 1 : -1;
+    const int deg = (static_cast<int>(rotation_) + step * 90 + 180) % 180;
+    rotation_ = static_cast<Rotation>(deg);
+    dirty_ = true;
   }
 }
 
@@ -59,13 +58,40 @@ void Application::draw(IDisplay& display) {
     return;
   }
 
-  frame_ = DisplayFrame{};
-  std::strncpy(frame_.lines[frame_.line_count].data(), build_info(), DisplayFrame::kMaxLineLength - 1);
-  ++frame_.line_count;
+  frame_.fill(false);
+  draw_text(frame_, 8, 8, build_info());
 
-  if (!status_line_.empty() && frame_.line_count < DisplayFrame::kMaxLines) {
-    std::strncpy(frame_.lines[frame_.line_count].data(), status_line_.c_str(), DisplayFrame::kMaxLineLength - 1);
-    ++frame_.line_count;
+  // Apply rotation whenever it differs from the display's current setting.
+  if (display.rotation() != rotation_) {
+    display.set_rotation(rotation_);
+  }
+
+  // Build a space-separated list of currently held button names.
+  char held[64] = {};
+  char* p = held;
+  auto append = [&](const char* name) {
+    if (p != held) {
+      *p++ = ' ';
+    }
+    while (*name)
+      *p++ = *name++;
+  };
+  if (buttons_.is_down(Button::Up))
+    append("Up");
+  if (buttons_.is_down(Button::Down))
+    append("Down");
+  if (buttons_.is_down(Button::Button0))
+    append("B0");
+  if (buttons_.is_down(Button::Button1))
+    append("B1");
+  if (buttons_.is_down(Button::Button2))
+    append("B2");
+  if (buttons_.is_down(Button::Button3))
+    append("B3");
+  if (buttons_.is_down(Button::Power))
+    append("Power");
+  if (p != held) {
+    draw_text(frame_, 8, 24, held);
   }
 
   display.present(frame_, running_ ? RefreshMode::Fast : RefreshMode::Full);
