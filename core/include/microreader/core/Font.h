@@ -133,7 +133,7 @@ inline void draw_char(DisplayFrame& frame, int x, int y, char c) {
 inline void draw_text(DisplayFrame& frame, int x, int y, const char* text) {
   int cx = x;
   while (text && *text) {
-    if (cx + 8 > DisplayFrame::kWidth)
+    if (cx + 8 > frame.width())
       break;
     draw_char(frame, cx, y, *text++);
     cx += 8;

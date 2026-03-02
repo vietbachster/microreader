@@ -19,8 +19,8 @@ class DesktopRuntime final : public microreader::IRuntime {
       throw std::runtime_error(std::string("SDL_Init: ") + SDL_GetError());
     }
     window_ = SDL_CreateWindow("microreader", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-                               microreader::DisplayFrame::kWidth * kDisplayScale,
-                               microreader::DisplayFrame::kHeight * kDisplayScale, SDL_WINDOW_SHOWN);
+                               microreader::DisplayFrame::kPhysicalWidth * kDisplayScale,
+                               microreader::DisplayFrame::kPhysicalHeight * kDisplayScale, SDL_WINDOW_SHOWN);
     if (!window_)
       throw std::runtime_error(std::string("SDL_CreateWindow: ") + SDL_GetError());
 
@@ -30,10 +30,11 @@ class DesktopRuntime final : public microreader::IRuntime {
 
     // Nearest-neighbour scaling so individual pixels stay crisp when zoomed.
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
-    SDL_RenderSetLogicalSize(renderer_, microreader::DisplayFrame::kWidth, microreader::DisplayFrame::kHeight);
+    SDL_RenderSetLogicalSize(renderer_, microreader::DisplayFrame::kPhysicalWidth,
+                             microreader::DisplayFrame::kPhysicalHeight);
 
     texture_ = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STREAMING,
-                                 microreader::DisplayFrame::kWidth, microreader::DisplayFrame::kHeight);
+                                 microreader::DisplayFrame::kPhysicalWidth, microreader::DisplayFrame::kPhysicalHeight);
     if (!texture_)
       throw std::runtime_error(std::string("SDL_CreateTexture: ") + SDL_GetError());
   }
@@ -60,14 +61,16 @@ class DesktopRuntime final : public microreader::IRuntime {
   void apply_rotation(microreader::Rotation rotation) {
     const bool sideways = rotation == microreader::Rotation::Deg90;
     const int win_w =
-        (sideways ? microreader::DisplayFrame::kHeight : microreader::DisplayFrame::kWidth) * kDisplayScale;
+        (sideways ? microreader::DisplayFrame::kPhysicalHeight : microreader::DisplayFrame::kPhysicalWidth) *
+        kDisplayScale;
     const int win_h =
-        (sideways ? microreader::DisplayFrame::kWidth : microreader::DisplayFrame::kHeight) * kDisplayScale;
+        (sideways ? microreader::DisplayFrame::kPhysicalWidth : microreader::DisplayFrame::kPhysicalHeight) *
+        kDisplayScale;
     SDL_SetWindowSize(window_, win_w, win_h);
     SDL_SetWindowPosition(window_, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
-    SDL_RenderSetLogicalSize(renderer_,
-                             sideways ? microreader::DisplayFrame::kHeight : microreader::DisplayFrame::kWidth,
-                             sideways ? microreader::DisplayFrame::kWidth : microreader::DisplayFrame::kHeight);
+    SDL_RenderSetLogicalSize(
+        renderer_, sideways ? microreader::DisplayFrame::kPhysicalHeight : microreader::DisplayFrame::kPhysicalWidth,
+        sideways ? microreader::DisplayFrame::kPhysicalWidth : microreader::DisplayFrame::kPhysicalHeight);
   }
 
   // IRuntime

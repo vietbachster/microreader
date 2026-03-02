@@ -11,7 +11,8 @@ const char* Application::build_info() const {
 void Application::start(ILogger& logger) {
   ticks_ = 0;
   uptime_ms_ = 0;
-  frame_ = DisplayFrame{};
+  frame_.fill(false);  // reset in-place — avoids a 48 KB stack temporary
+  frame_.rotation_ = Rotation::Deg0;
   buttons_ = ButtonState{};
   dirty_ = true;
   started_ = true;
@@ -58,8 +59,22 @@ void Application::draw(IDisplay& display) {
     return;
   }
 
+  frame_.rotation_ = rotation_;
   frame_.fill(false);
-  draw_text(frame_, 8, 8, build_info());
+
+  // Helper: horizontal centre x for a string of known pixel width.
+  auto center_x = [&](const char* s) {
+    int len = 0;
+    while (s[len])
+      ++len;
+    return (frame_.width() - len * 8) / 2;
+  };
+
+  const char* info = build_info();
+  draw_text(frame_, center_x(info), 8, info);
+
+  static constexpr const char* kVersion = "v0.1";
+  draw_text(frame_, center_x(kVersion), frame_.height() - 16, kVersion);
 
   // Apply rotation whenever it differs from the display's current setting.
   if (display.rotation() != rotation_) {

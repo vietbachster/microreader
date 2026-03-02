@@ -21,7 +21,9 @@ class Application {
   uint32_t uptime_ms() const;
 
  private:
-  DisplayFrame frame_;
+  // Pixel buffer owned here; DisplayFrame is a non-owning view into it.
+  alignas(4) uint8_t frame_pixels_[DisplayFrame::kPixelBytes]{};
+  DisplayFrame frame_{frame_pixels_};
   ButtonState buttons_{};
   Rotation rotation_ = Rotation::Deg0;
   uint64_t ticks_ = 0;
