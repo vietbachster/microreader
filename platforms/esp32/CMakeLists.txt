@@ -1,3 +1,5 @@
-FILE(GLOB_RECURSE app_sources ${CMAKE_SOURCE_DIR}/platforms/esp32/*.*)
+FILE(GLOB app_sources
+    ${CMAKE_CURRENT_LIST_DIR}/*.c
+    ${CMAKE_CURRENT_LIST_DIR}/*.cpp)
 
-idf_component_register(SRCS ${app_sources})
+idf_component_register(SRCS ${app_sources} INCLUDE_DIRS ".")
