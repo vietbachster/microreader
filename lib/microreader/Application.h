@@ -2,9 +2,9 @@
 
 #include <cstdint>
 
-#include "microreader/core/Display.h"
-#include "microreader/core/Input.h"
-#include "microreader/core/Log.h"
+#include "Display.h"
+#include "Input.h"
+#include "Log.h"
 
 namespace microreader {
 

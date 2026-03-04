@@ -7,7 +7,7 @@
 #include "esp_adc/adc_oneshot.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
-#include "microreader/core/Input.h"
+#include "microreader/Input.h"
 
 // ---- Button hardware configuration ----
 //

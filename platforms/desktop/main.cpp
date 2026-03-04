@@ -2,8 +2,8 @@
 
 #include "display.h"
 #include "logger.h"
-#include "microreader/core/Application.h"
-#include "microreader/core/Loop.h"
+#include "microreader/Application.h"
+#include "microreader/Loop.h"
 #include "runtime.h"
 
 int main() {

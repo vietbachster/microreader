@@ -3,7 +3,7 @@
 #include <iostream>
 #include <string>
 
-#include "microreader/core/Log.h"
+#include "microreader/Log.h"
 
 class DesktopLogger final : public microreader::ILogger {
  public:

@@ -4,11 +4,7 @@
 
 namespace microreader {
 
-enum class LogLevel {
-  Info,
-  Warning,
-  Error
-};
+enum class LogLevel { Info, Warning, Error };
 
 class ILogger {
  public:

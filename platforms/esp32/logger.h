@@ -3,7 +3,7 @@
 #include <string>
 
 #include "esp_log.h"
-#include "microreader/core/Log.h"
+#include "microreader/Log.h"
 
 class Esp32Logger final : public microreader::ILogger {
  public:

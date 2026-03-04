@@ -2,8 +2,8 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "microreader/core/Input.h"
-#include "microreader/core/Loop.h"
+#include "microreader/Input.h"
+#include "microreader/Loop.h"
 
 class Esp32Runtime final : public microreader::IRuntime {
  public:

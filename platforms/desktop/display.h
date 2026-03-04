@@ -2,7 +2,7 @@
 
 #include <SDL.h>
 
-#include "microreader/core/Display.h"
+#include "microreader/Display.h"
 #include "runtime.h"
 
 // Renders the 1-bit DisplayFrame into an SDL texture and presents it.

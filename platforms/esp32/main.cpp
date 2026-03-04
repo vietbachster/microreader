@@ -7,7 +7,7 @@
 #include "freertos/task.h"
 #include "input.h"
 #include "logger.h"
-#include "microreader/core/Input.h"
+#include "microreader/Input.h"
 
 static constexpr const char* kBtnNames[] = {"Back", "Confirm", "Left", "Right", "Up", "Down", "Power"};
 static constexpr microreader::Button kButtons[] = {microreader::Button::Button0, microreader::Button::Button1,

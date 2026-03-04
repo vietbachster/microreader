@@ -23,11 +23,11 @@ FetchContent_MakeAvailable(SDL2)
 # Platform-agnostic core library
 # ---------------------------------------------------------------------------
 add_library(microreader_core STATIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/../core/src/Application.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../core/src/Loop.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/microreader/Application.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/microreader/Loop.cpp
 )
 target_include_directories(microreader_core PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/../core/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../lib
 )
 
 # ---------------------------------------------------------------------------

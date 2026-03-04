@@ -1,7 +1,7 @@
 #pragma once
 
-#include "microreader/core/Application.h"
-#include "microreader/core/Log.h"
+#include "microreader/Application.h"
+#include "microreader/Log.h"
 
 namespace microreader {
 

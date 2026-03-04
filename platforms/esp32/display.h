@@ -9,7 +9,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "microreader/core/Display.h"
+#include "microreader/Display.h"
 
 // ---- Pin assignments ----
 static constexpr gpio_num_t kEpdSclk = GPIO_NUM_8;

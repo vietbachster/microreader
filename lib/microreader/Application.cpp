@@ -1,6 +1,6 @@
-#include "microreader/core/Application.h"
+#include "Application.h"
 
-#include "microreader/core/Font.h"
+#include "Font.h"
 
 namespace microreader {
 
