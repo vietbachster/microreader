@@ -43,7 +43,20 @@ VS_MAP = {0b00: "VSS", 0b01: "VSH1", 0b10: "VSL", 0b11: "VSH2"}
 VS_REVERSE = {v: k for k, v in VS_MAP.items()}
 
 TRANSITION_NAMES = ["Black → Black", "Black → White", "White → Black", "White → White"]
-VOLTAGE_OPTIONS = ["VSS", "VSH1", "VSL", "VSH2"]
+VOLTAGE_OPTIONS = ["VSS", "VSL", "VSH1", "VSH2"]
+
+VOLTAGE_COLORS = {
+    "VSS": "#757575",  # ground / off
+    "VSL": "#2980b9",  # low / negative
+    "VSH1": "#c0392b",  # high positive 1
+    "VSH2": "#e67e22",  # high positive 2
+}
+VOLTAGE_DESCRIPTIONS = {
+    "VSS": "Ground (0 V)",
+    "VSL": "Low / negative",
+    "VSH1": "High positive 1",
+    "VSH2": "High positive 2",
+}
 
 FRAME_MAGIC = bytes([0xDE, 0xAD, 0xBE, 0xEF])
 LUT_SIZE = 112
@@ -116,7 +129,7 @@ class LUTEditor:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("SSD1677 LUT Editor")
-        self.root.geometry("1600x950")
+        self.root.geometry("1200x780")
 
         # --- LUT state ---
         self.voltage_patterns: Dict[int, List[str]] = {
@@ -152,31 +165,58 @@ class LUTEditor:
     # ------------------------------------------------------------------
 
     def _build_ui(self):
-        paned = ttk.PanedWindow(self.root, orient=tk.HORIZONTAL)
-        paned.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.root.rowconfigure(0, weight=1)
+        self.root.columnconfigure(0, weight=1)
 
-        left = ttk.Frame(paned)
-        right = ttk.Frame(paned)
-        paned.add(left, weight=2)
-        paned.add(right, weight=1)
+        paned = tk.PanedWindow(
+            self.root,
+            orient=tk.HORIZONTAL,
+            sashrelief="raised",
+            sashwidth=5,
+            bg="#cccccc",
+        )
+        paned.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
 
-        self._build_left(left)
-        self._build_right(right)
+        left_outer = ttk.Frame(paned)
+        right_outer = ttk.Frame(paned)
+        paned.add(left_outer, stretch="always")
+        paned.add(right_outer, stretch="always")
+
+        self._build_left(left_outer)
+        self._build_right(right_outer)
+
+        # Set sash to 70% of window width after the window is fully drawn
+        def _set_sash():
+            paned.update_idletasks()
+            paned.sash_place(0, int(paned.winfo_width() * 0.60), 0)
+
+        self.root.after(50, _set_sash)
 
     def _build_left(self, parent: ttk.Frame):
-        canvas = tk.Canvas(parent)
-        scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
+        parent.rowconfigure(0, weight=1)
+        parent.columnconfigure(0, weight=1)
+
+        v_scroll = ttk.Scrollbar(parent, orient="vertical")
+        v_scroll.grid(row=0, column=1, sticky="ns")
+
+        canvas = tk.Canvas(parent, yscrollcommand=v_scroll.set, highlightthickness=0)
+        canvas.grid(row=0, column=0, sticky="nsew")
+        v_scroll.config(command=canvas.yview)
+
         inner = ttk.Frame(canvas)
+        win_id = canvas.create_window((0, 0), window=inner, anchor="nw")
+
+        # Keep inner frame as wide as the canvas
+        canvas.bind("<Configure>", lambda e: canvas.itemconfig(win_id, width=e.width))
         inner.bind(
-            "<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all")),
         )
-        canvas.create_window((0, 0), window=inner, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
 
         # Title
         hdr = ttk.Frame(inner)
-        hdr.pack(fill=tk.X, padx=10, pady=10)
-        ttk.Label(hdr, text="SSD1677 LUT Editor", font=("", 14, "bold")).pack()
+        hdr.pack(fill=tk.X, padx=10, pady=(10, 4))
+        ttk.Label(hdr, text="SSD1677 LUT Editor", font=("", 13, "bold")).pack()
         ttk.Label(
             hdr,
             text="Voltage patterns are per-transition · Timing groups are global",
@@ -184,70 +224,174 @@ class LUTEditor:
         ).pack()
 
         # Voltage patterns
-        vf = ttk.LabelFrame(inner, text="Voltage Patterns (per transition)", padding=10)
-        vf.pack(fill=tk.X, padx=10, pady=5)
-        for i in range(4):
-            self._build_voltage_row(vf, i)
+        vf = ttk.LabelFrame(inner, text="Voltage Patterns (per transition)", padding=8)
+        vf.pack(fill=tk.X, padx=8, pady=4)
+        self._build_voltage_legend(vf)
+        self._build_voltage_section(vf)
 
         # Timing groups
         tf = ttk.LabelFrame(
-            inner, text="Timing Groups (global – used by all transitions)", padding=10
+            inner, text="Timing Groups (global – used by all transitions)", padding=8
         )
-        tf.pack(fill=tk.X, padx=10, pady=5)
+        tf.pack(fill=tk.X, padx=8, pady=4)
         for i in range(10):
             self._build_timing_row(tf, i)
 
         # Global settings
-        sf = ttk.LabelFrame(inner, text="Global Settings", padding=10)
-        sf.pack(fill=tk.X, padx=10, pady=10)
+        sf = ttk.LabelFrame(inner, text="Global Settings", padding=8)
+        sf.pack(fill=tk.X, padx=8, pady=(4, 10))
         self._build_settings(sf)
 
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
+    # ---- voltage legend ----
+
+    def _build_voltage_legend(self, parent):
+        legend = ttk.Frame(parent)
+        legend.pack(fill=tk.X, pady=(0, 6))
+        ttk.Label(legend, text="Key: ", font=("Consolas", 8)).pack(side=tk.LEFT)
+        for name in VOLTAGE_OPTIONS:
+            color = VOLTAGE_COLORS[name]
+            swatch = tk.Label(
+                legend,
+                text=f" {name} ",
+                bg=color,
+                fg="white",
+                font=("Consolas", 8, "bold"),
+                relief="flat",
+                padx=4,
+                pady=2,
+            )
+            swatch.pack(side=tk.LEFT, padx=3)
+            ttk.Label(
+                legend, text=VOLTAGE_DESCRIPTIONS[name], font=("Consolas", 8)
+            ).pack(side=tk.LEFT)
+            ttk.Label(legend, text="  ").pack(side=tk.LEFT)
+
+    # ---- voltage pattern rows (shared scroll) ----
+
+    def _build_voltage_section(self, parent):
+        """One canvas + one scrollbar shared by all 4 transition rows."""
+        body = ttk.Frame(parent)
+        body.pack(fill=tk.X, expand=True)
+
+        # Fixed left column: row labels
+        labels_col = ttk.Frame(body)
+        labels_col.pack(side=tk.LEFT)
+
+        # Shared scrollable canvas
+        self._vp_canvas = tk.Canvas(body, highlightthickness=0)
+        self._vp_canvas.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # Fixed right column: +/- buttons
+        ctrl_col = ttk.Frame(body)
+        ctrl_col.pack(side=tk.LEFT)
+
+        # Shared scrollbar below the canvas
+        h_scroll = ttk.Scrollbar(
+            parent, orient="horizontal", command=self._vp_canvas.xview
+        )
+        h_scroll.pack(fill=tk.X)
+        self._vp_canvas.configure(xscrollcommand=h_scroll.set)
+
+        # Inner frame that holds all 4 button rows stacked vertically
+        canvas_inner = ttk.Frame(self._vp_canvas)
+        self._vp_canvas.create_window((0, 0), window=canvas_inner, anchor="nw")
+
+        def _update_scrollregion(e):
+            self._vp_canvas.configure(scrollregion=self._vp_canvas.bbox("all"))
+            self._vp_canvas.configure(height=canvas_inner.winfo_reqheight())
+
+        canvas_inner.bind("<Configure>", _update_scrollregion)
+
+        for i in range(4):
+            self._build_voltage_row(labels_col, canvas_inner, ctrl_col, i)
 
     # ---- voltage pattern row ----
 
-    def _build_voltage_row(self, parent, trans_idx: int):
-        row = ttk.Frame(parent)
-        row.pack(fill=tk.X, pady=3)
-        ttk.Label(row, text=f"{TRANSITION_NAMES[trans_idx]}:", width=18).pack(
-            side=tk.LEFT
-        )
-        container = ttk.Frame(row)
-        container.pack(side=tk.LEFT, fill=tk.X, expand=True)
+    def _build_voltage_row(self, labels_col, canvas_inner, ctrl_col, trans_idx: int):
+        ttk.Label(
+            labels_col, text=f"{TRANSITION_NAMES[trans_idx]}:", width=18, anchor="w"
+        ).pack(pady=3)
+
+        container = ttk.Frame(canvas_inner)
+        container.pack(anchor="nw", pady=3)
+
+        ctrl = ttk.Frame(ctrl_col)
+        ctrl.pack(pady=3)
         add_btn = ttk.Button(
-            row, text="+ Add", width=6, command=lambda: self._add_voltage(trans_idx)
+            ctrl, text="+", width=3, command=lambda: self._add_voltage(trans_idx)
         )
         add_btn.pack(side=tk.LEFT, padx=2)
-        self.voltage_widgets[trans_idx] = {"container": container, "add_btn": add_btn}
+        rem_btn = ttk.Button(
+            ctrl,
+            text="−",
+            width=3,
+            command=lambda: self._remove_last_voltage(trans_idx),
+        )
+        rem_btn.pack(side=tk.LEFT, padx=2)
+
+        self.voltage_widgets[trans_idx] = {
+            "container": container,
+            "add_btn": add_btn,
+            "rem_btn": rem_btn,
+            "btns": [],
+        }
         self._reload_voltage_row(trans_idx)
 
     def _reload_voltage_row(self, trans_idx: int):
-        container = self.voltage_widgets[trans_idx]["container"]
-        for w in container.winfo_children():
-            w.destroy()
+        widgets = self.voltage_widgets[trans_idx]
+        container = widgets["container"]
         pattern = self.voltage_patterns[trans_idx]
-        for idx, voltage in enumerate(pattern):
-            cell = ttk.Frame(container)
-            cell.pack(side=tk.LEFT, padx=2)
-            combo = ttk.Combobox(
-                cell, values=VOLTAGE_OPTIONS, width=7, state="readonly"
+        btns: list = widgets["btns"]
+
+        # Grow: add missing buttons
+        while len(btns) < len(pattern):
+            idx = len(btns)
+            btn = tk.Button(
+                container,
+                text="",
+                fg="white",
+                width=5,
+                relief="raised",
+                bd=2,
+                font=("Consolas", 8, "bold"),
+                cursor="hand2",
             )
-            combo.set(voltage)
-            combo.pack(side=tk.LEFT)
-            combo.bind(
-                "<<ComboboxSelected>>",
-                lambda e, t=trans_idx, v=idx: self._on_voltage_change(t, v),
+            btn.pack(side=tk.LEFT, padx=2)
+            btns.append(btn)
+
+        # Shrink: remove excess buttons
+        while len(btns) > len(pattern):
+            btns.pop().destroy()
+
+        # Update all buttons in-place (no flicker)
+        for idx, btn in enumerate(btns):
+            voltage = pattern[idx]
+            btn.config(
+                text=voltage,
+                bg=VOLTAGE_COLORS[voltage],
+                command=lambda t=trans_idx, v=idx: self._cycle_voltage(t, v),
             )
-            if len(pattern) > 1:
-                ttk.Button(
-                    cell,
-                    text="×",
-                    width=2,
-                    command=lambda t=trans_idx, v=idx: self._remove_voltage(t, v),
-                ).pack(side=tk.LEFT)
-        add_btn = self.voltage_widgets[trans_idx]["add_btn"]
-        add_btn.config(state="disabled" if len(pattern) >= 40 else "normal")
+
+        widgets["add_btn"].config(state="disabled" if len(pattern) >= 40 else "normal")
+        widgets["rem_btn"].config(state="disabled" if len(pattern) <= 1 else "normal")
+        # Refresh the shared canvas scrollregion
+        if hasattr(self, "_vp_canvas"):
+            self._vp_canvas.after_idle(
+                lambda: self._vp_canvas.configure(
+                    scrollregion=self._vp_canvas.bbox("all")
+                )
+            )
+
+    def _cycle_voltage(self, trans_idx: int, volt_idx: int):
+        current = self.voltage_patterns[trans_idx][volt_idx]
+        next_val = VOLTAGE_OPTIONS[
+            (VOLTAGE_OPTIONS.index(current) + 1) % len(VOLTAGE_OPTIONS)
+        ]
+        self.voltage_patterns[trans_idx][volt_idx] = next_val
+        # Update only the clicked button in-place — no flicker
+        btn = self.voltage_widgets[trans_idx]["btns"][volt_idx]
+        btn.config(text=next_val, bg=VOLTAGE_COLORS[next_val])
+        self.update_preview()
 
     def _add_voltage(self, trans_idx: int):
         if len(self.voltage_patterns[trans_idx]) < 40:
@@ -255,17 +399,11 @@ class LUTEditor:
             self._reload_voltage_row(trans_idx)
             self.update_preview()
 
-    def _remove_voltage(self, trans_idx: int, volt_idx: int):
+    def _remove_last_voltage(self, trans_idx: int):
         if len(self.voltage_patterns[trans_idx]) > 1:
-            self.voltage_patterns[trans_idx].pop(volt_idx)
+            self.voltage_patterns[trans_idx].pop()
             self._reload_voltage_row(trans_idx)
             self.update_preview()
-
-    def _on_voltage_change(self, trans_idx: int, volt_idx: int):
-        container = self.voltage_widgets[trans_idx]["container"]
-        cell = container.winfo_children()[volt_idx]
-        self.voltage_patterns[trans_idx][volt_idx] = cell.winfo_children()[0].get()
-        self.update_preview()
 
     # ---- timing group row ----
 
@@ -276,19 +414,17 @@ class LUTEditor:
         entries = []
         for pi, name in enumerate(["A", "B", "C", "D"]):
             ttk.Label(row, text=f"{name}:").pack(side=tk.LEFT, padx=2)
-            spin = ttk.Spinbox(row, from_=0, to=255, width=5)
-            spin.set(str(self.timing_groups[group_idx][pi]))
-            spin.pack(side=tk.LEFT, padx=2)
-            for event in ("<KeyRelease>", "<<Increment>>", "<<Decrement>>"):
-                spin.bind(event, lambda e, g=group_idx: self._on_timing_change(g))
-            entries.append(spin)
+            var = tk.StringVar(value=str(self.timing_groups[group_idx][pi]))
+            entry = ttk.Entry(row, textvariable=var, width=5)
+            entry.pack(side=tk.LEFT, padx=2)
+            entry.bind("<KeyRelease>", lambda e, g=group_idx: self._on_timing_change(g))
+            entries.append(var)
         ttk.Label(row, text="RP:").pack(side=tk.LEFT, padx=5)
-        rp = ttk.Spinbox(row, from_=0, to=255, width=5)
-        rp.set(str(self.timing_groups[group_idx][4]))
-        rp.pack(side=tk.LEFT, padx=2)
-        for event in ("<KeyRelease>", "<<Increment>>", "<<Decrement>>"):
-            rp.bind(event, lambda e, g=group_idx: self._on_timing_change(g))
-        entries.append(rp)
+        var = tk.StringVar(value=str(self.timing_groups[group_idx][4]))
+        entry = ttk.Entry(row, textvariable=var, width=5)
+        entry.pack(side=tk.LEFT, padx=2)
+        entry.bind("<KeyRelease>", lambda e, g=group_idx: self._on_timing_change(g))
+        entries.append(var)
         self.timing_widgets.append(entries)
 
     def _on_timing_change(self, group_idx: int):
@@ -317,15 +453,13 @@ class LUTEditor:
         vf = ttk.Frame(parent)
         vf.pack(fill=tk.X, pady=5)
         ttk.Label(vf, text="Voltages:", font=("", 9, "bold")).pack(anchor=tk.W)
-        grid = ttk.Frame(vf)
-        grid.pack(fill=tk.X, pady=2)
-        for i, name in enumerate(["VGH", "VSH1", "VSH2", "VSL", "VCOM"]):
-            ttk.Label(grid, text=f"{name}:").grid(
-                row=i, column=0, sticky=tk.W, padx=2, pady=2
-            )
-            entry = ttk.Entry(grid, width=8)
+        hrow = ttk.Frame(vf)
+        hrow.pack(fill=tk.X, pady=2)
+        for name in ["VGH", "VSH1", "VSH2", "VSL", "VCOM"]:
+            ttk.Label(hrow, text=f"{name}:").pack(side=tk.LEFT, padx=(6, 1))
+            entry = ttk.Entry(hrow, width=7)
             entry.insert(0, f"0x{self.voltages[name]:02X}")
-            entry.grid(row=i, column=1, padx=2, pady=2)
+            entry.pack(side=tk.LEFT)
             entry.bind("<KeyRelease>", lambda e: self._on_voltage_setting_change())
             self.voltage_entries[name] = entry
 
@@ -352,71 +486,75 @@ class LUTEditor:
     # ------------------------------------------------------------------
 
     def _build_right(self, parent: ttk.Frame):
-        # --- Action buttons ---
-        btn_row = ttk.Frame(parent)
-        btn_row.pack(fill=tk.X, padx=5, pady=5)
-        ttk.Button(btn_row, text="Load", command=self._load).pack(side=tk.LEFT, padx=2)
-        ttk.Button(btn_row, text="Save", command=self._save).pack(side=tk.LEFT, padx=2)
-        ttk.Button(btn_row, text="Reset", command=self._reset).pack(
-            side=tk.LEFT, padx=2
-        )
-        ttk.Button(btn_row, text="Copy", command=self._copy).pack(side=tk.LEFT, padx=2)
+        parent.columnconfigure(0, weight=1)
+        # rows that should expand:  C-array (row 2) and device log (row 5)
+        parent.rowconfigure(2, weight=2)
+        parent.rowconfigure(5, weight=3)
 
-        # --- Timing info ---
-        info = ttk.LabelFrame(parent, text="Timing Info", padding=5)
-        info.pack(fill=tk.X, padx=5, pady=5)
+        # row 0 – action buttons
+        btn_row = ttk.Frame(parent)
+        btn_row.grid(row=0, column=0, sticky="ew", padx=4, pady=(4, 2))
+        for text, cmd in [
+            ("Load", self._load),
+            ("Save", self._save),
+            ("Reset", self._reset),
+            ("Copy", self._copy),
+        ]:
+            ttk.Button(btn_row, text=text, command=cmd).pack(side=tk.LEFT, padx=2)
+
+        # row 1 – timing info
+        info = ttk.LabelFrame(parent, text="Timing Info", padding=4)
+        info.grid(row=1, column=0, sticky="ew", padx=4, pady=2)
         self.timing_label = ttk.Label(info, text="", font=("", 9))
         self.timing_label.pack()
 
-        # --- C array preview ---
-        preview = ttk.LabelFrame(parent, text="C Array Output", padding=5)
-        preview.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        # row 2 – C array (expands)
+        preview = ttk.LabelFrame(parent, text="C Array Output", padding=4)
+        preview.grid(row=2, column=0, sticky="nsew", padx=4, pady=2)
+        preview.rowconfigure(0, weight=1)
+        preview.columnconfigure(0, weight=1)
         self.preview_text = scrolledtext.ScrolledText(
-            preview, wrap=tk.WORD, font=("Consolas", 9), height=12
+            preview, wrap=tk.WORD, font=("Consolas", 9)
         )
-        self.preview_text.pack(fill=tk.BOTH, expand=True)
+        self.preview_text.grid(row=0, column=0, sticky="nsew")
 
-        # --- Send to Device ---
-        send_frame = ttk.LabelFrame(parent, text="Send to Device", padding=8)
-        send_frame.pack(fill=tk.X, padx=5, pady=5)
+        # row 3 – send to device
+        send_frame = ttk.LabelFrame(parent, text="Send to Device", padding=6)
+        send_frame.grid(row=3, column=0, sticky="ew", padx=4, pady=2)
 
-        port_row = ttk.Frame(send_frame)
-        port_row.pack(fill=tk.X, pady=3)
-        ttk.Label(port_row, text="COM Port:").pack(side=tk.LEFT)
+        ctrl_row = ttk.Frame(send_frame)
+        ctrl_row.pack(fill=tk.X)
+        ttk.Label(ctrl_row, text="Port:").pack(side=tk.LEFT)
         self.port_var = tk.StringVar(value="COM4")
-        self.port_combo = ttk.Combobox(port_row, textvariable=self.port_var, width=12)
-        self.port_combo.pack(side=tk.LEFT, padx=5)
-        ttk.Button(port_row, text="↻ Refresh", command=self._refresh_ports).pack(
-            side=tk.LEFT
+        self.port_combo = ttk.Combobox(ctrl_row, textvariable=self.port_var, width=9)
+        self.port_combo.pack(side=tk.LEFT, padx=(2, 0))
+        ttk.Button(ctrl_row, text="↻", width=2, command=self._refresh_ports).pack(
+            side=tk.LEFT, padx=(1, 8)
         )
-        self._refresh_ports()
-
-        baud_row = ttk.Frame(send_frame)
-        baud_row.pack(fill=tk.X, pady=3)
-        ttk.Label(baud_row, text="Baud rate:").pack(side=tk.LEFT)
+        ttk.Label(ctrl_row, text="Baud:").pack(side=tk.LEFT)
         self.baud_var = tk.StringVar(value="115200")
         ttk.Combobox(
-            baud_row,
+            ctrl_row,
             textvariable=self.baud_var,
             values=["115200", "230400", "460800", "921600"],
-            width=10,
+            width=8,
             state="readonly",
-        ).pack(side=tk.LEFT, padx=5)
+        ).pack(side=tk.LEFT, padx=(2, 8))
+        ttk.Button(ctrl_row, text="▶  Send LUT", command=self._send_to_device).pack(
+            side=tk.LEFT, padx=2
+        )
+        self._refresh_ports()
 
         if not SERIAL_AVAILABLE:
             ttk.Label(
                 send_frame,
                 text="⚠  pyserial not installed  (pip install pyserial)",
                 foreground="red",
-            ).pack()
+            ).pack(anchor="w")
 
-        ttk.Button(
-            send_frame, text="▶  Send LUT to Device", command=self._send_to_device
-        ).pack(fill=tk.X, pady=(6, 2))
-
-        # --- Device log ---
+        # row 4 – log header
         log_header = ttk.Frame(parent)
-        log_header.pack(fill=tk.X, padx=5)
+        log_header.grid(row=4, column=0, sticky="ew", padx=4, pady=(6, 0))
         ttk.Label(log_header, text="Device Log", font=("", 9, "bold")).pack(
             side=tk.LEFT
         )
@@ -424,10 +562,11 @@ class LUTEditor:
             side=tk.RIGHT
         )
 
+        # row 5 – device log (expands)
         self.log_text = scrolledtext.ScrolledText(
-            parent, wrap=tk.WORD, font=("Consolas", 9), height=10, state=tk.DISABLED
+            parent, wrap=tk.WORD, font=("Consolas", 9), state=tk.DISABLED
         )
-        self.log_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=(0, 5))
+        self.log_text.grid(row=5, column=0, sticky="nsew", padx=4, pady=(0, 4))
         self.log_text.tag_config("ok", foreground="#00aa00")
         self.log_text.tag_config("err", foreground="#cc0000")
         self.log_text.tag_config("warn", foreground="#cc7700")

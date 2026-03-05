@@ -149,15 +149,22 @@ class EInkDisplay {
   RefreshMode writeBuffers(RefreshMode mode = FAST_REFRESH) {
     if (!isScreenOn)
       mode = HALF_REFRESH;
+
     setRamArea(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+
     if (mode != FAST_REFRESH) {
       writeRamBuffer(CMD_WRITE_RAM_BW, frameBuffer, BUFFER_SIZE);
       writeRamBuffer(CMD_WRITE_RAM_RED, frameBuffer, BUFFER_SIZE);
     } else {
       writeRamBuffer(CMD_WRITE_RAM_BW, frameBuffer, BUFFER_SIZE);
-      writeRamBuffer(CMD_WRITE_RAM_RED, frameBufferActive, BUFFER_SIZE);
+      writeRamBuffer(CMD_WRITE_RAM_RED, frameBuffer, BUFFER_SIZE);
+
+      // writeRamBuffer(CMD_WRITE_RAM_BW, frameBuffer, BUFFER_SIZE);
+      // writeRamBuffer(CMD_WRITE_RAM_RED, frameBufferActive, BUFFER_SIZE);
     }
+
     swapBuffers();
+
     return mode;  // return effective mode so refreshDisplay() gets the right one
   }
 

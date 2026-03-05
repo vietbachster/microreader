@@ -90,8 +90,8 @@ static void ballMove(Ball& b, int dir) {
   }
 }
 
-// Clear the framebuffer, draw all balls, flush, and log the refresh time.
-static void drawScene(EInkDisplay& epd, microreader::ILogger& logger) {
+// Clear the framebuffer, draw all balls, upload to display, and log the time.
+static RefreshMode drawScene(EInkDisplay& epd, microreader::ILogger& logger) {
   epd.clearScreen(0xFF);
   for (int i = 0; i < kNumBalls; ++i)
     drawFilledCircle(epd.frameBuffer, balls[i].x, balls[i].y, balls[i].radius, true);
@@ -100,17 +100,8 @@ static void drawScene(EInkDisplay& epd, microreader::ILogger& logger) {
   const RefreshMode mode = epd.writeBuffers(FAST_REFRESH);
   const int64_t t_write_ms = (esp_timer_get_time() - t_write0) / 1000;
 
-  const int64_t t_refresh0 = esp_timer_get_time();
-  epd.refreshDisplay(mode, false);
-  const int64_t t_refresh_ms = (esp_timer_get_time() - t_refresh0) / 1000;
-
-  logger.log(microreader::LogLevel::Info, "write: " + std::to_string(t_write_ms) +
-                                              " ms  "
-                                              "refresh: " +
-                                              std::to_string(t_refresh_ms) +
-                                              " ms  "
-                                              "total: " +
-                                              std::to_string(t_write_ms + t_refresh_ms) + " ms");
+  logger.log(microreader::LogLevel::Info, "upload: " + std::to_string(t_write_ms) + " ms");
+  return mode;
 }
 
 extern "C" void app_main(void) {
@@ -123,11 +114,18 @@ extern "C" void app_main(void) {
 
   // Start ball in the centre moving diagonally.
   bool autoMove = false;
+  int pending_refreshes = 0;
+  RefreshMode pending_refresh_mode = FAST_REFRESH;
 
-  drawScene(epd, logger);
+  {
+    pending_refresh_mode = drawScene(epd, logger);
+    pending_refreshes = 1;
+  }
   logger.log(microreader::LogLevel::Info, "Button0=fwd  Button1=back  Up/Down=toggle auto");
 
   while (true) {
+    const int64_t loop_start = esp_timer_get_time();
+
     // Apply any LUT received over serial.
     static uint8_t lut_buf[112];
     if (serial_lut_take(lut_buf)) {
@@ -145,17 +143,20 @@ extern "C" void app_main(void) {
     if (autoMove) {
       for (int i = 0; i < kNumBalls; ++i)
         ballMove(balls[i], 1);
-      drawScene(epd, logger);
+      pending_refresh_mode = drawScene(epd, logger);
+      pending_refreshes = 6;
     } else if (state.is_pressed(microreader::Button::Button0)) {
       for (int i = 0; i < kNumBalls; ++i)
         ballMove(balls[i], 1);
       logger.log(microreader::LogLevel::Info, "forward");
-      drawScene(epd, logger);
+      pending_refresh_mode = drawScene(epd, logger);
+      pending_refreshes = 6;
     } else if (state.is_pressed(microreader::Button::Button1)) {
       for (int i = 0; i < kNumBalls; ++i)
         ballMove(balls[i], -1);
       logger.log(microreader::LogLevel::Info, "backward");
-      drawScene(epd, logger);
+      pending_refresh_mode = drawScene(epd, logger);
+      pending_refreshes = 6;
     } else if (state.is_pressed(microreader::Button::Button2)) {
       logger.log(microreader::LogLevel::Info, "clearing screen white");
       epd.clearScreen(0xFF);
@@ -166,6 +167,19 @@ extern "C" void app_main(void) {
       epd.displayBuffer(FAST_REFRESH);
     }
 
-    vTaskDelay(pdMS_TO_TICKS(20));
+    // Drain one refresh per loop.
+    if (pending_refreshes > 0) {
+      const int64_t t_refresh0 = esp_timer_get_time();
+      epd.refreshDisplay(pending_refresh_mode, false);
+      const int64_t t_refresh_ms = (esp_timer_get_time() - t_refresh0) / 1000;
+      --pending_refreshes;
+      logger.log(microreader::LogLevel::Info,
+                 "refresh: " + std::to_string(t_refresh_ms) + " ms  remaining: " + std::to_string(pending_refreshes));
+    }
+
+    constexpr int64_t kMinLoopMs = 20;
+    const int64_t elapsed_ms = (esp_timer_get_time() - loop_start) / 1000;
+    if (elapsed_ms < kMinLoopMs)
+      vTaskDelay(pdMS_TO_TICKS(kMinLoopMs - elapsed_ms));
   }
 }
