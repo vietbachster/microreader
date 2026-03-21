@@ -73,6 +73,22 @@ class DesktopRuntime final : public microreader::IRuntime {
         sideways ? microreader::DisplayFrame::kPhysicalWidth : microreader::DisplayFrame::kPhysicalHeight);
   }
 
+  // Register a bool to flip when the user presses T.
+  void set_transition_toggle(bool* flag) {
+    transition_flag_ = flag;
+  }
+
+  // IRuntime: step mode (P toggles, Space advances one tick).
+  bool step_mode() const override {
+    return step_mode_;
+  }
+  bool consume_step() override {
+    if (!step_requested_)
+      return false;
+    step_requested_ = false;
+    return true;
+  }
+
   // IRuntime
   bool should_continue() const override {
     return !quit_;
@@ -83,21 +99,27 @@ class DesktopRuntime final : public microreader::IRuntime {
     while (SDL_PollEvent(&e)) {
       if (e.type == SDL_QUIT)
         quit_ = true;
+      if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_t && transition_flag_)
+        *transition_flag_ = !*transition_flag_;
+      if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_p)
+        step_mode_ = !step_mode_;
+      if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_SPACE)
+        step_requested_ = true;
     }
     const uint8_t* keys = SDL_GetKeyboardState(nullptr);
     uint8_t mask = 0;
-    if (keys[SDL_SCANCODE_A])
+    // Button0-3: arrow keys for directional movement.
+    if (keys[SDL_SCANCODE_LEFT])
       mask |= 1u << static_cast<uint8_t>(microreader::Button::Button0);
-    if (keys[SDL_SCANCODE_S])
+    if (keys[SDL_SCANCODE_RIGHT])
       mask |= 1u << static_cast<uint8_t>(microreader::Button::Button1);
-    if (keys[SDL_SCANCODE_D])
-      mask |= 1u << static_cast<uint8_t>(microreader::Button::Button2);
-    if (keys[SDL_SCANCODE_F])
-      mask |= 1u << static_cast<uint8_t>(microreader::Button::Button3);
     if (keys[SDL_SCANCODE_UP])
-      mask |= 1u << static_cast<uint8_t>(microreader::Button::Up);
+      mask |= 1u << static_cast<uint8_t>(microreader::Button::Button2);
     if (keys[SDL_SCANCODE_DOWN])
-      mask |= 1u << static_cast<uint8_t>(microreader::Button::Down);
+      mask |= 1u << static_cast<uint8_t>(microreader::Button::Button3);
+    // Button4 (Up enum): Q key — toggle stop/start.
+    if (keys[SDL_SCANCODE_Q])
+      mask |= 1u << static_cast<uint8_t>(microreader::Button::Up);
     if (keys[SDL_SCANCODE_RETURN])
       mask |= 1u << static_cast<uint8_t>(microreader::Button::Power);
     buttons_.update(mask);
@@ -115,8 +137,11 @@ class DesktopRuntime final : public microreader::IRuntime {
  private:
   uint32_t frame_time_ms_;
   bool quit_ = false;
+  bool* transition_flag_ = nullptr;
   SDL_Window* window_ = nullptr;
   SDL_Renderer* renderer_ = nullptr;
   SDL_Texture* texture_ = nullptr;
   microreader::ButtonState buttons_{};
+  bool step_mode_ = false;
+  bool step_requested_ = false;
 };

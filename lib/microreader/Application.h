@@ -2,7 +2,9 @@
 
 #include <cstdint>
 
+#include "Canvas.h"
 #include "Display.h"
+#include "DisplayQueue.h"
 #include "Input.h"
 #include "Log.h"
 
@@ -14,16 +16,13 @@ class Application {
 
   const char* build_info() const;
   void start(ILogger& logger);
-  void update(const ButtonState& buttons, uint32_t dt_ms, ILogger& logger);
-  void draw(IDisplay& display);
+  // Update app logic and submit any display commands to the controller.
+  void update(const ButtonState& buttons, uint32_t dt_ms, DisplayQueue& queue, ILogger& logger);
   bool running() const;
   uint64_t tick_count() const;
   uint32_t uptime_ms() const;
 
  private:
-  // Pixel buffer owned here; DisplayFrame is a non-owning view into it.
-  alignas(4) uint8_t frame_pixels_[DisplayFrame::kPixelBytes]{};
-  DisplayFrame frame_{frame_pixels_};
   ButtonState buttons_{};
   Rotation rotation_ = Rotation::Deg0;
   uint64_t ticks_ = 0;
@@ -31,6 +30,14 @@ class Application {
   bool dirty_ = true;
   bool started_ = false;
   bool running_ = true;
+
+  // Demo: bouncing square.
+  static constexpr int kSquareSize = 60;
+  static constexpr int kMoveStep = 30;
+  CanvasRect square_{0, 0, kSquareSize, kSquareSize, /*white=*/false};
+  int demo_vx_ = 30;
+  int demo_vy_ = 30;
+  bool demo_paused_ = true;
 };
 
 }  // namespace microreader

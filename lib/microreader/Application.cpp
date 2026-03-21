@@ -1,5 +1,7 @@
 #include "Application.h"
 
+#include <algorithm>
+
 #include "Font.h"
 
 namespace microreader {
@@ -11,8 +13,6 @@ const char* Application::build_info() const {
 void Application::start(ILogger& logger) {
   ticks_ = 0;
   uptime_ms_ = 0;
-  frame_.fill(false);  // reset in-place — avoids a 48 KB stack temporary
-  frame_.rotation_ = Rotation::Deg0;
   buttons_ = ButtonState{};
   dirty_ = true;
   started_ = true;
@@ -20,107 +20,80 @@ void Application::start(ILogger& logger) {
   logger.log(LogLevel::Info, build_info());
 }
 
-void Application::update(const ButtonState& buttons, uint32_t dt_ms, ILogger& logger) {
-  if (!started_) {
+void Application::update(const ButtonState& buttons, uint32_t dt_ms, DisplayQueue& queue, ILogger& logger) {
+  if (!started_)
     start(logger);
-  }
-
-  if (!running_) {
+  if (!running_)
     return;
-  }
 
   ++ticks_;
   uptime_ms_ += dt_ms;
-
-  // Redraw whenever the held button set changes.
-  if (buttons.current != buttons_.current) {
-    dirty_ = true;
-  }
   buttons_ = buttons;
 
   if (buttons_.is_pressed(Button::Power)) {
     running_ = false;
-    dirty_ = true;
-    logger.log(LogLevel::Info, "power pressed -> sleep");
     return;
   }
 
-  // Cycle rotation on Up/Down press.
-  if (buttons_.is_pressed(Button::Up) || buttons_.is_pressed(Button::Down)) {
-    const int step = buttons_.is_pressed(Button::Up) ? 1 : -1;
-    const int deg = (static_cast<int>(rotation_) + step * 90 + 180) % 180;
-    rotation_ = static_cast<Rotation>(deg);
-    dirty_ = true;
-  }
-}
+  // --- Demo: bouncing black square on a white background ---
+  // Button4 (Up) toggles pause/auto-bounce.
+  if (buttons_.is_pressed(Button::Up))
+    demo_paused_ = !demo_paused_;
 
-void Application::draw(IDisplay& display) {
-  if (!dirty_) {
+  if (demo_paused_) {
+    // Manual movement: Button0=left, Button1=right, Button2=up, Button3=down.
+    int x = square_.x();
+    int y = square_.y();
+    if (buttons_.is_down(Button::Button0))
+      y += kMoveStep;
+    if (buttons_.is_down(Button::Button1))
+      y -= kMoveStep;
+    if (buttons_.is_down(Button::Button2))
+      x += kMoveStep;
+    if (buttons_.is_down(Button::Button3))
+      x -= kMoveStep;
+    x = std::max(0, std::min(x, DisplayFrame::kPhysicalWidth - kSquareSize));
+    y = std::max(0, std::min(y, DisplayFrame::kPhysicalHeight - kSquareSize));
+    square_.set_position(x, y);
+    square_.commit(queue);
     return;
   }
 
-  frame_.rotation_ = rotation_;
-  frame_.fill(false);
+  // Auto-bounce.
+  int x = square_.x() + demo_vx_;
+  int y = square_.y() + demo_vy_;
 
-  // Helper: horizontal centre x for a string of known pixel width.
-  auto center_x = [&](const char* s) {
-    int len = 0;
-    while (s[len])
-      ++len;
-    return (frame_.width() - len * 8) / 2;
-  };
-
-  const char* info = build_info();
-  draw_text(frame_, center_x(info), 8, info);
-
-  static constexpr const char* kVersion = "v0.1";
-  draw_text(frame_, center_x(kVersion), frame_.height() - 16, kVersion);
-
-  // Apply rotation whenever it differs from the display's current setting.
-  if (display.rotation() != rotation_) {
-    display.set_rotation(rotation_);
+  // Bounce off edges.
+  const int max_x = DisplayFrame::kPhysicalWidth - kSquareSize;
+  const int max_y = DisplayFrame::kPhysicalHeight - kSquareSize;
+  if (x <= 0) {
+    x = 0;
+    demo_vx_ = -demo_vx_;
+  }
+  if (x >= max_x) {
+    x = max_x;
+    demo_vx_ = -demo_vx_;
+  }
+  if (y <= 0) {
+    y = 0;
+    demo_vy_ = -demo_vy_;
+  }
+  if (y >= max_y) {
+    y = max_y;
+    demo_vy_ = -demo_vy_;
   }
 
-  // Build a space-separated list of currently held button names.
-  char held[64] = {};
-  char* p = held;
-  auto append = [&](const char* name) {
-    if (p != held) {
-      *p++ = ' ';
-    }
-    while (*name)
-      *p++ = *name++;
-  };
-  if (buttons_.is_down(Button::Up))
-    append("Up");
-  if (buttons_.is_down(Button::Down))
-    append("Down");
-  if (buttons_.is_down(Button::Button0))
-    append("B0");
-  if (buttons_.is_down(Button::Button1))
-    append("B1");
-  if (buttons_.is_down(Button::Button2))
-    append("B2");
-  if (buttons_.is_down(Button::Button3))
-    append("B3");
-  if (buttons_.is_down(Button::Power))
-    append("Power");
-  if (p != held) {
-    draw_text(frame_, 8, 24, held);
-  }
-
-  display.present(frame_, running_ ? RefreshMode::Fast : RefreshMode::Full);
-  dirty_ = false;
+  square_.set_position(x, y);
+  // square_.set_visible(!square_.visible());
+  square_.commit(queue);
 }
 
 bool Application::running() const {
   return running_;
 }
-
 uint64_t Application::tick_count() const {
   return ticks_;
 }
-
 uint32_t Application::uptime_ms() const {
   return uptime_ms_;
 }

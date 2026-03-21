@@ -1,8 +1,6 @@
 ﻿#pragma once
 
-// Direct port of EInkDisplay (reference project) to ESP-IDF.
-// Method names, variable names, and logic are kept identical to the reference.
-// Only the low-level SPI/GPIO/delay calls are swapped from Arduino to ESP-IDF.
+// EInkDisplay driver for ESP-IDF (SSD1677).
 
 #include <cstdint>
 #include <cstring>
@@ -13,6 +11,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "microreader/Display.h"
 
 // ---- Pin assignments ----
 #define EPD_SCLK GPIO_NUM_8
@@ -22,7 +21,7 @@
 #define EPD_RST GPIO_NUM_5
 #define EPD_BUSY GPIO_NUM_6
 
-// ---- SSD1677 command definitions (identical to reference) ----
+// ---- SSD1677 command definitions ----
 #define CMD_SOFT_RESET 0x12
 #define CMD_BOOSTER_SOFT_START 0x0C
 #define CMD_DRIVER_OUTPUT_CONTROL 0x01
@@ -35,6 +34,7 @@
 #define CMD_SET_RAM_Y_COUNTER 0x4F
 #define CMD_WRITE_RAM_BW 0x24
 #define CMD_WRITE_RAM_RED 0x26
+#define CMD_DISPLAY_OPTIONS 0x37
 #define CMD_AUTO_WRITE_BW_RAM 0x46
 #define CMD_AUTO_WRITE_RED_RAM 0x47
 #define CMD_DISPLAY_UPDATE_CTRL1 0x21
@@ -49,19 +49,45 @@
 #define CMD_WRITE_TEMP 0x1A
 #define CMD_DEEP_SLEEP 0x10
 
-// ---- Refresh modes (identical to reference) ----
+// ---- Refresh modes ----
 enum RefreshMode { FULL_REFRESH, HALF_REFRESH, FAST_REFRESH };
 
-// ---- LUT (identical to reference lut_grayscale) ----
-static const uint8_t lut_grayscale[] = {
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x54, 0x54, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0xAA, 0xA0, 0xA8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xA2, 0x22, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x01, 0x01, 0x00, 0x01, 0x01,
-    0x01, 0x01, 0x00, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x8F, 0x8F, 0x8F, 0x8F, 0x8F, 0x17, 0x41, 0xA8, 0x32, 0x30, 0x00, 0x00};
+// ---- LUT ----
+static const uint8_t lut_fast[] = {
+    // VS L0–L3 (voltage patterns per transition)
+    // Black → Black: [VSH1 → VSL → VSH1 → VSH1]
+    0x65, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // Black → White: [VSL → VSH1 → VSL → VSL]
+    0x9A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // White → Black: [VSL → VSH2 → VSL → VSH1]
+    0xB9, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // White → White: [VSH2 → VSL → VSH2 → VSL]
+    0xEE, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // L4 (VCOM)
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 
-class EInkDisplay {
+    // TP/RP groups
+    0x01, 0x01, 0x01, 0x01, 0x00,  // G0: A=1 B=1 C=1 D=1 RP=0 (4 frames)
+    0x00, 0x00, 0x00, 0x00, 0x00,  // G1: A=0 B=0 C=0 D=0 RP=0
+    0x00, 0x00, 0x00, 0x00, 0x00,  // G2: A=0 B=0 C=0 D=0 RP=0
+    0x00, 0x00, 0x00, 0x00, 0x00,  // G3: A=0 B=0 C=0 D=0 RP=0
+    0x00, 0x00, 0x00, 0x00, 0x00,  // G4: A=0 B=0 C=0 D=0 RP=0
+    0x00, 0x00, 0x00, 0x00, 0x00,  // G5: A=0 B=0 C=0 D=0 RP=0
+    0x00, 0x00, 0x00, 0x00, 0x00,  // G6: A=0 B=0 C=0 D=0 RP=0
+    0x00, 0x00, 0x00, 0x00, 0x00,  // G7: A=0 B=0 C=0 D=0 RP=0
+    0x00, 0x00, 0x00, 0x00, 0x00,  // G8: A=0 B=0 C=0 D=0 RP=0
+    0x00, 0x00, 0x00, 0x00, 0x00,  // G9: A=0 B=0 C=0 D=0 RP=0
+
+    // Frame rate
+    0x86, 0x86, 0x86, 0x86, 0x86,
+
+    // Voltages (VGH, VSH1, VSH2, VSL, VCOM)
+    0x17, 0x41, 0xA8, 0x32, 0x30,
+
+    // Reserved
+    0x00, 0x00};
+
+class EInkDisplay : public microreader::IDisplay {
  public:
   static const uint16_t DISPLAY_WIDTH = 800;
   static const uint16_t DISPLAY_HEIGHT = 480;
@@ -108,7 +134,7 @@ class EInkDisplay {
 
     spi_bus_config_t bus{};
     bus.mosi_io_num = EPD_MOSI;
-    bus.miso_io_num = -1;
+    bus.miso_io_num = GPIO_NUM_7;  // shared with SD card
     bus.sclk_io_num = EPD_SCLK;
     bus.quadwp_io_num = -1;
     bus.quadhd_io_num = -1;
@@ -136,12 +162,17 @@ class EInkDisplay {
     frameBufferActive = temp;
   }
 
-  // Identical to reference displayBuffer()
   void displayBuffer(RefreshMode mode = FAST_REFRESH) {
     if (!isScreenOn)
       mode = HALF_REFRESH;
     writeBuffers(mode);
     refreshDisplay(mode, false);
+  }
+
+  // Upload data to RED RAM without triggering a refresh.
+  void writeRedRam(const uint8_t* data, uint32_t size) {
+    setRamArea(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+    writeRamBuffer(CMD_WRITE_RAM_RED, data, size);
   }
 
   // Write framebuffer data to display RAM (SPI transfer only, no waveform).
@@ -156,11 +187,12 @@ class EInkDisplay {
       writeRamBuffer(CMD_WRITE_RAM_BW, frameBuffer, BUFFER_SIZE);
       writeRamBuffer(CMD_WRITE_RAM_RED, frameBuffer, BUFFER_SIZE);
     } else {
-      writeRamBuffer(CMD_WRITE_RAM_BW, frameBuffer, BUFFER_SIZE);
-      writeRamBuffer(CMD_WRITE_RAM_RED, frameBuffer, BUFFER_SIZE);
-
-      // writeRamBuffer(CMD_WRITE_RAM_BW, frameBuffer, BUFFER_SIZE);
-      // writeRamBuffer(CMD_WRITE_RAM_RED, frameBufferActive, BUFFER_SIZE);
+      if (customLutActive) {
+        writeRamBuffer(CMD_WRITE_RAM_BW, frameBuffer, BUFFER_SIZE);
+      } else {
+        writeRamBuffer(CMD_WRITE_RAM_BW, frameBuffer, BUFFER_SIZE);
+        writeRamBuffer(CMD_WRITE_RAM_RED, frameBufferActive, BUFFER_SIZE);
+      }
     }
 
     swapBuffers();
@@ -168,7 +200,27 @@ class EInkDisplay {
     return mode;  // return effective mode so refreshDisplay() gets the right one
   }
 
-  // Identical to reference refreshDisplay()
+  // ---- microreader::IDisplay ----
+  void tick() override {
+    waitWhileBusy();  // ensure previous refresh is complete before starting a new one
+
+    if (memcmp(frameBuffer, target_, BUFFER_SIZE) == 0)
+      return;
+
+    memcpy(frameBuffer, target_, BUFFER_SIZE);
+
+    const bool was_off = !isScreenOn;
+    const uint32_t t0 = millis();
+    writeBuffers(FAST_REFRESH);
+    const uint32_t t1 = millis();
+    refreshDisplay(FAST_REFRESH, false);
+    const uint32_t t2 = millis();
+    if (was_off)
+      setCustomLUT(true);
+
+    ESP_LOGI("epd", "tick: writeBuffers=%lums refresh=%lums total=%lums", t1 - t0, t2 - t1, t2 - t0);
+  }
+
   void refreshDisplay(RefreshMode mode = FAST_REFRESH, bool turnOffScreen = false) {
     sendCommand(CMD_DISPLAY_UPDATE_CTRL1);
     sendData((mode == FAST_REFRESH) ? CTRL1_NORMAL : CTRL1_BYPASS_RED);
@@ -191,11 +243,13 @@ class EInkDisplay {
       sendCommand(CMD_WRITE_TEMP);
       sendData(0x5A);
       displayMode |= 0xD4;
+    } else if (customLutActive) {
+      displayMode |= 0x0C;
     } else {  // FAST_REFRESH
-      displayMode |= customLutActive ? 0x0C : 0x1C;
+      displayMode |= 0x1C;
     }
 
-    ESP_LOGI("epd", "refreshDisplay: mode=%s displayMode=0x%02X",
+    ESP_LOGD("epd", "refreshDisplay: mode=%s displayMode=0x%02X",
              mode == FULL_REFRESH   ? "FULL"
              : mode == HALF_REFRESH ? "HALF"
                                     : "FAST",
@@ -204,11 +258,12 @@ class EInkDisplay {
     sendCommand(CMD_DISPLAY_UPDATE_CTRL2);
     sendData(displayMode);
     sendCommand(CMD_MASTER_ACTIVATION);
-    waitWhileBusy();
   }
 
   void setCustomLUT(bool enabled, const uint8_t* lutData = nullptr) {
-    if (enabled && lutData) {
+    if (enabled) {
+      if (!lutData)
+        lutData = lut_fast;
       sendCommand(CMD_WRITE_LUT);
       for (uint16_t i = 0; i < 105; i++)
         sendData(lutData[i]);
@@ -280,7 +335,7 @@ class EInkDisplay {
   void waitWhileBusy(const char* comment = nullptr) {
     uint32_t start = millis();
     while (gpio_get_level(EPD_BUSY) == 1) {
-      delay(1);
+      esp_rom_delay_us(100);
       if (millis() - start > 10000) {
         ESP_LOGW("epd", "waitWhileBusy timeout%s", comment ? comment : "");
         break;

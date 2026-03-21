@@ -2,17 +2,20 @@
 
 namespace microreader {
 
-void run_loop(Application& app, IRuntime& runtime, IDisplay& display, ILogger& logger) {
+void run_loop(Application& app, DisplayQueue& queue, IRuntime& runtime, IDisplay& display, ILogger& logger) {
   app.start(logger);
 
   while (runtime.should_continue() && app.running()) {
-    app.update(runtime.poll_buttons(), runtime.frame_time_ms(), logger);
-    app.draw(display);
+    const ButtonState buttons = runtime.poll_buttons();  // always pump events
+    if (runtime.step_mode() && !runtime.consume_step()) {
+      runtime.wait_next_frame();
+      continue;
+    }
+    app.update(buttons, runtime.frame_time_ms(), queue, logger);
+    queue.tick();
+    display.tick();
     runtime.wait_next_frame();
   }
-
-  // Render one final frame for sleep/end state if needed.
-  app.draw(display);
 }
 
 }  // namespace microreader
