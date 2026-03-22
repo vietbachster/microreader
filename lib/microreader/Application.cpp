@@ -30,16 +30,37 @@ void Application::start(ILogger& logger, DisplayQueue& queue) {
   std::srand(static_cast<unsigned>(std::time(nullptr)));
 #endif
 
-  // Randomize all rect positions and commit every primitive so the initial
-  // full refresh starts from a fully initialized frame.
+  // Register all elements with the canvas (z-order: rects, circles, ball on top).
+  for (auto& r : rand_rects_)
+    canvas_.add(&r.rect);
+  for (auto& c : rand_circles_)
+    canvas_.add(&c.circle);
+  canvas_.add(&ball_);
+  for (auto& t : rand_texts_)
+    canvas_.add(&t.label);
+
+  // Randomize positions.
   for (auto& r : rand_rects_) {
     const int rx = std::rand() % (DisplayFrame::kPhysicalWidth - r.w);
     const int ry = std::rand() % (DisplayFrame::kPhysicalHeight - r.h);
     r.rect.set_position(rx, ry);
-    r.rect.commit(queue);
     r.countdown = 25 + std::rand() % 76;
   }
-  square_.commit(queue);
+  for (auto& c : rand_circles_) {
+    const int cx = c.radius + std::rand() % (DisplayFrame::kPhysicalWidth - 2 * c.radius);
+    const int cy = c.radius + std::rand() % (DisplayFrame::kPhysicalHeight - 2 * c.radius);
+    c.circle.set_position(cx, cy);
+    c.countdown = 25 + std::rand() % 76;
+  }
+  for (auto& t : rand_texts_) {
+    const int len = static_cast<int>(std::strlen(t.label.text()));
+    const int tw = len * CanvasText::kGlyphW;
+    const int tx = std::rand() % std::max(1, DisplayFrame::kPhysicalWidth - tw);
+    const int ty = std::rand() % std::max(1, DisplayFrame::kPhysicalHeight - CanvasText::kGlyphH);
+    t.label.set_position(tx, ty);
+    t.countdown = 25 + std::rand() % 76;
+  }
+  canvas_.commit(queue);
   queue.full_refresh();
 }
 
@@ -58,7 +79,7 @@ void Application::update(const ButtonState& buttons, uint32_t dt_ms, DisplayQueu
     return;
   }
 
-  // --- Demo: bouncing black square on a white background ---
+  // --- Demo: bouncing black ball on a white background ---
   // Button4 (Up) toggles pause/auto-bounce.
   if (buttons_.is_pressed(Button::Up))
     demo_paused_ = !demo_paused_;
@@ -69,50 +90,46 @@ void Application::update(const ButtonState& buttons, uint32_t dt_ms, DisplayQueu
 
   if (demo_paused_) {
     // Manual movement: Button0=left, Button1=right, Button2=up, Button3=down.
-    int x = square_.x();
-    int y = square_.y();
+    int cx = ball_.cx();
+    int cy = ball_.cy();
     if (buttons_.is_down(Button::Button0))
-      y += kMoveStep;
+      cy += kMoveStep;
     if (buttons_.is_down(Button::Button1))
-      y -= kMoveStep;
+      cy -= kMoveStep;
     if (buttons_.is_down(Button::Button2))
-      x += kMoveStep;
+      cx += kMoveStep;
     if (buttons_.is_down(Button::Button3))
-      x -= kMoveStep;
-    x = std::max(0, std::min(x, DisplayFrame::kPhysicalWidth - kSquareSize));
-    y = std::max(0, std::min(y, DisplayFrame::kPhysicalHeight - kSquareSize));
-    square_.set_position(x, y);
-    square_.commit(queue);
+      cx -= kMoveStep;
+    cx = std::max(kBallRadius, std::min(cx, DisplayFrame::kPhysicalWidth - kBallRadius - 1));
+    cy = std::max(kBallRadius, std::min(cy, DisplayFrame::kPhysicalHeight - kBallRadius - 1));
+    ball_.set_position(cx, cy);
+    canvas_.commit(queue);
     return;
   }
 
   // Auto-bounce.
-  int x = square_.x() + demo_vx_;
-  int y = square_.y() + demo_vy_;
+  int cx = ball_.cx() + demo_vx_;
+  int cy = ball_.cy() + demo_vy_;
 
   // Bounce off edges.
-  const int max_x = DisplayFrame::kPhysicalWidth - kSquareSize;
-  const int max_y = DisplayFrame::kPhysicalHeight - kSquareSize;
-  if (x <= 0) {
-    x = 0;
+  if (cx <= kBallRadius) {
+    cx = kBallRadius;
     demo_vx_ = -demo_vx_;
   }
-  if (x >= max_x) {
-    x = max_x;
+  if (cx >= DisplayFrame::kPhysicalWidth - kBallRadius - 1) {
+    cx = DisplayFrame::kPhysicalWidth - kBallRadius - 1;
     demo_vx_ = -demo_vx_;
   }
-  if (y <= 0) {
-    y = 0;
+  if (cy <= kBallRadius) {
+    cy = kBallRadius;
     demo_vy_ = -demo_vy_;
   }
-  if (y >= max_y) {
-    y = max_y;
+  if (cy >= DisplayFrame::kPhysicalHeight - kBallRadius - 1) {
+    cy = DisplayFrame::kPhysicalHeight - kBallRadius - 1;
     demo_vy_ = -demo_vy_;
   }
 
-  square_.set_position(x, y);
-  // square_.set_visible(!square_.visible());
-  square_.commit(queue);
+  ball_.set_position(cx, cy);
 
   // Each rect has its own countdown; when it hits zero, move it and reset.
   for (auto& r : rand_rects_) {
@@ -120,10 +137,33 @@ void Application::update(const ButtonState& buttons, uint32_t dt_ms, DisplayQueu
       const int rx = std::rand() % (DisplayFrame::kPhysicalWidth - r.w);
       const int ry = std::rand() % (DisplayFrame::kPhysicalHeight - r.h);
       r.rect.set_position(rx, ry);
-      r.rect.commit(queue);
       r.countdown = 25 + std::rand() % 76;  // [25, 100]
     }
   }
+
+  // Each circle has its own countdown; when it hits zero, move it and reset.
+  for (auto& c : rand_circles_) {
+    if (--c.countdown <= 0) {
+      const int cx = c.radius + std::rand() % (DisplayFrame::kPhysicalWidth - 2 * c.radius);
+      const int cy = c.radius + std::rand() % (DisplayFrame::kPhysicalHeight - 2 * c.radius);
+      c.circle.set_position(cx, cy);
+      c.countdown = 25 + std::rand() % 76;  // [25, 100]
+    }
+  }
+
+  // Each text label has its own countdown; when it hits zero, move it and reset.
+  for (auto& t : rand_texts_) {
+    if (--t.countdown <= 0) {
+      const int len = static_cast<int>(std::strlen(t.label.text()));
+      const int tw = len * CanvasText::kGlyphW;
+      const int tx = std::rand() % std::max(1, DisplayFrame::kPhysicalWidth - tw);
+      const int ty = std::rand() % std::max(1, DisplayFrame::kPhysicalHeight - CanvasText::kGlyphH);
+      t.label.set_position(tx, ty);
+      t.countdown = 25 + std::rand() % 76;  // [25, 100]
+    }
+  }
+
+  canvas_.commit(queue);
 }
 
 bool Application::running() const {
