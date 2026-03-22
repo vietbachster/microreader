@@ -1,6 +1,12 @@
 #include "Application.h"
 
 #include <algorithm>
+#include <cstdlib>
+#include <ctime>
+
+#ifdef ESP_PLATFORM
+#include "esp_random.h"
+#endif
 
 #include "Font.h"
 
@@ -10,7 +16,7 @@ const char* Application::build_info() const {
   return "microreader";
 }
 
-void Application::start(ILogger& logger) {
+void Application::start(ILogger& logger, DisplayQueue& queue) {
   ticks_ = 0;
   uptime_ms_ = 0;
   buttons_ = ButtonState{};
@@ -18,11 +24,28 @@ void Application::start(ILogger& logger) {
   started_ = true;
   running_ = true;
   logger.log(LogLevel::Info, build_info());
+#ifdef ESP_PLATFORM
+  std::srand(esp_random());
+#else
+  std::srand(static_cast<unsigned>(std::time(nullptr)));
+#endif
+
+  // Randomize all rect positions and commit every primitive so the initial
+  // full refresh starts from a fully initialized frame.
+  for (auto& r : rand_rects_) {
+    const int rx = std::rand() % (DisplayFrame::kPhysicalWidth - r.w);
+    const int ry = std::rand() % (DisplayFrame::kPhysicalHeight - r.h);
+    r.rect.set_position(rx, ry);
+    r.rect.commit(queue);
+    r.countdown = 25 + std::rand() % 76;
+  }
+  square_.commit(queue);
+  queue.full_refresh();
 }
 
 void Application::update(const ButtonState& buttons, uint32_t dt_ms, DisplayQueue& queue, ILogger& logger) {
   if (!started_)
-    start(logger);
+    start(logger, queue);
   if (!running_)
     return;
 
@@ -86,6 +109,17 @@ void Application::update(const ButtonState& buttons, uint32_t dt_ms, DisplayQueu
   square_.set_position(x, y);
   // square_.set_visible(!square_.visible());
   square_.commit(queue);
+
+  // Each rect has its own countdown; when it hits zero, move it and reset.
+  for (auto& r : rand_rects_) {
+    if (--r.countdown <= 0) {
+      const int rx = std::rand() % (DisplayFrame::kPhysicalWidth - r.w);
+      const int ry = std::rand() % (DisplayFrame::kPhysicalHeight - r.h);
+      r.rect.set_position(rx, ry);
+      r.rect.commit(queue);
+      r.countdown = 25 + std::rand() % 76;  // [25, 100]
+    }
+  }
 }
 
 bool Application::running() const {

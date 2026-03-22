@@ -88,6 +88,12 @@ class IDisplay {
   // Called each loop tick. Implementations read ground_truth_/target_.
   virtual void tick() = 0;
 
+  // Perform a full refresh: immediately commit target to ground_truth.
+  // Override in hardware drivers to also trigger a physical slow refresh.
+  virtual void full_refresh() {
+    memcpy(ground_truth_, target_, DisplayFrame::kPixelBytes);
+  }
+
   virtual void set_rotation(Rotation r) {
     (void)r;
   }

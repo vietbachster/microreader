@@ -50,17 +50,17 @@
 #define CMD_DEEP_SLEEP 0x10
 
 // ---- Refresh modes ----
-enum RefreshMode { FULL_REFRESH, HALF_REFRESH, FAST_REFRESH };
+enum RefreshMode { FULL_REFRESH, HALF_REFRESH, FAST_REFRESH, CUSTOM_LUT_REFRESH };
 
 // ---- LUT ----
 static const uint8_t lut_fast[] = {
     // VS L0–L3 (voltage patterns per transition)
-    // Black → Black: [VSH1 → VSL → VSH1 → VSH1]
-    0x65, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    // Black → White: [VSL → VSH1 → VSL → VSL]
-    0x9A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    // White → Black: [VSL → VSH2 → VSL → VSH1]
+    // Black → Black: [VSL → VSH2 → VSL → VSH1]
     0xB9, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // Black → White: [VSL → VSL → VSL → VSL]
+    0xAA, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // White → Black: [VSH1 → VSH1 → VSH1 → VSH1]
+    0x55, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     // White → White: [VSH2 → VSL → VSH2 → VSL]
     0xEE, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     // L4 (VCOM)
@@ -101,7 +101,6 @@ class EInkDisplay : public microreader::IDisplay {
   uint8_t* frameBufferActive;
 
   bool isScreenOn = false;
-  bool customLutActive = false;
 
   spi_device_handle_t spi_;
 
@@ -150,6 +149,7 @@ class EInkDisplay : public microreader::IDisplay {
 
     resetDisplay();
     initDisplayController();
+    setCustomLUT();  // program built-in lut_fast; sets tick_mode_ = CUSTOM_LUT_REFRESH
   }
 
   void clearScreen(uint8_t color = 0xFF) {
@@ -166,7 +166,7 @@ class EInkDisplay : public microreader::IDisplay {
     if (!isScreenOn)
       mode = HALF_REFRESH;
     writeBuffers(mode);
-    refreshDisplay(mode, false);
+    refreshDisplay(mode);
   }
 
   // Upload data to RED RAM without triggering a refresh.
@@ -177,108 +177,146 @@ class EInkDisplay : public microreader::IDisplay {
 
   // Write framebuffer data to display RAM (SPI transfer only, no waveform).
   // Call refreshDisplay() afterwards to trigger the actual panel update.
-  RefreshMode writeBuffers(RefreshMode mode = FAST_REFRESH) {
+  RefreshMode writeBuffers(RefreshMode mode) {
     if (!isScreenOn)
       mode = HALF_REFRESH;
 
     setRamArea(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
 
-    if (mode != FAST_REFRESH) {
+    if (mode == FULL_REFRESH || mode == HALF_REFRESH) {
       writeRamBuffer(CMD_WRITE_RAM_BW, frameBuffer, BUFFER_SIZE);
       writeRamBuffer(CMD_WRITE_RAM_RED, frameBuffer, BUFFER_SIZE);
-    } else {
-      if (customLutActive) {
-        writeRamBuffer(CMD_WRITE_RAM_BW, frameBuffer, BUFFER_SIZE);
-      } else {
-        writeRamBuffer(CMD_WRITE_RAM_BW, frameBuffer, BUFFER_SIZE);
-        writeRamBuffer(CMD_WRITE_RAM_RED, frameBufferActive, BUFFER_SIZE);
-      }
+    } else {  // FAST_REFRESH
+      // BW = new frame, RED = previous frame for ping-pong transition detection.
+      writeRamBuffer(CMD_WRITE_RAM_BW, frameBuffer, BUFFER_SIZE);
+      writeRamBuffer(CMD_WRITE_RAM_RED, frameBufferActive, BUFFER_SIZE);
     }
 
     swapBuffers();
-
-    return mode;  // return effective mode so refreshDisplay() gets the right one
+    return mode;
   }
 
   // ---- microreader::IDisplay ----
   void tick() override {
-    waitWhileBusy();  // ensure previous refresh is complete before starting a new one
+    waitWhileBusy();
 
     if (memcmp(frameBuffer, target_, BUFFER_SIZE) == 0)
       return;
 
+    // Update both internal buffers so the memcmp check stays valid across
+    // swapBuffers() and so frameBufferActive is never stale.
     memcpy(frameBuffer, target_, BUFFER_SIZE);
+    memcpy(frameBufferActive, ground_truth_, BUFFER_SIZE);
 
-    const bool was_off = !isScreenOn;
     const uint32_t t0 = millis();
-    writeBuffers(FAST_REFRESH);
+    writeBuffers(CUSTOM_LUT_REFRESH);
     const uint32_t t1 = millis();
-    refreshDisplay(FAST_REFRESH, false);
-    const uint32_t t2 = millis();
-    if (was_off)
-      setCustomLUT(true);
-
-    ESP_LOGI("epd", "tick: writeBuffers=%lums refresh=%lums total=%lums", t1 - t0, t2 - t1, t2 - t0);
+    ESP_LOGI("epd", "tick: writeBuffers=%lums", t1 - t0);
+    refreshDisplay(CUSTOM_LUT_REFRESH);
   }
 
-  void refreshDisplay(RefreshMode mode = FAST_REFRESH, bool turnOffScreen = false) {
+  void full_refresh() override {
+    waitWhileBusy();
+    setRamArea(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+    writeRamBuffer(CMD_WRITE_RAM_BW, target_, BUFFER_SIZE);
+    writeRamBuffer(CMD_WRITE_RAM_RED, frameBuffer, BUFFER_SIZE);
+    memcpy(frameBuffer, target_, BUFFER_SIZE);
+    memcpy(frameBufferActive, target_, BUFFER_SIZE);
+    refreshDisplay(FULL_REFRESH);
+    IDisplay::full_refresh();  // sync ground_truth_ = target_
+  }
+
+  void refreshDisplay(RefreshMode mode) {
     sendCommand(CMD_DISPLAY_UPDATE_CTRL1);
-    sendData((mode == FAST_REFRESH) ? CTRL1_NORMAL : CTRL1_BYPASS_RED);
+    sendData((mode == FAST_REFRESH || mode == CUSTOM_LUT_REFRESH) ? CTRL1_NORMAL : CTRL1_BYPASS_RED);
+
+    // best guess at display mode bits:
+    // bit | hex | name                    | effect
+    // ----+-----+--------------------------+-------------------------------------------
+    // 7   | 80  | CLOCK_ON                | Start internal oscillator
+    // 6   | 40  | ANALOG_ON               | Enable analog power rails (VGH/VGL drivers)
+    // 5   | 20  | TEMP_LOAD               | Load temperature (internal or I2C)
+    // 4   | 10  | LUT_LOAD                | Load waveform LUT
+    // 3   | 08  | MODE_SELECT             | Mode 1/2
+    // 2   | 04  | DISPLAY_START           | Run display
+    // 1   | 02  | ANALOG_OFF_PHASE        | Shutdown step 1 (undocumented)
+    // 0   | 01  | CLOCK_OFF               | Disable internal oscillator
 
     uint8_t displayMode = 0x00;
-
     if (!isScreenOn) {
       isScreenOn = true;
       displayMode |= 0xC0;
     }
 
-    if (turnOffScreen) {
-      isScreenOn = false;
-      displayMode |= 0x03;
+    switch (mode) {
+      case FULL_REFRESH:
+        displayMode |= 0x34;
+        break;
+      case HALF_REFRESH:
+        sendCommand(CMD_WRITE_TEMP);
+        sendData(0x5A);
+        displayMode |= 0xD4;
+        break;
+      case FAST_REFRESH:
+        displayMode |= 0x1C;
+        break;
+      case CUSTOM_LUT_REFRESH:
+        displayMode |= 0x0C;
+        break;
     }
 
-    if (mode == FULL_REFRESH) {
-      displayMode |= 0x34;
-    } else if (mode == HALF_REFRESH) {
-      sendCommand(CMD_WRITE_TEMP);
-      sendData(0x5A);
-      displayMode |= 0xD4;
-    } else if (customLutActive) {
-      displayMode |= 0x0C;
-    } else {  // FAST_REFRESH
-      displayMode |= 0x1C;
+    // disable ram ping poing; the problem is that this seems to affect the mode selection
+    // not sure how to actually set it without breaking mode selection...
+    if (mode == FULL_REFRESH || mode == HALF_REFRESH) {
+      // sendCommand(CMD_DISPLAY_OPTIONS);
+      // for (size_t i = 0; i < 5; i++) {
+      //   sendData(0x00);
+      // }
+      // sendData(0x00);
+    } else {
+      // sendCommand(CMD_DISPLAY_OPTIONS);
+      // for (size_t i = 0; i < 5; i++) {
+      //   sendData(0xFF);
+      // }
+      // sendData(0x0F);
+      // sendData(0x00);
+      // sendData(0x00);
+      // sendData(0x00);
+      // sendData(0x00);
     }
-
-    ESP_LOGD("epd", "refreshDisplay: mode=%s displayMode=0x%02X",
-             mode == FULL_REFRESH   ? "FULL"
-             : mode == HALF_REFRESH ? "HALF"
-                                    : "FAST",
-             displayMode);
 
     sendCommand(CMD_DISPLAY_UPDATE_CTRL2);
     sendData(displayMode);
     sendCommand(CMD_MASTER_ACTIVATION);
+
+    const uint32_t t0_r = millis();
+    if (mode == FULL_REFRESH || mode == HALF_REFRESH) {
+      waitWhileBusy();
+    }
+    ESP_LOGI("epd", "refreshDisplay: mode=%s displayMode=0x%02X duration=%lums",
+             mode == FULL_REFRESH         ? "FULL"
+             : mode == HALF_REFRESH       ? "HALF"
+             : mode == CUSTOM_LUT_REFRESH ? "CUSTOM"
+                                          : "FAST",
+             displayMode, millis() - t0_r);
   }
 
-  void setCustomLUT(bool enabled, const uint8_t* lutData = nullptr) {
-    if (enabled) {
-      if (!lutData)
-        lutData = lut_fast;
-      sendCommand(CMD_WRITE_LUT);
-      for (uint16_t i = 0; i < 105; i++)
-        sendData(lutData[i]);
-      sendCommand(CMD_GATE_VOLTAGE);
-      sendData(lutData[105]);
-      sendCommand(CMD_SOURCE_VOLTAGE);
-      sendData(lutData[106]);
-      sendData(lutData[107]);
-      sendData(lutData[108]);
-      sendCommand(CMD_WRITE_VCOM);
-      sendData(lutData[109]);
-      customLutActive = true;
-    } else {
-      customLutActive = false;
-    }
+  // Program a custom LUT and switch tick() to CUSTOM_LUT_REFRESH mode.
+  // Pass nullptr to use the built-in lut_fast table.
+  void setCustomLUT(const uint8_t* lutData = nullptr) {
+    if (!lutData)
+      lutData = lut_fast;
+    sendCommand(CMD_WRITE_LUT);
+    for (uint16_t i = 0; i < 105; i++)
+      sendData(lutData[i]);
+    sendCommand(CMD_GATE_VOLTAGE);
+    sendData(lutData[105]);
+    sendCommand(CMD_SOURCE_VOLTAGE);
+    sendData(lutData[106]);
+    sendData(lutData[107]);
+    sendData(lutData[108]);
+    sendCommand(CMD_WRITE_VCOM);
+    sendData(lutData[109]);
   }
 
   void deepSleep() {
@@ -335,7 +373,7 @@ class EInkDisplay : public microreader::IDisplay {
   void waitWhileBusy(const char* comment = nullptr) {
     uint32_t start = millis();
     while (gpio_get_level(EPD_BUSY) == 1) {
-      esp_rom_delay_us(100);
+      esp_rom_delay_us(1000);
       if (millis() - start > 10000) {
         ESP_LOGW("epd", "waitWhileBusy timeout%s", comment ? comment : "");
         break;

@@ -39,7 +39,7 @@ class DisplayQueue {
 
   // The controller operates directly on the display's owned pixel buffers.
   explicit DisplayQueue(IDisplay& display)
-      : ground_truth_(display.ground_truth_buf()), target_(display.target_buf()), next_ts_(0) {}
+      : display_(display), ground_truth_(display.ground_truth_buf()), target_(display.target_buf()), next_ts_(0) {}
 
   // Submit a fill command for the region (x, y, w, h) toward `white`.
   // Returns the command's timestamp (monotonically increasing).
@@ -151,7 +151,15 @@ class DisplayQueue {
     return static_cast<int>(commands_.size());
   }
 
+  // Immediately commit target to ground_truth, clear all pending commands,
+  // and trigger a physical full refresh on the display driver.
+  void full_refresh() {
+    commands_.clear();
+    display_.full_refresh();
+  }
+
  private:
+  IDisplay& display_;
   uint8_t* const ground_truth_;  // points into display's buffer
   uint8_t* const target_;        // points into display's buffer
   std::vector<UpdateCommand> commands_;

@@ -110,13 +110,13 @@ class DesktopRuntime final : public microreader::IRuntime {
     uint8_t mask = 0;
     // Button0-3: arrow keys for directional movement.
     if (keys[SDL_SCANCODE_LEFT])
-      mask |= 1u << static_cast<uint8_t>(microreader::Button::Button0);
-    if (keys[SDL_SCANCODE_RIGHT])
-      mask |= 1u << static_cast<uint8_t>(microreader::Button::Button1);
-    if (keys[SDL_SCANCODE_UP])
-      mask |= 1u << static_cast<uint8_t>(microreader::Button::Button2);
-    if (keys[SDL_SCANCODE_DOWN])
       mask |= 1u << static_cast<uint8_t>(microreader::Button::Button3);
+    if (keys[SDL_SCANCODE_RIGHT])
+      mask |= 1u << static_cast<uint8_t>(microreader::Button::Button2);
+    if (keys[SDL_SCANCODE_UP])
+      mask |= 1u << static_cast<uint8_t>(microreader::Button::Button1);
+    if (keys[SDL_SCANCODE_DOWN])
+      mask |= 1u << static_cast<uint8_t>(microreader::Button::Button0);
     // Button4 (Up enum): Q key — toggle stop/start.
     if (keys[SDL_SCANCODE_Q])
       mask |= 1u << static_cast<uint8_t>(microreader::Button::Up);
