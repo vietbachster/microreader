@@ -37,9 +37,10 @@ class DisplayQueue {
  public:
   int phases = 8;  // number of ticks a command runs before committing
 
-  // The controller operates directly on the display's owned pixel buffers.
-  explicit DisplayQueue(IDisplay& display)
-      : display_(display), ground_truth_(display.ground_truth_buf()), target_(display.target_buf()), next_ts_(0) {}
+  explicit DisplayQueue(IDisplay& display) : display_(display), next_ts_(0) {
+    memset(ground_truth_, 0xFF, DisplayFrame::kPixelBytes);
+    memset(target_, 0xFF, DisplayFrame::kPixelBytes);
+  }
 
   // Submit a fill command for the region (x, y, w, h) toward `white`.
   // Returns the command's timestamp (monotonically increasing).
@@ -110,38 +111,38 @@ class DisplayQueue {
     }
     commands_.resize(write);
 
-    if (finished.empty())
-      return;
-
-    // Commit finished commands into ground_truth, but only for pixels that
-    // are not covered by any still-active command.  Writing into a pixel
-    // that a newer command owns would corrupt the ground_truth value that
-    // submit() fast-forwarded for that command, causing gt == target for
-    // in-flight pixels and breaking the transition animation.
-    DisplayFrame gt(ground_truth_);
-    for (const auto& done : finished) {
-      const int x2 = done.x + done.w;
-      const int y2 = done.y + done.h;
-      for (int py = done.y; py < y2; ++py) {
-        for (int px = done.x; px < x2; ++px) {
-          bool covered = false;
-          for (const auto& active : commands_) {
-            if (px >= active.x && px < active.x + active.w && py >= active.y && py < active.y + active.h) {
-              covered = true;
-              break;
+    if (!finished.empty()) {
+      // Commit finished commands into ground_truth, but only for pixels that
+      // are not covered by any still-active command.  Writing into a pixel
+      // that a newer command owns would corrupt the ground_truth value that
+      // submit() fast-forwarded for that command, causing gt == target for
+      // in-flight pixels and breaking the transition animation.
+      DisplayFrame gt(ground_truth_);
+      for (const auto& done : finished) {
+        const int x2 = done.x + done.w;
+        const int y2 = done.y + done.h;
+        for (int py = done.y; py < y2; ++py) {
+          for (int px = done.x; px < x2; ++px) {
+            bool covered = false;
+            for (const auto& active : commands_) {
+              if (px >= active.x && px < active.x + active.w && py >= active.y && py < active.y + active.h) {
+                covered = true;
+                break;
+              }
             }
+            if (!covered)
+              gt.set_pixel(px, py, done.white);
           }
-          if (!covered)
-            gt.set_pixel(px, py, done.white);
         }
       }
-    }
-    rebuild_target_();
-  }
 
-  // Copy the target buffer (ground truth + in-flight commands) into `frame`.
-  void render(DisplayFrame& frame) const {
-    memcpy(frame.pixels, target_, DisplayFrame::kPixelBytes);
+      ground_truth_dirty_ = true;
+      rebuild_target_();
+    }
+
+    display_.tick(ground_truth_, ground_truth_dirty_, target_, target_dirty_);
+    ground_truth_dirty_ = false;
+    target_dirty_ = false;
   }
 
   bool idle() const {
@@ -153,15 +154,30 @@ class DisplayQueue {
 
   // Immediately commit target to ground_truth, clear all pending commands,
   // and trigger a physical full refresh on the display driver.
-  void full_refresh() {
+  void full_refresh(RefreshMode mode = RefreshMode::Full) {
     commands_.clear();
-    display_.full_refresh();
+    memcpy(ground_truth_, target_, DisplayFrame::kPixelBytes);
+    display_.full_refresh(target_, mode);
+    ground_truth_dirty_ = false;
+    target_dirty_ = false;
+  }
+
+  // Fill the screen with a solid color, clear all pending commands, and refresh.
+  void clear_screen(bool white = true, RefreshMode mode = RefreshMode::Full) {
+    commands_.clear();
+    memset(ground_truth_, white ? 0xFF : 0x00, DisplayFrame::kPixelBytes);
+    memset(target_, white ? 0xFF : 0x00, DisplayFrame::kPixelBytes);
+    display_.full_refresh(target_, mode);
+    ground_truth_dirty_ = false;
+    target_dirty_ = false;
   }
 
  private:
   IDisplay& display_;
-  uint8_t* const ground_truth_;  // points into display's buffer
-  uint8_t* const target_;        // points into display's buffer
+  alignas(4) uint8_t ground_truth_[DisplayFrame::kPixelBytes];
+  alignas(4) uint8_t target_[DisplayFrame::kPixelBytes];
+  bool ground_truth_dirty_ = false;
+  bool target_dirty_ = false;
   std::vector<UpdateCommand> commands_;
   uint32_t next_ts_;
 
@@ -170,6 +186,7 @@ class DisplayQueue {
     memcpy(target_, ground_truth_, DisplayFrame::kPixelBytes);
     for (const auto& cmd : commands_)
       paint(target_, cmd);
+    target_dirty_ = true;
   }
 
   // Paint cmd's target color into `buf` (raw kPixelBytes buffer, Deg0 layout).

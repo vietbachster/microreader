@@ -62,6 +62,10 @@ void Application::update(const ButtonState& buttons, uint32_t dt_ms, DisplayQueu
   // Button4 (Up) toggles pause/auto-bounce.
   if (buttons_.is_pressed(Button::Up))
     demo_paused_ = !demo_paused_;
+  if (buttons_.is_pressed(Button::Down)) {
+    queue.clear_screen(clear_white_, RefreshMode::Full);
+    clear_white_ = !clear_white_;
+  }
 
   if (demo_paused_) {
     // Manual movement: Button0=left, Button1=right, Button2=up, Button3=down.

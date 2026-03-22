@@ -9,6 +9,9 @@ namespace microreader {
 
 enum class Rotation { Deg0 = 0, Deg90 = 90 };
 
+// Refresh mode for full-screen updates.
+enum class RefreshMode { Full, Half };
+
 // Physical screen constants and per-pixel helpers.
 // DisplayFrame wraps an external buffer and provides set_pixel/get_pixel;
 // it is used internally for font rendering and bit-packing, not as a
@@ -66,33 +69,21 @@ struct DisplayFrame {
   }
 };
 
-// Display interface.
+// Display driver interface.
 //
-// Owns the two 1-bit pixel buffers that the DisplayQueue operates on:
-//   ground_truth — settled pixel state (all commands fully committed).
-//   target       — ground_truth with all in-flight commands overlaid;
-//                  where every pixel is heading.
-//
-// Both buffers start white (0xFF). The controller receives mutable pointers
-// to them via ground_truth_buf()/target_buf() and writes into them directly.
-// tick() is called each loop cycle (~30 ms); implementations read their own
-// buffers to drive the panel or simulator — no parameters needed.
+// Pixel buffers (ground_truth, target) are owned by DisplayQueue.
+// The display receives buffer pointers and dirty flags each tick.
 class IDisplay {
  public:
-  IDisplay() {
-    memset(ground_truth_, 0xFF, DisplayFrame::kPixelBytes);
-    memset(target_, 0xFF, DisplayFrame::kPixelBytes);
-  }
   virtual ~IDisplay() = default;
 
-  // Called each loop tick. Implementations read ground_truth_/target_.
-  virtual void tick() = 0;
+  // Called each tick while commands are in flight.
+  // ground_truth = settled pixel state; target = where pixels are heading.
+  // Dirty flags indicate which buffers changed since the last call.
+  virtual void tick(const uint8_t* ground_truth, bool gt_dirty, const uint8_t* target, bool target_dirty) = 0;
 
-  // Perform a full refresh: immediately commit target to ground_truth.
-  // Override in hardware drivers to also trigger a physical slow refresh.
-  virtual void full_refresh() {
-    memcpy(ground_truth_, target_, DisplayFrame::kPixelBytes);
-  }
+  // Full physical refresh.  `pixels` is the settled (ground_truth == target) state.
+  virtual void full_refresh(const uint8_t* pixels, RefreshMode mode) = 0;
 
   virtual void set_rotation(Rotation r) {
     (void)r;
@@ -100,18 +91,6 @@ class IDisplay {
   virtual Rotation rotation() const {
     return Rotation::Deg0;
   }
-
-  // Mutable buffer accessors for DisplayQueue.
-  uint8_t* ground_truth_buf() {
-    return ground_truth_;
-  }
-  uint8_t* target_buf() {
-    return target_;
-  }
-
- protected:
-  alignas(4) uint8_t ground_truth_[DisplayFrame::kPixelBytes];
-  alignas(4) uint8_t target_[DisplayFrame::kPixelBytes];
 };
 
 }  // namespace microreader

@@ -40,6 +40,7 @@ class Application {
   int demo_vx_ = 10;
   int demo_vy_ = 10;
   bool demo_paused_ = true;
+  bool clear_white_ = true;  // toggles between white/black for clear_screen
 
   // Randomly repositioning rectangles, each with its own countdown.
   static constexpr int kNumRects = 10;

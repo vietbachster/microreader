@@ -29,6 +29,6 @@ extern "C" void app_main(void) {
     if (serial_lut_take(lut_buf))
       epd.setCustomLUT(lut_buf);
 
-    microreader::run_loop_iteration(app, queue, runtime, epd, logger);
+    microreader::run_loop_iteration(app, queue, runtime, logger);
   }
 }

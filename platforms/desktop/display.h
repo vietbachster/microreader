@@ -33,21 +33,22 @@ class DesktopEmulatorDisplay final : public microreader::IDisplay {
     return rotation_;
   }
 
-  // Called each loop tick. Steps sim toward target_, then renders.
-  void tick() override {
-    step_and_render();
+  // Called each loop tick. Steps sim toward target, then renders.
+  void tick(const uint8_t* ground_truth, bool /*gt_dirty*/, const uint8_t* target, bool /*target_dirty*/) override {
+    step_and_render(ground_truth, target);
   }
 
-  // Snap ground_truth and the sim state directly to target (no animation).
-  void full_refresh() override {
-    IDisplay::full_refresh();  // sync ground_truth_ = target_
+  // Snap sim state directly to the settled buffer (no animation), then render.
+  void full_refresh(const uint8_t* pixels, microreader::RefreshMode /*mode*/) override {
     for (int y = 0; y < microreader::DisplayFrame::kPhysicalHeight; ++y) {
       for (int x = 0; x < microreader::DisplayFrame::kPhysicalWidth; ++x) {
         const std::size_t byte_idx = static_cast<std::size_t>(y * microreader::DisplayFrame::kStride + x / 8);
         const uint8_t bit = static_cast<uint8_t>(0x80u >> (x & 7));
-        sim_[y * microreader::DisplayFrame::kPhysicalWidth + x] = (target_[byte_idx] & bit) ? 1.0f : 0.0f;
+        sim_[y * microreader::DisplayFrame::kPhysicalWidth + x] = (pixels[byte_idx] & bit) ? 1.0f : 0.0f;
       }
     }
+    // ground_truth == target after full_refresh, so pass pixels for both.
+    step_and_render(pixels, pixels);
   }
 
  private:
@@ -61,14 +62,14 @@ class DesktopEmulatorDisplay final : public microreader::IDisplay {
     return phases_ ? *phases_ : 1;
   }
 
-  void step_and_render() {
+  void step_and_render(const uint8_t* ground_truth, const uint8_t* target) {
     const float step = 1.0f / static_cast<float>(phases());
     for (int y = 0; y < microreader::DisplayFrame::kPhysicalHeight; ++y) {
       for (int x = 0; x < microreader::DisplayFrame::kPhysicalWidth; ++x) {
         const std::size_t byte_idx = static_cast<std::size_t>(y * microreader::DisplayFrame::kStride + x / 8);
         const uint8_t bit = static_cast<uint8_t>(0x80u >> (x & 7));
-        const bool gt_white = (ground_truth_[byte_idx] & bit) != 0;
-        const bool target_white = (target_[byte_idx] & bit) != 0;
+        const bool gt_white = (ground_truth[byte_idx] & bit) != 0;
+        const bool target_white = (target[byte_idx] & bit) != 0;
         float& s = sim_[y * microreader::DisplayFrame::kPhysicalWidth + x];
         const bool transitioning = (gt_white != target_white);
         transitioning_[y * microreader::DisplayFrame::kPhysicalWidth + x] = transitioning;

@@ -27,7 +27,7 @@ class IRuntime {
   }
 };
 
-void run_loop(Application& app, DisplayQueue& queue, IRuntime& runtime, IDisplay& display, ILogger& logger);
-void run_loop_iteration(Application& app, DisplayQueue& queue, IRuntime& runtime, IDisplay& display, ILogger& logger);
+void run_loop(Application& app, DisplayQueue& queue, IRuntime& runtime, ILogger& logger);
+void run_loop_iteration(Application& app, DisplayQueue& queue, IRuntime& runtime, ILogger& logger);
 
 }  // namespace microreader
