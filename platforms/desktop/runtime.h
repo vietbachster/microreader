@@ -7,7 +7,7 @@
 
 #include "microreader/Display.h"
 #include "microreader/Input.h"
-#include "microreader/Loop.h"
+#include "microreader/Runtime.h"
 
 // Window scale factor: each display pixel becomes kScale×kScale screen pixels.
 static constexpr int kDisplayScale = 1;

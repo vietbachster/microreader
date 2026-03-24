@@ -8,7 +8,7 @@ void run_loop_iteration(Application& app, DisplayQueue& queue, IRuntime& runtime
     runtime.wait_next_frame();
     return;
   }
-  app.update(buttons, runtime.frame_time_ms(), queue, logger);
+  app.update(buttons, runtime.frame_time_ms(), queue, logger, runtime);
   queue.tick();
   runtime.wait_next_frame();
 }

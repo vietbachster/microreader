@@ -4,7 +4,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "microreader/Input.h"
-#include "microreader/Loop.h"
+#include "microreader/Runtime.h"
 
 class Esp32Runtime final : public microreader::IRuntime {
  public:
@@ -37,8 +37,14 @@ class Esp32Runtime final : public microreader::IRuntime {
       const uint32_t elapsed = now - frame_start_ms_;
       if (elapsed < frame_time_ms_)
         vTaskDelay(pdMS_TO_TICKS(frame_time_ms_ - elapsed));
+      else
+        vTaskDelay(pdMS_TO_TICKS(1));
     }
     frame_start_ms_ = millis();
+  }
+
+  void yield() override {
+    vTaskDelay(1);  // 1 tick (10ms at 100Hz); pdMS_TO_TICKS(1) rounds to 0
   }
 
  private:

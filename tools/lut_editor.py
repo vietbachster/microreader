@@ -43,6 +43,7 @@ VS_MAP = {0b00: "VSS", 0b01: "VSH1", 0b10: "VSL", 0b11: "VSH2"}
 VS_REVERSE = {v: k for k, v in VS_MAP.items()}
 
 TRANSITION_NAMES = ["Black → Black", "Black → White", "White → Black", "White → White"]
+VOLTAGE_ROW_NAMES = TRANSITION_NAMES + ["VCOM (global)"]
 VOLTAGE_OPTIONS = ["VSS", "VSL", "VSH1", "VSH2"]
 
 VOLTAGE_COLORS = {
@@ -76,9 +77,10 @@ def encode_lut(
     """Encode editor state into the 112-byte SSD1677 LUT."""
     lut = bytearray(LUT_SIZE)
 
-    # VS blocks L0–L3 (10 bytes each, 4 steps per byte, 2 bits per step)
-    for trans_idx in range(4):
-        pattern = voltage_patterns[trans_idx]
+    # VS blocks L0–L4 (10 bytes each, 4 steps per byte, 2 bits per step)
+    # L0–L3 = pixel transitions, L4 = VCOM
+    for trans_idx in range(5):
+        pattern = voltage_patterns.get(trans_idx, ["VSS"] * 4)
         base = trans_idx * 10
         byte_idx = step_idx = 0
         while step_idx < len(pattern) and byte_idx < 10:
@@ -90,7 +92,6 @@ def encode_lut(
                     step_idx += 1
             lut[base + byte_idx] = byte_val
             byte_idx += 1
-    # L4 (VCOM) – stays 0x00
 
     # TP/RP groups: 10 groups × 5 bytes starting at offset 50
     for g in range(10):
@@ -137,6 +138,7 @@ class LUTEditor:
             1: ["VSL", "VSL", "VSL", "VSS"],  # B->W
             2: ["VSH1", "VSS", "VSH1", "VSS"],  # W->B
             3: ["VSS", "VSL", "VSS", "VSL"],  # W->W
+            4: ["VSS", "VSS", "VSS", "VSS"],  # VCOM (L4)
         }
         self.timing_groups: List[List[int]] = [
             [4, 4, 0, 0, 0],
@@ -224,7 +226,9 @@ class LUTEditor:
         ).pack()
 
         # Voltage patterns
-        vf = ttk.LabelFrame(inner, text="Voltage Patterns (per transition)", padding=8)
+        vf = ttk.LabelFrame(
+            inner, text="Voltage Patterns (per transition + VCOM)", padding=8
+        )
         vf.pack(fill=tk.X, padx=8, pady=4)
         self._build_voltage_legend(vf)
         self._build_voltage_section(vf)
@@ -269,7 +273,7 @@ class LUTEditor:
     # ---- voltage pattern rows (shared scroll) ----
 
     def _build_voltage_section(self, parent):
-        """One canvas + one scrollbar shared by all 4 transition rows."""
+        """One canvas + one scrollbar shared by all 5 voltage rows (L0–L4)."""
         body = ttk.Frame(parent)
         body.pack(fill=tk.X, expand=True)
 
@@ -292,7 +296,7 @@ class LUTEditor:
         h_scroll.pack(fill=tk.X)
         self._vp_canvas.configure(xscrollcommand=h_scroll.set)
 
-        # Inner frame that holds all 4 button rows stacked vertically
+        # Inner frame that holds all 5 button rows stacked vertically
         canvas_inner = ttk.Frame(self._vp_canvas)
         self._vp_canvas.create_window((0, 0), window=canvas_inner, anchor="nw")
 
@@ -302,14 +306,15 @@ class LUTEditor:
 
         canvas_inner.bind("<Configure>", _update_scrollregion)
 
-        for i in range(4):
+        # L0–L3 (pixel transitions) + L4 (VCOM)
+        for i in range(5):
             self._build_voltage_row(labels_col, canvas_inner, ctrl_col, i)
 
     # ---- voltage pattern row ----
 
     def _build_voltage_row(self, labels_col, canvas_inner, ctrl_col, trans_idx: int):
         ttk.Label(
-            labels_col, text=f"{TRANSITION_NAMES[trans_idx]}:", width=18, anchor="w"
+            labels_col, text=f"{VOLTAGE_ROW_NAMES[trans_idx]}:", width=18, anchor="w"
         ).pack(pady=3)
 
         container = ttk.Frame(canvas_inner)
@@ -593,7 +598,9 @@ class LUTEditor:
         for t in range(4):
             out += f"  // {TRANSITION_NAMES[t]}: [{' → '.join(self.voltage_patterns[t])}]\n  "
             out += "".join(f"0x{lut[t * 10 + b]:02X}," for b in range(10)) + "\n"
-        out += "  // L4 (VCOM)\n  "
+        out += (
+            f"  // L4 VCOM: [{' → '.join(self.voltage_patterns.get(4, ['VSS']))}]\n  "
+        )
         out += "".join(f"0x{lut[40 + i]:02X}," for i in range(10)) + "\n\n"
         out += "  // TP/RP groups\n"
         for g in range(10):
@@ -749,11 +756,14 @@ class LUTEditor:
             self.voltage_patterns = {
                 int(k): v for k, v in data["voltage_patterns"].items()
             }
+            # Backward compat: old saves lack VCOM (L4)
+            if 4 not in self.voltage_patterns:
+                self.voltage_patterns[4] = ["VSS", "VSS", "VSS", "VSS"]
             self.timing_groups = data["timing_groups"]
             self.frame_rate = data["frame_rate"]
             self.voltages = data["voltages"]
 
-            for i in range(4):
+            for i in range(5):
                 self._reload_voltage_row(i)
             for g in range(10):
                 for t in range(5):
@@ -775,6 +785,7 @@ class LUTEditor:
             1: ["VSL", "VSL", "VSL", "VSS"],
             2: ["VSH1", "VSS", "VSH1", "VSS"],
             3: ["VSS", "VSL", "VSS", "VSL"],
+            4: ["VSS", "VSS", "VSS", "VSS"],
         }
         self.timing_groups = [[4, 4, 0, 0, 0], [2, 2, 0, 0, 0], *[[0, 0, 0, 0, 0]] * 8]
         self.frame_rate = 0x88
@@ -785,7 +796,7 @@ class LUTEditor:
             "VSL": 0x32,
             "VCOM": 0x30,
         }
-        for i in range(4):
+        for i in range(5):
             self._reload_voltage_row(i)
         for g in range(10):
             for t in range(5):

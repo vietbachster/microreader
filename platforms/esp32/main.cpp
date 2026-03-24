@@ -1,4 +1,6 @@
+#include "driver/gpio.h"
 #include "epd.h"
+#include "esp_sleep.h"
 #include "input.h"
 #include "logger.h"
 #include "microreader/Application.h"
@@ -18,6 +20,8 @@ extern "C" void app_main(void) {
   // Wait for the serial monitor to connect before logging anything.
   vTaskDelay(pdMS_TO_TICKS(2000));
 
+  logger.log(microreader::LogLevel::Info, "Booting up...");
+
   epd.begin();
   runtime.set_input_source(&input);
   serial_lut_start();
@@ -31,4 +35,13 @@ extern "C" void app_main(void) {
 
     microreader::run_loop_iteration(app, queue, runtime, logger);
   }
+
+  logger.log(microreader::LogLevel::Info, "Shutting down, entering deep sleep...");
+
+  // Enter deep sleep; wake on power button press (active LOW, GPIO 3).
+  constexpr gpio_num_t kPowerPin = GPIO_NUM_3;
+  gpio_set_direction(kPowerPin, GPIO_MODE_INPUT);
+  gpio_pullup_en(kPowerPin);
+  esp_deep_sleep_enable_gpio_wakeup(1ULL << kPowerPin, ESP_GPIO_WAKEUP_GPIO_LOW);
+  esp_deep_sleep_start();
 }

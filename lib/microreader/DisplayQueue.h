@@ -134,8 +134,8 @@ class DisplayQueue {
     return next_ts_++;
   }
 
-  void tick() {
-    if (commands_.empty())
+  void tick(bool force = false) {
+    if (commands_.empty() && !force)
       return;
 
     std::vector<UpdateCommand> finished;
