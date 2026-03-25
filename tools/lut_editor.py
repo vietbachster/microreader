@@ -132,25 +132,24 @@ class LUTEditor:
         self.root.title("SSD1677 LUT Editor")
         self.root.geometry("1200x780")
 
-        # --- LUT state ---
+        # --- LUT state (defaults match lut_fast in epd.h) ---
         self.voltage_patterns: Dict[int, List[str]] = {
-            0: ["VSS", "VSH1", "VSS", "VSH1"],  # B->B
-            1: ["VSL", "VSL", "VSL", "VSS"],  # B->W
-            2: ["VSH1", "VSS", "VSH1", "VSS"],  # W->B
-            3: ["VSS", "VSL", "VSS", "VSL"],  # W->W
+            0: ["VSS", "VSL", "VSH2", "VSH1"],  # B->B
+            1: ["VSH1", "VSL", "VSL", "VSL"],  # B->W
+            2: ["VSL", "VSH1", "VSH1", "VSH1"],  # W->B
+            3: ["VSH1", "VSL", "VSH1", "VSL"],  # W->W
             4: ["VSS", "VSS", "VSS", "VSS"],  # VCOM (L4)
         }
         self.timing_groups: List[List[int]] = [
-            [4, 4, 0, 0, 0],
-            [2, 2, 0, 0, 0],
-            *[[0, 0, 0, 0, 0]] * 8,
+            [1, 1, 1, 1, 0],
+            *[[0, 0, 0, 0, 0]] * 9,
         ]
-        self.frame_rate = 0x88
+        self.frame_rate = 0x86
         self.voltages = {
             "VGH": 0x17,
             "VSH1": 0x41,
             "VSH2": 0xA8,
-            "VSL": 0x32,
+            "VSL": 0x2A,
             "VCOM": 0x30,
         }
 
@@ -351,7 +350,7 @@ class LUTEditor:
         # Grow: add missing buttons
         while len(btns) < len(pattern):
             idx = len(btns)
-            btn = tk.Button(
+            btn = tk.Label(
                 container,
                 text="",
                 fg="white",
@@ -374,8 +373,8 @@ class LUTEditor:
             btn.config(
                 text=voltage,
                 bg=VOLTAGE_COLORS[voltage],
-                command=lambda t=trans_idx, v=idx: self._cycle_voltage(t, v),
             )
+            btn.bind("<Button-1>", lambda e, t=trans_idx, v=idx: self._cycle_voltage(t, v))
 
         widgets["add_btn"].config(state="disabled" if len(pattern) >= 40 else "normal")
         widgets["rem_btn"].config(state="disabled" if len(pattern) <= 1 else "normal")
