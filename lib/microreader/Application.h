@@ -37,6 +37,7 @@ class Application {
   Canvas canvas_;  // scene manager — composites all elements
   Demo demo_;
   LutCalibration lut_calibration_;
+  CanvasText sleep_label_;
 };
 
 }  // namespace microreader

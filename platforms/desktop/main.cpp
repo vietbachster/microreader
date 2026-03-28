@@ -10,7 +10,7 @@
 int main() {
   try {
     DesktopLogger logger;
-    DesktopRuntime runtime(30);
+    DesktopRuntime runtime(16);
     DesktopEmulatorDisplay display(runtime);
     microreader::Application app;
     microreader::DisplayQueue queue(display);

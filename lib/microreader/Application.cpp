@@ -8,8 +8,6 @@
 #include "esp_random.h"
 #endif
 
-#include "Font.h"
-
 namespace microreader {
 
 const char* Application::build_info() const {
@@ -46,7 +44,27 @@ void Application::update(const ButtonState& buttons, uint32_t dt_ms, DisplayQueu
   buttons_ = buttons;
 
   if (buttons_.is_pressed(Button::Power)) {
-    queue.clear_screen(/*white=*/true, RefreshMode::Full);
+    // Paint a checkerboard pattern (~80px squares) as the sleep screen.
+    constexpr int kBlock = 80;
+    constexpr int W = DisplayFrame::kPhysicalWidth;
+    constexpr int H = DisplayFrame::kPhysicalHeight;
+    queue.submit(0, 0, W, H, [=](uint8_t* buf) {
+      for (int row = 0; row < H; ++row) {
+        const int tile_y = row / kBlock;
+        uint8_t* rp = buf + row * DisplayFrame::kStride;
+        int col = 0;
+        while (col < W) {
+          const int tile_x = col / kBlock;
+          const bool white = ((tile_x ^ tile_y) & 1) == 0;
+          const int tile_end = (tile_x + 1) * kBlock;
+          const int span_end = tile_end < W ? tile_end : W;
+          DisplayQueue::fill_row(buf, row, col, span_end, white);
+          col = span_end;
+        }
+      }
+    });
+    queue.full_refresh(RefreshMode::Full);
+    queue.display_deep_sleep();
     running_ = false;
     return;
   }

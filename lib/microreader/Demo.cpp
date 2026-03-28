@@ -48,19 +48,17 @@ void Demo::update(const ButtonState& buttons, Canvas& canvas, DisplayQueue& queu
   // Button4 (Up) toggles pause/auto-bounce.
   if (buttons.is_pressed(Button::Up))
     demo_paused_ = !demo_paused_;
-  if (buttons.is_pressed(Button::Down)) {
-    queue.clear_screen(clear_white_, RefreshMode::Full);
-    clear_white_ = !clear_white_;
-  }
+  if (buttons.is_pressed(Button::Down))
+    queue.display_deep_sleep();
+  if (buttons.is_down(Button::Button0))
+    queue.clear_screen();
+  if (buttons.is_down(Button::Button1))
+    queue.clear_screen(false);
 
   if (demo_paused_) {
     // Manual movement: Button0=left, Button1=right, Button2=up, Button3=down.
     int cx = ball_.cx();
     int cy = ball_.cy();
-    if (buttons.is_down(Button::Button0))
-      cy += kMoveStep;
-    if (buttons.is_down(Button::Button1))
-      cy -= kMoveStep;
     if (buttons.is_down(Button::Button2))
       cx += kMoveStep;
     if (buttons.is_down(Button::Button3))

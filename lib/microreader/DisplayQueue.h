@@ -184,6 +184,10 @@ class DisplayQueue {
     target_dirty_ = false;
   }
 
+  void display_deep_sleep() {
+    display_.deep_sleep();
+  }
+
  private:
   IDisplay& display_;
   alignas(4) uint8_t ground_truth_[DisplayFrame::kPixelBytes];

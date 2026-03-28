@@ -63,7 +63,7 @@ class DesktopEmulatorDisplay final : public microreader::IDisplay {
   }
 
   void step_and_render(const uint8_t* ground_truth, const uint8_t* target) {
-    const float step = 1.0f / static_cast<float>(phases());
+    const float step = 3.0f / static_cast<float>(phases());
     for (int y = 0; y < microreader::DisplayFrame::kPhysicalHeight; ++y) {
       for (int x = 0; x < microreader::DisplayFrame::kPhysicalWidth; ++x) {
         const std::size_t byte_idx = static_cast<std::size_t>(y * microreader::DisplayFrame::kStride + x / 8);
@@ -74,8 +74,10 @@ class DesktopEmulatorDisplay final : public microreader::IDisplay {
         const bool transitioning = (gt_white != target_white);
         transitioning_[y * microreader::DisplayFrame::kPhysicalWidth + x] = transitioning;
         if (transitioning) {
-          // Pixel is transitioning: step sim toward target.
-          s += target_white ? step : -step;
+          // Pixel is transitioning: move a fraction of the remaining distance
+          // so movement is fast initially and slows as it approaches the target.
+          const float goal = target_white ? 1.0f : 0.0f;
+          s += (goal - s) * step;
           if (s > 1.0f)
             s = 1.0f;
           if (s < 0.0f)

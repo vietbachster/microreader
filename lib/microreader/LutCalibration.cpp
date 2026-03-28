@@ -11,7 +11,7 @@ void LutCalibration::update(const ButtonState& buttons, DisplayQueue& queue, IRu
     queue.clear_screen(/*white=*/true, RefreshMode::Full);
   }
   if (buttons.is_pressed(Button::Down)) {
-    queue.clear_screen(/*white=*/false, RefreshMode::Full);
+    queue.display_deep_sleep();
   }
 
   if (buttons.is_pressed(Button::Button0)) {

@@ -55,20 +55,20 @@ enum RefreshMode { FULL_REFRESH, HALF_REFRESH, FAST_REFRESH, CUSTOM_LUT_REFRESH 
 // ---- LUT ----
 static const uint8_t lut_fast[] = {
     // VS L0–L3 (voltage patterns per transition)
-    // Black → Black: [VSS → VSL → VSH2 → VSH1]
-    0x2D, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    // Black → White: [VSH1 → VSL → VSL → VSL]
-    0x6A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    // White → Black: [VSL → VSH1 → VSH1 → VSH1]
-    0x95, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    // White → White: [VSH1 → VSL → VSH1 → VSL]
-    0x66, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    // L4 VCOM: [VSS → VSS → VSS → VSS]
+    // Black → Black: [VSS → VSS → VSS → VSS → VSS → VSS]
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // Black → White: [VSH1 → VSL → VSL → VSL → VSL → VSL]
+    0x6A, 0xA0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // White → Black: [VSS → VSH1 → VSL → VSH1 → VSH1 → VSH1]
+    0x19, 0x50, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // White → White: [VSS → VSS → VSS → VSS → VSS → VSS]
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // L4 VCOM: [VSS → VSS → VSS → VSS → VSS → VSS]
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 
     // TP/RP groups
     0x01, 0x01, 0x01, 0x01, 0x00,  // G0: A=1 B=1 C=1 D=1 RP=0 (4 frames)
-    0x00, 0x00, 0x00, 0x00, 0x00,  // G1: A=0 B=0 C=0 D=0 RP=0
+    0x01, 0x01, 0x00, 0x00, 0x00,  // G1: A=1 B=1 C=0 D=0 RP=0 (2 frames)
     0x00, 0x00, 0x00, 0x00, 0x00,  // G2: A=0 B=0 C=0 D=0 RP=0
     0x00, 0x00, 0x00, 0x00, 0x00,  // G3: A=0 B=0 C=0 D=0 RP=0
     0x00, 0x00, 0x00, 0x00, 0x00,  // G4: A=0 B=0 C=0 D=0 RP=0
@@ -82,7 +82,7 @@ static const uint8_t lut_fast[] = {
     0x86, 0x86, 0x86, 0x86, 0x86,
 
     // Voltages (VGH, VSH1, VSH2, VSL, VCOM)
-    0x17, 0x41, 0xA8, 0x2A, 0x30,
+    0x17, 0x41, 0xB2, 0x2E, 0x30,
 
     // Reserved
     0x00, 0x00};
@@ -96,6 +96,7 @@ class EInkDisplay : public microreader::IDisplay {
 
   bool isScreenOn = false;
   bool pingPongMode = true;
+  bool inDeepSleep_ = false;
 
   spi_device_handle_t spi_;
   uint8_t activeLut_[110];  // current LUT programmed to hardware; defaults to lut_fast
@@ -148,6 +149,7 @@ class EInkDisplay : public microreader::IDisplay {
 
   // ---- microreader::IDisplay ----
   void tick(const uint8_t* ground_truth, bool gt_dirty, const uint8_t* target, bool target_dirty) override {
+    wakeIfNeeded();
     waitWhileBusy();
 
     const uint32_t t0 = millis();
@@ -179,6 +181,7 @@ class EInkDisplay : public microreader::IDisplay {
   }
 
   void full_refresh(const uint8_t* pixels, microreader::RefreshMode mode) override {
+    wakeIfNeeded();
     waitWhileBusy();
     setRamArea(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
     writeRamBuffer(CMD_WRITE_RAM_BW, pixels, BUFFER_SIZE);
@@ -255,12 +258,32 @@ class EInkDisplay : public microreader::IDisplay {
     memcpy(activeLut_, lutData, sizeof(activeLut_));
   }
 
-  void deepSleep() {
+  void deep_sleep() override {
     sendCommand(CMD_DEEP_SLEEP);
-    sendData(0x01);
+    sendData(0x03);
+    isScreenOn = false;
+    inDeepSleep_ = true;
   }
 
  private:
+  // Exit deep sleep via hardware reset + controller re-init.
+  // Deep sleep mode 0x03 fully powers off internal circuits;
+  // a longer reset pulse and settling time are needed.
+  void wakeIfNeeded() {
+    if (!inDeepSleep_)
+      return;
+    ESP_LOGI("epd", "waking from deep sleep (HWRESET)");
+    gpio_set_level(EPD_RST, 1);
+    delay(10);
+    gpio_set_level(EPD_RST, 0);
+    delay(20);
+    gpio_set_level(EPD_RST, 1);
+    delay(200);
+    waitWhileBusy("post-HWRESET");
+    initDisplayController(false);
+    inDeepSleep_ = false;
+  }
+
   // Program activeLut_ into the controller registers.
   // Called from begin(), setCustomLUT(), and after any refresh that sets LUT_LOAD.
   void applyLUT() {
@@ -325,7 +348,7 @@ class EInkDisplay : public microreader::IDisplay {
   void waitWhileBusy(const char* comment = nullptr) {
     uint32_t start = millis();
     while (gpio_get_level(EPD_BUSY) == 1) {
-      esp_rom_delay_us(1000);
+      vTaskDelay(pdMS_TO_TICKS(1));
       if (millis() - start > 10000) {
         ESP_LOGW("epd", "waitWhileBusy timeout%s", comment ? comment : "");
         break;

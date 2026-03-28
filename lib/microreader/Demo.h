@@ -25,7 +25,6 @@ class Demo {
   int demo_vx_ = 5;
   int demo_vy_ = 5;
   bool demo_paused_ = true;
-  bool clear_white_ = true;  // toggles between white/black for clear_screen
 
   // Randomly repositioning rectangles, each with its own countdown.
   static constexpr int kNumRects = 10;

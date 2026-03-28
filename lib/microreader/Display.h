@@ -85,6 +85,9 @@ class IDisplay {
   // Full physical refresh.  `pixels` is the settled (ground_truth == target) state.
   virtual void full_refresh(const uint8_t* pixels, RefreshMode mode) = 0;
 
+  // Put the display controller into deep sleep (low-power mode).
+  virtual void deep_sleep() {}
+
   virtual void set_rotation(Rotation r) {
     (void)r;
   }
