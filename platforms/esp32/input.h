@@ -69,6 +69,14 @@ class Esp32InputSource final : public microreader::IInputSource {
     return result;
   }
 
+  // Clear the latch for a single button without affecting others.
+  void clear_button(microreader::Button button) {
+    const uint8_t mask = static_cast<uint8_t>(1u << static_cast<uint8_t>(button));
+    portENTER_CRITICAL(&lock_);
+    pressed_latch_ &= static_cast<uint8_t>(~mask);
+    portEXIT_CRITICAL(&lock_);
+  }
+
  private:
   static constexpr gpio_num_t kPowerPin = GPIO_NUM_3;
   static constexpr int kAdcTol = 400;     // ±tolerance for threshold match
@@ -89,6 +97,10 @@ class Esp32InputSource final : public microreader::IInputSource {
   uint8_t prev_debounced_ = 0;
   bool last_raw_[kNumButtons] = {};
   uint32_t debounce_time_[kNumButtons] = {};
+
+  // Auto-repeat state — only modified by the timer callback
+  uint32_t repeat_hold_[kNumButtons] = {};
+  uint32_t repeat_next_[kNumButtons] = {};
 
   // Latch — shared between timer callback (write) and poll_buttons (read+clear)
   uint8_t pressed_latch_ = 0;
@@ -120,12 +132,37 @@ class Esp32InputSource final : public microreader::IInputSource {
       }
     }
 
-    // Latch rising edges (critical section shared with poll_buttons)
+    // Detect rising edges.
+    const uint8_t rising = debounced_ & ~prev_debounced_;
+
+    // Latch rising edges (critical section shared with poll_buttons).
     portENTER_CRITICAL(&lock_);
-    uint8_t rising = debounced_ & ~prev_debounced_;
     pressed_latch_ |= rising;
-    prev_debounced_ = debounced_;
     portEXIT_CRITICAL(&lock_);
+
+    // Auto-repeat: generate synthetic latch bits for held buttons.
+    static constexpr uint32_t kSampleMs = kSampleIntervalUs / 1000;
+    for (uint8_t i = 0; i < kNumButtons; ++i) {
+      const uint8_t mask = static_cast<uint8_t>(1u << i);
+      if (rising & mask) {
+        // Fresh press — begin tracking hold duration.
+        repeat_hold_[i] = 0;
+        repeat_next_[i] = microreader::ButtonState::kRepeatDelayMs;
+      } else if (debounced_ & mask) {
+        // Held — accumulate sample interval.
+        repeat_hold_[i] += kSampleMs;
+        if (repeat_hold_[i] >= repeat_next_[i]) {
+          portENTER_CRITICAL(&lock_);
+          pressed_latch_ |= mask;
+          portEXIT_CRITICAL(&lock_);
+          repeat_next_[i] += microreader::ButtonState::kRepeatIntervalMs;
+        }
+      } else {
+        repeat_hold_[i] = 0;
+      }
+    }
+
+    prev_debounced_ = debounced_;
   }
 
   uint8_t read_raw() const {

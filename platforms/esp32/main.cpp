@@ -31,7 +31,7 @@ extern "C" void app_main(void) {
   static microreader::DisplayQueue queue(epd);
 
   // Wait for the serial monitor to connect before logging anything.
-  vTaskDelay(pdMS_TO_TICKS(2000));
+  // vTaskDelay(pdMS_TO_TICKS(2000));
 
   logger.log(microreader::LogLevel::Info, "Booting up...");
 
@@ -42,8 +42,8 @@ extern "C" void app_main(void) {
 
   app.start(logger, queue);
 
-  // Discard any input latched during boot (e.g. the power button that woke us).
-  input.poll_buttons();
+  // Discard the power-button press that woke us from deep sleep.
+  input.clear_button(microreader::Button::Power);
 
   while (runtime.should_continue() && app.running()) {
     if (serial_lut_take(lut_buf))

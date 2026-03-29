@@ -7,6 +7,10 @@ namespace microreader {
 enum class Button : uint8_t { Button0 = 0, Button1 = 1, Button2 = 2, Button3 = 3, Up = 4, Down = 5, Power = 6 };
 
 struct ButtonState {
+  static constexpr uint8_t kButtonCount = 7;
+  static constexpr uint32_t kRepeatDelayMs = 350;
+  static constexpr uint32_t kRepeatIntervalMs = 175;
+
   uint8_t current = 0;        // Instantaneous state at last sample
   uint8_t pressed_latch = 0;  // Accumulated rising edges since last poll
 

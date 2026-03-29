@@ -42,7 +42,7 @@ struct UpdateCommand {
 // their bounding-box pixels not covered by active commands.
 class DisplayQueue {
  public:
-  int phases = 10;
+  int phases = 6;
 
   explicit DisplayQueue(IDisplay& display) : display_(display), next_ts_(0) {
     memset(ground_truth_, 0xFF, DisplayFrame::kPixelBytes);
@@ -149,6 +149,14 @@ class DisplayQueue {
   }
 
   void tick(bool force = false) {
+    // Settle refresh fires once, the tick after all commands finish.
+    if (needs_settle_ && commands_.empty()) {
+      needs_settle_ = false;
+      display_.settle_refresh(target_);
+      if (!force)
+        return;
+    }
+
     if (commands_.empty() && !force)
       return;
 
@@ -169,6 +177,10 @@ class DisplayQueue {
       ground_truth_dirty_ = true;
     }
 
+    // Queue just went idle — request settle on the next tick.
+    if (commands_.empty())
+      needs_settle_ = true;
+
     display_.tick(ground_truth_, ground_truth_dirty_, target_, target_dirty_);
     ground_truth_dirty_ = false;
     target_dirty_ = false;
@@ -187,16 +199,29 @@ class DisplayQueue {
       tick();
   }
 
-  void full_refresh(RefreshMode mode = RefreshMode::Full) {
+  void full_refresh(RefreshMode mode = RefreshMode::Half) {
     commands_.clear();
+    needs_settle_ = false;
     memcpy(ground_truth_, target_, DisplayFrame::kPixelBytes);
     display_.full_refresh(target_, mode);
     ground_truth_dirty_ = false;
     target_dirty_ = false;
   }
 
+  // Partial refresh: flush pending commands, then send ground_truth (old image)
+  // to RED RAM and target (new image) to BW RAM for a fast differential refresh.
+  void partial_refresh() {
+    flush();
+    needs_settle_ = true;
+    display_.partial_refresh(ground_truth_, target_);
+    memcpy(ground_truth_, target_, DisplayFrame::kPixelBytes);
+    ground_truth_dirty_ = false;
+    target_dirty_ = false;
+  }
+
   void clear_screen(bool white = true, RefreshMode mode = RefreshMode::Full) {
     commands_.clear();
+    needs_settle_ = false;
     memset(ground_truth_, white ? 0xFF : 0x00, DisplayFrame::kPixelBytes);
     memset(target_, white ? 0xFF : 0x00, DisplayFrame::kPixelBytes);
     display_.full_refresh(target_, mode);
@@ -209,6 +234,7 @@ class DisplayQueue {
   }
 
   void set_rotation(Rotation r) {
+    flush();
     rotation_ = r;
     display_.set_rotation(r);
   }
@@ -223,6 +249,7 @@ class DisplayQueue {
   alignas(4) uint8_t target_[DisplayFrame::kPixelBytes];
   bool ground_truth_dirty_ = false;
   bool target_dirty_ = false;
+  bool needs_settle_ = false;
   std::vector<UpdateCommand> commands_;
   uint32_t next_ts_;
   std::vector<uint8_t> save_buf_;  // reused by generic submit

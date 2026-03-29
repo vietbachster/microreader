@@ -52,7 +52,40 @@
 // ---- Refresh modes ----
 enum RefreshMode { FULL_REFRESH, HALF_REFRESH, FAST_REFRESH, CUSTOM_LUT_REFRESH };
 
-// ---- LUT ----
+static const uint8_t lut_settle[] = {
+    // VS L0–L3 (voltage patterns per transition)
+    // Black → Black: [VSL → VSH1 → VSL → VSH1]
+    0x99, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // Black → White: [VSS → VSS → VSS → VSS]
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // White → Black: [VSS → VSS → VSS → VSS]
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // White → White: [VSH2 → VSL → VSH2 → VSL]
+    0xEE, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // L4 VCOM: [VSS → VSS → VSS → VSS]
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+
+    // TP/RP groups
+    0x01, 0x01, 0x00, 0x00, 0x00,  // G0: A=1 B=1 C=0 D=0 RP=0 (2 frames)
+    0x00, 0x00, 0x00, 0x00, 0x00,  // G1: A=0 B=0 C=0 D=0 RP=0
+    0x00, 0x00, 0x00, 0x00, 0x00,  // G2: A=0 B=0 C=0 D=0 RP=0
+    0x00, 0x00, 0x00, 0x00, 0x00,  // G3: A=0 B=0 C=0 D=0 RP=0
+    0x00, 0x00, 0x00, 0x00, 0x00,  // G4: A=0 B=0 C=0 D=0 RP=0
+    0x00, 0x00, 0x00, 0x00, 0x00,  // G5: A=0 B=0 C=0 D=0 RP=0
+    0x00, 0x00, 0x00, 0x00, 0x00,  // G6: A=0 B=0 C=0 D=0 RP=0
+    0x00, 0x00, 0x00, 0x00, 0x00,  // G7: A=0 B=0 C=0 D=0 RP=0
+    0x00, 0x00, 0x00, 0x00, 0x00,  // G8: A=0 B=0 C=0 D=0 RP=0
+    0x00, 0x00, 0x00, 0x00, 0x00,  // G9: A=0 B=0 C=0 D=0 RP=0
+
+    // Frame rate
+    0x86, 0x86, 0x86, 0x86, 0x86,
+
+    // Voltages (VGH, VSH1, VSH2, VSL, VCOM)
+    0x17, 0x41, 0xA8, 0x32, 0x30,
+
+    // Reserved
+    0x00, 0x00};
+
 static const uint8_t lut_fast[] = {
     // VS L0–L3 (voltage patterns per transition)
     // Black → Black: [VSS → VSS → VSS → VSS → VSS → VSS]
@@ -187,6 +220,36 @@ class EInkDisplay : public microreader::IDisplay {
     writeRamBuffer(CMD_WRITE_RAM_BW, pixels, BUFFER_SIZE);
     writeRamBuffer(CMD_WRITE_RAM_RED, pixels, BUFFER_SIZE);
     refreshDisplay(mode == microreader::RefreshMode::Half ? HALF_REFRESH : FULL_REFRESH);
+  }
+
+  void partial_refresh(const uint8_t* old_pixels, const uint8_t* new_pixels) override {
+    wakeIfNeeded();
+    waitWhileBusy();
+    setRamArea(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+    writeRamBuffer(CMD_WRITE_RAM_BW, new_pixels, BUFFER_SIZE);
+    writeRamBuffer(CMD_WRITE_RAM_RED, old_pixels, BUFFER_SIZE);
+    refreshDisplay(FAST_REFRESH);
+  }
+
+  void settle_refresh(const uint8_t* pixels) override {
+    wakeIfNeeded();
+    waitWhileBusy();
+    setRamArea(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+    writeRamBuffer(CMD_WRITE_RAM_BW, pixels, BUFFER_SIZE);
+    writeRamBuffer(CMD_WRITE_RAM_RED, pixels, BUFFER_SIZE);
+    // Program settle LUT temporarily; next tick() will restore activeLut_.
+    sendCommand(CMD_WRITE_LUT);
+    for (uint16_t i = 0; i < 105; i++)
+      sendData(lut_settle[i]);
+    sendCommand(CMD_GATE_VOLTAGE);
+    sendData(lut_settle[105]);
+    sendCommand(CMD_SOURCE_VOLTAGE);
+    sendData(lut_settle[106]);
+    sendData(lut_settle[107]);
+    sendData(lut_settle[108]);
+    sendCommand(CMD_WRITE_VCOM);
+    sendData(lut_settle[109]);
+    refreshDisplay(CUSTOM_LUT_REFRESH);
   }
 
   void refreshDisplay(RefreshMode mode) {

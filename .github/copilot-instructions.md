@@ -27,13 +27,13 @@ platforms/esp32/          ← real hardware (ESP-IDF + PlatformIO)
 
 ## Core systems
 
-- **DisplayQueue**: dual-buffer (ground_truth + target) phase-based animation. Commands progress over N phases before committing.
+- **DisplayQueue**: dual-buffer (ground_truth + target) phase-based animation. Commands progress over N phases before committing. After all commands finish, a one-shot **settle refresh** fires on the next tick using a dedicated `lut_settle` waveform that reinforces B→B / W→W pixels to clean up ghosting from fast partial updates.
 - **Canvas**: z-ordered scene graph with damage-rect redraw. Elements: `CanvasRect`, `CanvasCircle`, `CanvasText`.
 - **Application**: manages screen lifecycle via `ScreenManager` (push/pop stack). Starts with `MenuDemo` at the bottom; selecting a menu item pushes a screen, pressing Down pops back. Handles power button → deep sleep.
 - **ScreenManager** (`ScreenManager.h`): generic stack of `IScreen*`. `push()` stops current top, starts new screen. `pop()` stops top, restarts the one below.
 - **Screens** (`lib/microreader/demos/`): `IScreen` interface (`name`, `start`, `stop`, `update`). Screens: `MenuDemo` (text menu for screen selection), `BouncingBallDemo` (bouncing ball + random shapes/text). `update()` returning false triggers a pop.
 - **Button conventions**: Button0 = back, Button1 = select, Button2 = down, Button3 = up, Up = context action (e.g. toggle pause).
-- **Input**: `ButtonState` carries `current` (instantaneous) + `pressed_latch` (accumulated rising edges). Input sources sample continuously between frame polls so brief presses are never lost. ESP32 uses an `esp_timer` (5 ms) for background sampling with per-button debounce and a `portMUX` spinlock to protect the latch. Desktop latches `SDL_KEYDOWN` events in `pump_events()`.
+- **Input**: `ButtonState` carries `current` (instantaneous) + `pressed_latch` (accumulated rising edges). Auto-repeat is generated at the hardware sampling layer — ESP32's 5 ms `sample()` timer and Desktop's `pump_events()` inject synthetic latch bits when a button is held past the delay (constants in `ButtonState::kRepeatDelayMs` / `kRepeatIntervalMs`). Screens just use `is_pressed()` naturally.
 - **Loop**: `run_loop()` polls input → app.update() → queue.tick() → wait_next_frame().
 
 ## Build

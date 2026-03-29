@@ -93,14 +93,19 @@ void MenuDemo::start(Canvas& canvas, DisplayQueue& queue) {
 void MenuDemo::stop() {}
 
 bool MenuDemo::update(const ButtonState& buttons, Canvas& canvas, DisplayQueue& queue, IRuntime& /*runtime*/) {
+  bool moved = false;
+
   if (buttons.is_pressed(Button::Button3)) {
     selected_ = selected_ > 0 ? selected_ - 1 : count_ - 1;
-    update_cursor(canvas, queue);
+    moved = true;
   }
   if (buttons.is_pressed(Button::Button2)) {
     selected_ = selected_ < count_ - 1 ? selected_ + 1 : 0;
-    update_cursor(canvas, queue);
+    moved = true;
   }
+
+  if (moved)
+    update_cursor(canvas, queue);
   if (buttons.is_pressed(Button::Button1) && selected_ < count_) {
     const auto& item = items_[selected_];
     if (item.action) {
@@ -109,6 +114,7 @@ bool MenuDemo::update(const ButtonState& buttons, Canvas& canvas, DisplayQueue& 
       stop();
       canvas.clear();
       start(canvas, queue);
+      queue.partial_refresh();
     } else {
       chosen_ = item.target_screen;
       return false;

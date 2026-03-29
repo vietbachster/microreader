@@ -103,6 +103,10 @@ class DesktopRuntime final : public microreader::IRuntime {
 
   // Process SDL window/debug events. Call once per frame before polling input.
   void pump_events() {
+    const uint32_t now = SDL_GetTicks();
+    const uint32_t dt = now - last_pump_tick_;
+    last_pump_tick_ = now;
+
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
       if (e.type == SDL_QUIT)
@@ -115,33 +119,69 @@ class DesktopRuntime final : public microreader::IRuntime {
         step_requested_ = true;
 
       // Latch button key-down events so brief presses between frames are not lost.
+      // Also reset repeat tracking for the pressed button.
       if (e.type == SDL_KEYDOWN && !e.key.repeat) {
         using B = microreader::Button;
+        auto latch_and_reset = [&](B btn) {
+          const uint8_t i = static_cast<uint8_t>(btn);
+          pressed_latch_ |= static_cast<uint8_t>(1u << i);
+          repeat_hold_[i] = 0;
+          repeat_next_[i] = microreader::ButtonState::kRepeatDelayMs;
+        };
         switch (e.key.keysym.scancode) {
           case SDL_SCANCODE_LEFT:
-            pressed_latch_ |= 1u << static_cast<uint8_t>(B::Button0);
+            latch_and_reset(B::Button0);
             break;
           case SDL_SCANCODE_RIGHT:
-            pressed_latch_ |= 1u << static_cast<uint8_t>(B::Button1);
+            latch_and_reset(B::Button1);
             break;
           case SDL_SCANCODE_DOWN:
-            pressed_latch_ |= 1u << static_cast<uint8_t>(B::Button2);
+            latch_and_reset(B::Button2);
             break;
           case SDL_SCANCODE_UP:
-            pressed_latch_ |= 1u << static_cast<uint8_t>(B::Button3);
+            latch_and_reset(B::Button3);
             break;
           case SDL_SCANCODE_Q:
-            pressed_latch_ |= 1u << static_cast<uint8_t>(B::Up);
+            latch_and_reset(B::Up);
             break;
           case SDL_SCANCODE_A:
-            pressed_latch_ |= 1u << static_cast<uint8_t>(B::Down);
+            latch_and_reset(B::Down);
             break;
           case SDL_SCANCODE_RETURN:
-            pressed_latch_ |= 1u << static_cast<uint8_t>(B::Power);
+            latch_and_reset(B::Power);
             break;
           default:
             break;
         }
+      }
+    }
+
+    // Auto-repeat: generate synthetic latch bits for held keys.
+    const uint8_t* keys = SDL_GetKeyboardState(nullptr);
+    struct KeyMap {
+      SDL_Scancode scan;
+      microreader::Button btn;
+    };
+    static constexpr KeyMap kMap[] = {
+        {SDL_SCANCODE_LEFT,   microreader::Button::Button0},
+        {SDL_SCANCODE_RIGHT,  microreader::Button::Button1},
+        {SDL_SCANCODE_DOWN,   microreader::Button::Button2},
+        {SDL_SCANCODE_UP,     microreader::Button::Button3},
+        {SDL_SCANCODE_Q,      microreader::Button::Up     },
+        {SDL_SCANCODE_A,      microreader::Button::Down   },
+        {SDL_SCANCODE_RETURN, microreader::Button::Power  },
+    };
+    for (const auto& k : kMap) {
+      const uint8_t i = static_cast<uint8_t>(k.btn);
+      if (keys[k.scan]) {
+        repeat_hold_[i] += dt;
+        if (repeat_hold_[i] >= repeat_next_[i]) {
+          pressed_latch_ |= static_cast<uint8_t>(1u << i);
+          repeat_next_[i] += microreader::ButtonState::kRepeatIntervalMs;
+        }
+      } else {
+        repeat_hold_[i] = 0;
+        repeat_next_[i] = microreader::ButtonState::kRepeatDelayMs;
       }
     }
   }
@@ -155,10 +195,15 @@ class DesktopRuntime final : public microreader::IRuntime {
   }
 
  private:
+  static constexpr uint8_t kNumButtons = microreader::ButtonState::kButtonCount;
+
   uint32_t frame_time_ms_;
   bool quit_ = false;
   bool* transition_flag_ = nullptr;
   uint8_t pressed_latch_ = 0;
+  uint32_t repeat_hold_[kNumButtons] = {};
+  uint32_t repeat_next_[kNumButtons] = {};
+  uint32_t last_pump_tick_ = 0;
   SDL_Window* window_ = nullptr;
   SDL_Renderer* renderer_ = nullptr;
   SDL_Texture* texture_ = nullptr;

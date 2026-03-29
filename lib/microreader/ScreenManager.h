@@ -19,9 +19,12 @@ class ScreenManager {
     if (depth_ > 0) {
       stack_[depth_ - 1]->stop();
       canvas.clear();
+      queue.flush();
     }
     stack_[depth_++] = screen;
     screen->start(canvas, queue);
+    if (depth_ > 1)
+      queue.partial_refresh();
   }
 
   // Pop the top screen. Stops it, then restarts the one below.
@@ -30,8 +33,11 @@ class ScreenManager {
       return;
     stack_[--depth_]->stop();
     canvas.clear();
-    if (depth_ > 0)
+    queue.flush();
+    if (depth_ > 0) {
       stack_[depth_ - 1]->start(canvas, queue);
+      queue.partial_refresh();
+    }
   }
 
   // Restart the top screen (stop + clear + start).
