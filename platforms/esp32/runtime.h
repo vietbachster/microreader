@@ -8,23 +8,10 @@
 
 class Esp32Runtime final : public microreader::IRuntime {
  public:
-  explicit Esp32Runtime(uint32_t frame_time_ms) : frame_time_ms_(frame_time_ms), input_(nullptr), frame_start_ms_(0) {}
-
-  void set_input_source(microreader::IInputSource* input) {
-    input_ = input;
-  }
+  explicit Esp32Runtime(uint32_t frame_time_ms) : frame_time_ms_(frame_time_ms), frame_start_ms_(0) {}
 
   bool should_continue() const override {
     return true;
-  }
-
-  microreader::ButtonState poll_buttons() override {
-    if (!input_) {
-      microreader::ButtonState empty{};
-      empty.update(0);
-      return empty;
-    }
-    return input_->poll_buttons();
   }
 
   uint32_t frame_time_ms() const override {
@@ -53,6 +40,5 @@ class Esp32Runtime final : public microreader::IRuntime {
   }
 
   uint32_t frame_time_ms_;
-  microreader::IInputSource* input_;
   uint32_t frame_start_ms_;
 };

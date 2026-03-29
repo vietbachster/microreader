@@ -25,9 +25,11 @@ FetchContent_MakeAvailable(SDL2)
 # ---------------------------------------------------------------------------
 add_library(microreader_core STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/microreader/Application.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/microreader/Demo.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/microreader/Loop.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/microreader/LutCalibration.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/microreader/demos/BouncingBallDemo.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/microreader/demos/MenuDemo.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/microreader/demos/TextShowcaseDemo.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/microreader/demos/PatternDemo.cpp
 )
 target_include_directories(microreader_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/../../lib

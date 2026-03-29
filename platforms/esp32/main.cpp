@@ -1,5 +1,6 @@
 #include "driver/gpio.h"
 #include "epd.h"
+#include "esp_ota_ops.h"
 #include "esp_sleep.h"
 #include "input.h"
 #include "logger.h"
@@ -9,7 +10,19 @@
 #include "runtime.h"
 #include "serial_lut.h"
 
+static void verify_ota() {
+  const esp_partition_t* running = esp_ota_get_running_partition();
+  esp_ota_img_states_t ota_state;
+  if (esp_ota_get_state_partition(running, &ota_state) == ESP_OK) {
+    if (ota_state == ESP_OTA_IMG_PENDING_VERIFY) {
+      esp_ota_mark_app_valid_cancel_rollback();
+    }
+  }
+}
+
 extern "C" void app_main(void) {
+  verify_ota();
+
   static Esp32Logger logger;
   static Esp32InputSource input;
   static EInkDisplay epd;
@@ -23,17 +36,20 @@ extern "C" void app_main(void) {
   logger.log(microreader::LogLevel::Info, "Booting up...");
 
   epd.begin();
-  runtime.set_input_source(&input);
   serial_lut_start();
 
   static uint8_t lut_buf[kLutSize];
 
   app.start(logger, queue);
+
+  // Discard any input latched during boot (e.g. the power button that woke us).
+  input.poll_buttons();
+
   while (runtime.should_continue() && app.running()) {
     if (serial_lut_take(lut_buf))
       epd.setCustomLUT(lut_buf);
 
-    microreader::run_loop_iteration(app, queue, runtime, logger);
+    microreader::run_loop_iteration(app, queue, input, runtime, logger);
   }
 
   logger.log(microreader::LogLevel::Info, "Shutting down, entering deep sleep...");

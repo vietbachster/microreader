@@ -94,7 +94,15 @@ class DesktopRuntime final : public microreader::IRuntime {
     return !quit_;
   }
 
-  microreader::ButtonState poll_buttons() override {
+  // Consume the latched button presses accumulated since the last call.
+  uint8_t consume_pressed_latch() {
+    uint8_t l = pressed_latch_;
+    pressed_latch_ = 0;
+    return l;
+  }
+
+  // Process SDL window/debug events. Call once per frame before polling input.
+  void pump_events() {
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
       if (e.type == SDL_QUIT)
@@ -105,25 +113,37 @@ class DesktopRuntime final : public microreader::IRuntime {
         step_mode_ = !step_mode_;
       if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_SPACE)
         step_requested_ = true;
+
+      // Latch button key-down events so brief presses between frames are not lost.
+      if (e.type == SDL_KEYDOWN && !e.key.repeat) {
+        using B = microreader::Button;
+        switch (e.key.keysym.scancode) {
+          case SDL_SCANCODE_LEFT:
+            pressed_latch_ |= 1u << static_cast<uint8_t>(B::Button0);
+            break;
+          case SDL_SCANCODE_RIGHT:
+            pressed_latch_ |= 1u << static_cast<uint8_t>(B::Button1);
+            break;
+          case SDL_SCANCODE_DOWN:
+            pressed_latch_ |= 1u << static_cast<uint8_t>(B::Button2);
+            break;
+          case SDL_SCANCODE_UP:
+            pressed_latch_ |= 1u << static_cast<uint8_t>(B::Button3);
+            break;
+          case SDL_SCANCODE_Q:
+            pressed_latch_ |= 1u << static_cast<uint8_t>(B::Up);
+            break;
+          case SDL_SCANCODE_A:
+            pressed_latch_ |= 1u << static_cast<uint8_t>(B::Down);
+            break;
+          case SDL_SCANCODE_RETURN:
+            pressed_latch_ |= 1u << static_cast<uint8_t>(B::Power);
+            break;
+          default:
+            break;
+        }
+      }
     }
-    const uint8_t* keys = SDL_GetKeyboardState(nullptr);
-    uint8_t mask = 0;
-    // Button0-3: arrow keys for directional movement.
-    if (keys[SDL_SCANCODE_LEFT])
-      mask |= 1u << static_cast<uint8_t>(microreader::Button::Button3);
-    if (keys[SDL_SCANCODE_RIGHT])
-      mask |= 1u << static_cast<uint8_t>(microreader::Button::Button2);
-    if (keys[SDL_SCANCODE_UP])
-      mask |= 1u << static_cast<uint8_t>(microreader::Button::Button1);
-    if (keys[SDL_SCANCODE_DOWN])
-      mask |= 1u << static_cast<uint8_t>(microreader::Button::Button0);
-    // Button4 (Up enum): Q key — toggle stop/start.
-    if (keys[SDL_SCANCODE_Q])
-      mask |= 1u << static_cast<uint8_t>(microreader::Button::Up);
-    if (keys[SDL_SCANCODE_RETURN])
-      mask |= 1u << static_cast<uint8_t>(microreader::Button::Power);
-    buttons_.update(mask);
-    return buttons_;
   }
 
   uint32_t frame_time_ms() const override {
@@ -138,10 +158,10 @@ class DesktopRuntime final : public microreader::IRuntime {
   uint32_t frame_time_ms_;
   bool quit_ = false;
   bool* transition_flag_ = nullptr;
+  uint8_t pressed_latch_ = 0;
   SDL_Window* window_ = nullptr;
   SDL_Renderer* renderer_ = nullptr;
   SDL_Texture* texture_ = nullptr;
-  microreader::ButtonState buttons_{};
   bool step_mode_ = false;
   bool step_requested_ = false;
 };

@@ -18,7 +18,6 @@ void Application::start(ILogger& logger, DisplayQueue& queue) {
   ticks_ = 0;
   uptime_ms_ = 0;
   buttons_ = ButtonState{};
-  dirty_ = true;
   started_ = true;
   running_ = true;
   logger.log(LogLevel::Info, build_info());
@@ -28,8 +27,8 @@ void Application::start(ILogger& logger, DisplayQueue& queue) {
   std::srand(static_cast<unsigned>(std::time(nullptr)));
 #endif
 
-  // lut_calibration_.start(queue);
-  demo_.start(canvas_, queue);
+  screen_mgr_.push(&menu_, canvas_, queue);
+  queue.full_refresh();
 }
 
 void Application::update(const ButtonState& buttons, uint32_t dt_ms, DisplayQueue& queue, ILogger& logger,
@@ -44,21 +43,19 @@ void Application::update(const ButtonState& buttons, uint32_t dt_ms, DisplayQueu
   buttons_ = buttons;
 
   if (buttons_.is_pressed(Button::Power)) {
-    // Paint a checkerboard pattern (~80px squares) as the sleep screen.
     constexpr int kBlock = 80;
-    constexpr int W = DisplayFrame::kPhysicalWidth;
-    constexpr int H = DisplayFrame::kPhysicalHeight;
-    queue.submit(0, 0, W, H, [=](uint8_t* buf) {
+    const int W = queue.width();
+    const int H = queue.height();
+    queue.submit(0, 0, W, H, [=](DisplayFrame& frame) {
       for (int row = 0; row < H; ++row) {
         const int tile_y = row / kBlock;
-        uint8_t* rp = buf + row * DisplayFrame::kStride;
         int col = 0;
         while (col < W) {
           const int tile_x = col / kBlock;
           const bool white = ((tile_x ^ tile_y) & 1) == 0;
           const int tile_end = (tile_x + 1) * kBlock;
           const int span_end = tile_end < W ? tile_end : W;
-          DisplayQueue::fill_row(buf, row, col, span_end, white);
+          frame.fill_row(row, col, span_end, white);
           col = span_end;
         }
       }
@@ -69,8 +66,21 @@ void Application::update(const ButtonState& buttons, uint32_t dt_ms, DisplayQueu
     return;
   }
 
-  // lut_calibration_.update(buttons_, queue, runtime);
-  demo_.update(buttons_, canvas_, queue);
+  IScreen* top = screen_mgr_.top();
+  if (top) {
+    if (!top->update(buttons_, canvas_, queue, runtime)) {
+      // Screen signalled exit.
+      if (top == &menu_) {
+        // Menu chose a screen — push it onto the stack.
+        IScreen* chosen = menu_.chosen();
+        if (chosen)
+          screen_mgr_.push(chosen, canvas_, queue);
+      } else {
+        // Pop back to the previous screen.
+        screen_mgr_.pop(canvas_, queue);
+      }
+    }
+  }
 }
 
 bool Application::running() const {

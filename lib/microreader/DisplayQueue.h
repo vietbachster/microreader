@@ -42,11 +42,20 @@ struct UpdateCommand {
 // their bounding-box pixels not covered by active commands.
 class DisplayQueue {
  public:
-  int phases = 8;
+  int phases = 10;
 
   explicit DisplayQueue(IDisplay& display) : display_(display), next_ts_(0) {
     memset(ground_truth_, 0xFF, DisplayFrame::kPixelBytes);
     memset(target_, 0xFF, DisplayFrame::kPixelBytes);
+    display_.set_rotation(rotation_);
+  }
+
+  // Logical dimensions (rotation-aware).
+  int width() const {
+    return rotation_ == Rotation::Deg90 ? DisplayFrame::kPhysicalHeight : DisplayFrame::kPhysicalWidth;
+  }
+  int height() const {
+    return rotation_ == Rotation::Deg90 ? DisplayFrame::kPhysicalWidth : DisplayFrame::kPhysicalHeight;
   }
 
   // Fill a single horizontal span [x1, x2) on one row of a raw buffer.
@@ -81,28 +90,33 @@ class DisplayQueue {
     }
   }
 
-  // Submit a solid rectangle fill (fast path — no save/diff needed).
+  // Submit a solid rectangle fill in logical coordinates (fast path).
   uint32_t submit(int x, int y, int w, int h, bool white) {
+    int px, py, pw, ph;
+    to_physical_rect_(x, y, w, h, px, py, pw, ph);
     if (!commands_.empty())
-      fast_forward_rect_(x, y, w, h, white);
-    commands_.push_back({x, y, w, h, next_ts_, 0});
-    fill_rect_(target_, x, y, w, h, white);
+      fast_forward_rect_(px, py, pw, ph, white);
+    commands_.push_back({px, py, pw, ph, next_ts_, 0});
+    fill_rect_(target_, px, py, pw, ph, white);
     target_dirty_ = true;
     return next_ts_++;
   }
 
-  // Submit a custom-painted region.  `paint` receives the target buffer
-  // and should paint the desired pixels within the bounding box (x,y,w,h).
-  // DisplayQueue tracks only the bounding box — any shape works.
-  template <typename PaintFn, typename = std::enable_if_t<std::is_invocable_v<PaintFn&, uint8_t*>>>
+  // Submit a custom-painted region in logical coordinates.
+  // `paint` receives a DisplayFrame wrapping the target buffer (with current
+  // rotation) so it can draw using logical coordinates.
+  template <typename PaintFn, typename = std::enable_if_t<std::is_invocable_v<PaintFn&, DisplayFrame&>>>
   uint32_t submit(int x, int y, int w, int h, PaintFn&& paint) {
-    const int x1 = std::max(x, 0);
-    const int y1 = std::max(y, 0);
-    const int x2 = std::min(x + w, DisplayFrame::kPhysicalWidth);
-    const int y2 = std::min(y + h, DisplayFrame::kPhysicalHeight);
+    int px, py, pw, ph;
+    to_physical_rect_(x, y, w, h, px, py, pw, ph);
+    const int x1 = std::max(px, 0);
+    const int y1 = std::max(py, 0);
+    const int x2 = std::min(px + pw, DisplayFrame::kPhysicalWidth);
+    const int y2 = std::min(py + ph, DisplayFrame::kPhysicalHeight);
 
+    DisplayFrame frame(target_, rotation_);
     if (x1 < x2 && y1 < y2 && !commands_.empty()) {
-      // Save the target region before the painter modifies it.
+      // Save the physical target region before the painter modifies it.
       const int bx1 = x1 / 8;
       const int bx2 = (x2 - 1) / 8;
       const int bw = bx2 - bx1 + 1;
@@ -111,7 +125,7 @@ class DisplayQueue {
       for (int r = y1; r < y2; ++r)
         memcpy(save_buf_.data() + (r - y1) * bw, target_ + r * DisplayFrame::kStride + bx1, bw);
 
-      paint(target_);
+      paint(frame);
 
       // Diff-based fast-forward: for every bit the painter changed,
       // set ground_truth to the OLD target value.  This guarantees
@@ -126,10 +140,10 @@ class DisplayQueue {
         }
       }
     } else {
-      paint(target_);
+      paint(frame);
     }
 
-    commands_.push_back({x, y, w, h, next_ts_, 0});
+    commands_.push_back({px, py, pw, ph, next_ts_, 0});
     target_dirty_ = true;
     return next_ts_++;
   }
@@ -167,6 +181,12 @@ class DisplayQueue {
     return static_cast<int>(commands_.size());
   }
 
+  // Tick until all pending commands have finished.
+  void flush() {
+    while (!idle())
+      tick();
+  }
+
   void full_refresh(RefreshMode mode = RefreshMode::Full) {
     commands_.clear();
     memcpy(ground_truth_, target_, DisplayFrame::kPixelBytes);
@@ -188,8 +208,17 @@ class DisplayQueue {
     display_.deep_sleep();
   }
 
+  void set_rotation(Rotation r) {
+    rotation_ = r;
+    display_.set_rotation(r);
+  }
+  Rotation rotation() const {
+    return rotation_;
+  }
+
  private:
   IDisplay& display_;
+  Rotation rotation_ = Rotation::Deg90;
   alignas(4) uint8_t ground_truth_[DisplayFrame::kPixelBytes];
   alignas(4) uint8_t target_[DisplayFrame::kPixelBytes];
   bool ground_truth_dirty_ = false;
@@ -197,6 +226,22 @@ class DisplayQueue {
   std::vector<UpdateCommand> commands_;
   uint32_t next_ts_;
   std::vector<uint8_t> save_buf_;  // reused by generic submit
+
+  // ── Logical → physical rectangle transform ─────────────────────────
+  void to_physical_rect_(int lx, int ly, int lw, int lh, int& px, int& py, int& pw, int& ph) const {
+    if (rotation_ == Rotation::Deg0) {
+      px = lx;
+      py = ly;
+      pw = lw;
+      ph = lh;
+    } else {
+      // Deg90: logical (x,y) → physical (y, kPhysH-1-x)
+      px = ly;
+      py = DisplayFrame::kPhysicalHeight - lx - lw;
+      pw = lh;
+      ph = lw;
+    }
+  }
 
   // ── Byte-level rectangle fill ──────────────────────────────────────
   static void fill_rect_(uint8_t* buf, int rx, int ry, int rw, int rh, bool white) {

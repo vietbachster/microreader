@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -61,11 +62,72 @@ struct DisplayFrame {
     memset(pixels, on ? 0xFF : 0x00, kPixelBytes);
   }
 
+  // Fill a horizontal span [x1, x2) on logical row y.
+  // Handles rotation automatically — efficient byte ops for Deg0,
+  // per-column ops for Deg90.
+  void fill_row(int y, int x1, int x2, bool on) {
+    if (rotation_ == Rotation::Deg0) {
+      fill_row_physical_(y, x1, x2, on);
+    } else {
+      // Deg90: logical (x, y) → physical (y, kPhysicalHeight-1-x)
+      // Logical row y, cols [x1, x2) → physical col y, rows [kPhysH-x2, kPhysH-x1)
+      fill_col_physical_(y, kPhysicalHeight - x2, kPhysicalHeight - x1, on);
+    }
+  }
+
  private:
   std::pair<int, int> to_physical(int x, int y) const {
     if (rotation_ == Rotation::Deg90)
       return {y, kPhysicalHeight - 1 - x};
     return {x, y};
+  }
+
+  // Fast horizontal span fill in physical coords.
+  void fill_row_physical_(int row, int x1, int x2, bool on) {
+    x1 = std::max(x1, 0);
+    x2 = std::min(x2, kPhysicalWidth);
+    if (x1 >= x2 || row < 0 || row >= kPhysicalHeight)
+      return;
+    const int bx1 = x1 / 8;
+    const int bx2 = (x2 - 1) / 8;
+    const auto lmask = static_cast<uint8_t>(0xFF >> (x1 & 7));
+    const auto rmask = static_cast<uint8_t>(0xFF << (7 - ((x2 - 1) & 7)));
+    uint8_t* rp = pixels + row * kStride;
+    if (bx1 == bx2) {
+      const auto m = static_cast<uint8_t>(lmask & rmask);
+      if (on)
+        rp[bx1] |= m;
+      else
+        rp[bx1] &= static_cast<uint8_t>(~m);
+    } else {
+      if (on)
+        rp[bx1] |= lmask;
+      else
+        rp[bx1] &= static_cast<uint8_t>(~lmask);
+      if (bx2 > bx1 + 1)
+        memset(rp + bx1 + 1, on ? 0xFF : 0x00, bx2 - bx1 - 1);
+      if (on)
+        rp[bx2] |= rmask;
+      else
+        rp[bx2] &= static_cast<uint8_t>(~rmask);
+    }
+  }
+
+  // Vertical column fill in physical coords: set bits at column `col` for rows [y1, y2).
+  void fill_col_physical_(int col, int y1, int y2, bool on) {
+    if (col < 0 || col >= kPhysicalWidth)
+      return;
+    y1 = std::max(y1, 0);
+    y2 = std::min(y2, kPhysicalHeight);
+    const int byte_idx = col / 8;
+    const uint8_t mask = static_cast<uint8_t>(0x80u >> (col & 7));
+    for (int row = y1; row < y2; ++row) {
+      uint8_t* p = pixels + row * kStride + byte_idx;
+      if (on)
+        *p |= mask;
+      else
+        *p &= static_cast<uint8_t>(~mask);
+    }
   }
 };
 

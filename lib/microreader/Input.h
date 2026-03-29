@@ -7,13 +7,8 @@ namespace microreader {
 enum class Button : uint8_t { Button0 = 0, Button1 = 1, Button2 = 2, Button3 = 3, Up = 4, Down = 5, Power = 6 };
 
 struct ButtonState {
-  uint8_t current = 0;
-  uint8_t previous = 0;
-
-  void update(uint8_t current_mask) {
-    previous = current;
-    current = current_mask;
-  }
+  uint8_t current = 0;        // Instantaneous state at last sample
+  uint8_t pressed_latch = 0;  // Accumulated rising edges since last poll
 
   bool is_down(Button button) const {
     const uint8_t mask = static_cast<uint8_t>(1u << static_cast<uint8_t>(button));
@@ -22,7 +17,7 @@ struct ButtonState {
 
   bool is_pressed(Button button) const {
     const uint8_t mask = static_cast<uint8_t>(1u << static_cast<uint8_t>(button));
-    return (current & mask) != 0 && (previous & mask) == 0;
+    return (pressed_latch & mask) != 0;
   }
 };
 

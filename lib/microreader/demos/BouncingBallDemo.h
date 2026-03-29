@@ -3,19 +3,25 @@
 #include <array>
 #include <cstdlib>
 
-#include "Canvas.h"
-#include "Display.h"
-#include "DisplayQueue.h"
-#include "Input.h"
+#include "../Canvas.h"
+#include "../Display.h"
+#include "../DisplayQueue.h"
+#include "../Input.h"
+#include "IScreen.h"
 
 namespace microreader {
 
-class Demo {
+class BouncingBallDemo final : public IScreen {
  public:
-  Demo() = default;
+  BouncingBallDemo() = default;
 
-  void start(Canvas& canvas, DisplayQueue& queue);
-  void update(const ButtonState& buttons, Canvas& canvas, DisplayQueue& queue);
+  const char* name() const override {
+    return "Bouncing Ball";
+  }
+
+  void start(Canvas& canvas, DisplayQueue& queue) override;
+  void stop() override;
+  bool update(const ButtonState& buttons, Canvas& canvas, DisplayQueue& queue, IRuntime& runtime) override;
 
  private:
   // Bouncing ball.
@@ -30,7 +36,7 @@ class Demo {
   static constexpr int kNumRects = 10;
   struct RandRect {
     CanvasRect rect;
-    int countdown = 1;  // ticks until next move (1 = move on first update)
+    int countdown = 1;
     int w, h;
   };
   std::array<RandRect, kNumRects> rand_rects_{

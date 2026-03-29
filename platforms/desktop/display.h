@@ -13,7 +13,7 @@
 // effect that mirrors the real panel's gradual particle movement.
 class DesktopEmulatorDisplay final : public microreader::IDisplay {
  public:
-  bool show_transitions = true;  // overlay pink tint on in-flight pixels
+  bool show_transitions = false;  // overlay pink tint on in-flight pixels
 
   // Point at DisplayQueue::phases so the sim step size stays in sync.
   void set_phases_source(const int* src) {
@@ -58,6 +58,14 @@ class DesktopEmulatorDisplay final : public microreader::IDisplay {
   std::vector<bool> transitioning_;  // true while ground_truth != target
   const int* phases_ = nullptr;
 
+  // E-ink palette: RGB endpoints for black (s=0) and white (s=1).
+  // Settled pixels.
+  static constexpr uint8_t kBlackR = 0x18, kBlackG = 0x1A, kBlackB = 0x1C;
+  static constexpr uint8_t kWhiteR = 0xE8, kWhiteG = 0xDC, kWhiteB = 0xC8;
+  // Transitioning pixel tint.
+  static constexpr uint8_t kTintBlackR = 0xE8, kTintBlackG = 0x40, kTintBlackB = 0x80;
+  static constexpr uint8_t kTintWhiteR = 0xFF, kTintWhiteG = 0xA0, kTintWhiteB = 0xC0;
+
   int phases() const {
     return phases_ ? *phases_ : 1;
   }
@@ -96,15 +104,13 @@ class DesktopEmulatorDisplay final : public microreader::IDisplay {
         const float s = sim_[y * microreader::DisplayFrame::kPhysicalWidth + x];
         const bool t = show_transitions && transitioning_[y * microreader::DisplayFrame::kPhysicalWidth + x];
         if (t) {
-          // Tint transitioning pixels pink.
-          row[x * 3 + 0] = static_cast<uint8_t>(0xE8 + s * (0xFF - 0xE8));
-          row[x * 3 + 1] = static_cast<uint8_t>(0x40 + s * (0xA0 - 0x40));
-          row[x * 3 + 2] = static_cast<uint8_t>(0x80 + s * (0xC0 - 0x80));
+          row[x * 3 + 0] = static_cast<uint8_t>(kTintBlackR + s * (kTintWhiteR - kTintBlackR));
+          row[x * 3 + 1] = static_cast<uint8_t>(kTintBlackG + s * (kTintWhiteG - kTintBlackG));
+          row[x * 3 + 2] = static_cast<uint8_t>(kTintBlackB + s * (kTintWhiteB - kTintBlackB));
         } else {
-          // Settled: e-ink grey palette.
-          row[x * 3 + 0] = static_cast<uint8_t>(0x18 + s * (0xE8 - 0x18));
-          row[x * 3 + 1] = static_cast<uint8_t>(0x1A + s * (0xDC - 0x1A));
-          row[x * 3 + 2] = static_cast<uint8_t>(0x1C + s * (0xC8 - 0x1C));
+          row[x * 3 + 0] = static_cast<uint8_t>(kBlackR + s * (kWhiteR - kBlackR));
+          row[x * 3 + 1] = static_cast<uint8_t>(kBlackG + s * (kWhiteG - kBlackG));
+          row[x * 3 + 2] = static_cast<uint8_t>(kBlackB + s * (kWhiteB - kBlackB));
         }
       }
     }

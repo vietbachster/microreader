@@ -1,0 +1,133 @@
+#include "MenuDemo.h"
+
+#include <algorithm>
+#include <cstring>
+
+#ifdef ESP_PLATFORM
+#include "esp_ota_ops.h"
+#include "esp_system.h"
+#endif
+
+namespace microreader {
+
+void MenuDemo::build_items_(DisplayQueue& queue) {
+  count_ = 0;
+  // Demo screens.
+  IScreen* screens[] = {&bouncing_ball_, &text_showcase_, &pattern_};
+  for (auto* s : screens) {
+    if (count_ < kMaxItems)
+      items_[count_++] = {s->name(), s, nullptr};
+  }
+  // Built-in actions.
+  if (count_ < kMaxItems)
+    items_[count_++] = {"Rotate Screen", nullptr, rotate_action_};
+  if (count_ < kMaxItems) {
+    update_phases_label_(queue.phases);
+    items_[count_++] = {phases_label_, nullptr, phases_action_};
+  }
+#ifdef ESP_PLATFORM
+  if (count_ < kMaxItems)
+    items_[count_++] = {"Switch OTA", nullptr, ota_action_};
+#endif
+}
+
+void MenuDemo::update_phases_label_(int phases) {
+  char* p = phases_label_;
+  const char* prefix = "Phases: ";
+  while (*prefix)
+    *p++ = *prefix++;
+  if (phases >= 10)
+    *p++ = '0' + (phases / 10);
+  *p++ = '0' + (phases % 10);
+  *p = '\0';
+}
+
+void MenuDemo::rotate_action_(MenuDemo& /*self*/, DisplayQueue& queue) {
+  Rotation next = queue.rotation() == Rotation::Deg0 ? Rotation::Deg90 : Rotation::Deg0;
+  queue.set_rotation(next);
+}
+
+void MenuDemo::phases_action_(MenuDemo& self, DisplayQueue& queue) {
+  int next = queue.phases + 1;
+  if (next > kMaxPhases)
+    next = kMinPhases;
+  queue.phases = next;
+  self.update_phases_label_(next);
+}
+
+#ifdef ESP_PLATFORM
+void MenuDemo::ota_action_(MenuDemo& /*self*/, DisplayQueue& /*queue*/) {
+  auto running = esp_ota_get_running_partition();
+  auto next = esp_ota_get_next_update_partition(running);
+  esp_ota_set_boot_partition(next);
+  esp_restart();
+}
+#endif
+
+void MenuDemo::start(Canvas& canvas, DisplayQueue& queue) {
+  chosen_ = nullptr;
+  build_items_(queue);
+
+  const int W = queue.width();
+  const int H = queue.height();
+  const int total_h = kLineHeight * count_;
+  const int items_y = (H - total_h) / 2;
+  const int title_x = (W - title_.text_width()) / 2;
+
+  queue.submit(0, 0, W, H, /*white=*/true);
+
+  title_.set_position(title_x, items_y - kLineHeight);
+  canvas.add(&title_);
+
+  for (int i = 0; i < count_; ++i) {
+    const int label_len = static_cast<int>(std::strlen(items_[i].label));
+    const int lx = (W - label_len * kGlyphW) / 2;
+    labels_[i] = CanvasText(lx, items_y + i * kLineHeight, items_[i].label, /*white=*/false, kScale);
+    canvas.add(&labels_[i]);
+  }
+
+  update_cursor_(items_y, canvas, queue);
+  canvas.commit(queue);
+}
+
+void MenuDemo::stop() {}
+
+bool MenuDemo::update(const ButtonState& buttons, Canvas& canvas, DisplayQueue& queue, IRuntime& /*runtime*/) {
+  if (buttons.is_pressed(Button::Button3)) {
+    selected_ = selected_ > 0 ? selected_ - 1 : count_ - 1;
+    update_cursor(canvas, queue);
+  }
+  if (buttons.is_pressed(Button::Button2)) {
+    selected_ = selected_ < count_ - 1 ? selected_ + 1 : 0;
+    update_cursor(canvas, queue);
+  }
+  if (buttons.is_pressed(Button::Button1) && selected_ < count_) {
+    const auto& item = items_[selected_];
+    if (item.action) {
+      item.action(*this, queue);
+      // Re-layout after the action (e.g. rotation may change dimensions).
+      stop();
+      canvas.clear();
+      start(canvas, queue);
+    } else {
+      chosen_ = item.target_screen;
+      return false;
+    }
+  }
+  return true;
+}
+
+void MenuDemo::update_cursor(Canvas& canvas, DisplayQueue& queue) {
+  const int H = queue.height();
+  const int total_h = kLineHeight * count_;
+  const int items_y = (H - total_h) / 2;
+  update_cursor_(items_y, canvas, queue);
+}
+
+void MenuDemo::update_cursor_(int /*items_y*/, Canvas& canvas, DisplayQueue& queue) {
+  for (int i = 0; i < count_; ++i)
+    labels_[i].set_color(i != selected_);
+  canvas.commit(queue);
+}
+
+}  // namespace microreader

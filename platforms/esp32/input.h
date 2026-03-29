@@ -22,6 +22,9 @@
 //   index 1 → Down (Vol-), threshold ≈ 3
 //
 // GPIO 3: Power button, digital active-LOW with internal pull-up
+//
+// Buttons are sampled every 5ms by an esp_timer callback. Rising edges
+// are latched so that brief presses between frame polls are never lost.
 
 class Esp32InputSource final : public microreader::IInputSource {
  public:
@@ -45,9 +48,56 @@ class Esp32InputSource final : public microreader::IInputSource {
     ch_cfg.bitwidth = ADC_BITWIDTH_DEFAULT;
     adc_oneshot_config_channel(adc_handle_, ADC_CHANNEL_1, &ch_cfg);  // GPIO1
     adc_oneshot_config_channel(adc_handle_, ADC_CHANNEL_2, &ch_cfg);  // GPIO2
+
+    // Start periodic timer for continuous button sampling
+    esp_timer_create_args_t timer_args{};
+    timer_args.callback = sample_timer_cb;
+    timer_args.arg = this;
+    timer_args.dispatch_method = ESP_TIMER_TASK;
+    esp_timer_create(&timer_args, &sample_timer_);
+    esp_timer_start_periodic(sample_timer_, kSampleIntervalUs);
   }
 
+  // Returns accumulated button state since last poll, then clears the latch.
   microreader::ButtonState poll_buttons() override {
+    microreader::ButtonState result;
+    portENTER_CRITICAL(&lock_);
+    result.current = debounced_;
+    result.pressed_latch = pressed_latch_;
+    pressed_latch_ = 0;
+    portEXIT_CRITICAL(&lock_);
+    return result;
+  }
+
+ private:
+  static constexpr gpio_num_t kPowerPin = GPIO_NUM_3;
+  static constexpr int kAdcTol = 400;     // ±tolerance for threshold match
+  static constexpr int kAdcNoBtn = 3800;  // ADC value when no key pressed
+  static constexpr uint8_t kNumButtons = 7;
+  static constexpr uint32_t kDebounceMs = 5;
+  static constexpr uint64_t kSampleIntervalUs = 5000;  // 5 ms
+
+  static constexpr int kThresh1[4] = {3470, 2655, 1470, 3};  // Button0–3
+  static constexpr int kThresh2[2] = {2205, 3};              // Up, Down
+
+  adc_oneshot_unit_handle_t adc_handle_ = nullptr;
+  esp_timer_handle_t sample_timer_ = nullptr;
+  portMUX_TYPE lock_ = portMUX_INITIALIZER_UNLOCKED;
+
+  // Debounce state — only modified by the timer callback
+  uint8_t debounced_ = 0;
+  uint8_t prev_debounced_ = 0;
+  bool last_raw_[kNumButtons] = {};
+  uint32_t debounce_time_[kNumButtons] = {};
+
+  // Latch — shared between timer callback (write) and poll_buttons (read+clear)
+  uint8_t pressed_latch_ = 0;
+
+  static void sample_timer_cb(void* arg) {
+    static_cast<Esp32InputSource*>(arg)->sample();
+  }
+
+  void sample() {
     const uint32_t now = static_cast<uint32_t>(esp_timer_get_time() / 1000);
     const uint8_t raw = read_raw();
 
@@ -70,25 +120,13 @@ class Esp32InputSource final : public microreader::IInputSource {
       }
     }
 
-    state_.update(debounced_);
-    return state_;
+    // Latch rising edges (critical section shared with poll_buttons)
+    portENTER_CRITICAL(&lock_);
+    uint8_t rising = debounced_ & ~prev_debounced_;
+    pressed_latch_ |= rising;
+    prev_debounced_ = debounced_;
+    portEXIT_CRITICAL(&lock_);
   }
-
- private:
-  static constexpr gpio_num_t kPowerPin = GPIO_NUM_3;
-  static constexpr int kAdcTol = 400;     // ±tolerance for threshold match
-  static constexpr int kAdcNoBtn = 3800;  // ADC value when no key pressed
-  static constexpr uint8_t kNumButtons = 7;
-  static constexpr uint32_t kDebounceMs = 5;
-
-  static constexpr int kThresh1[4] = {3470, 2655, 1470, 3};  // Button0–3
-  static constexpr int kThresh2[2] = {2205, 3};              // Up, Down
-
-  adc_oneshot_unit_handle_t adc_handle_ = nullptr;
-  microreader::ButtonState state_{};
-  uint8_t debounced_ = 0;
-  bool last_raw_[kNumButtons] = {};
-  uint32_t debounce_time_[kNumButtons] = {};
 
   uint8_t read_raw() const {
     uint8_t state = 0;

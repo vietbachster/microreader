@@ -3,13 +3,14 @@
 #include <cstdint>
 
 #include "Canvas.h"
-#include "Demo.h"
 #include "Display.h"
 #include "DisplayQueue.h"
 #include "Input.h"
 #include "Log.h"
-#include "LutCalibration.h"
 #include "Runtime.h"
+#include "ScreenManager.h"
+#include "demos/IScreen.h"
+#include "demos/MenuDemo.h"
 
 namespace microreader {
 
@@ -19,7 +20,6 @@ class Application {
 
   const char* build_info() const;
   void start(ILogger& logger, DisplayQueue& queue);
-  // Update app logic and submit any display commands to the controller.
   void update(const ButtonState& buttons, uint32_t dt_ms, DisplayQueue& queue, ILogger& logger, IRuntime& runtime);
   bool running() const;
   uint64_t tick_count() const;
@@ -27,17 +27,14 @@ class Application {
 
  private:
   ButtonState buttons_{};
-  Rotation rotation_ = Rotation::Deg0;
   uint64_t ticks_ = 0;
   uint32_t uptime_ms_ = 0;
-  bool dirty_ = true;
   bool started_ = false;
   bool running_ = true;
 
-  Canvas canvas_;  // scene manager — composites all elements
-  Demo demo_;
-  LutCalibration lut_calibration_;
-  CanvasText sleep_label_;
+  Canvas canvas_;
+  ScreenManager screen_mgr_;
+  MenuDemo menu_;
 };
 
 }  // namespace microreader

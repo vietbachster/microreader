@@ -96,6 +96,16 @@ class Canvas {
       elements_.erase(it);
   }
 
+  // Remove all elements without submitting any draw commands.
+  // Resets each element so it will be treated as new if re-added.
+  void clear() {
+    for (auto* elem : elements_) {
+      elem->dirty_ = true;
+      elem->committed_valid_ = false;
+    }
+    elements_.clear();
+  }
+
   // Commit all dirty elements.  For each dirty element:
   //   1. Compute damage rect = union of old bbox and new bbox.
   //   2. Erase the damage rect with white.
@@ -278,7 +288,7 @@ class CanvasCircle : public CanvasElement {
     const int r = radius_;
     const int ccx = cx_, ccy = cy_;
     const bool w = white_;
-    queue.submit(ccx - r, ccy - r, 2 * r + 1, 2 * r + 1, [=](uint8_t* buf) {
+    queue.submit(ccx - r, ccy - r, 2 * r + 1, 2 * r + 1, [=](DisplayFrame& frame) {
       const int r2 = r * r;
       int dx = r;
       for (int dy = 0; dy <= r; ++dy) {
@@ -286,9 +296,9 @@ class CanvasCircle : public CanvasElement {
           --dx;
         if (dx < 0)
           break;
-        DisplayQueue::fill_row(buf, ccy + dy, ccx - dx, ccx + dx + 1, w);
+        frame.fill_row(ccy + dy, ccx - dx, ccx + dx + 1, w);
         if (dy != 0)
-          DisplayQueue::fill_row(buf, ccy - dy, ccx - dx, ccx + dx + 1, w);
+          frame.fill_row(ccy - dy, ccx - dx, ccx + dx + 1, w);
       }
     });
   }
@@ -312,7 +322,8 @@ class CanvasText : public CanvasElement {
   static constexpr int kGlyphH = 8;
 
   CanvasText() = default;
-  CanvasText(int x, int y, const char* text, bool white = false) : x_(x), y_(y), white_(white) {
+  CanvasText(int x, int y, const char* text, bool white = false, int scale = 1)
+      : x_(x), y_(y), white_(white), scale_(scale < 1 ? 1 : scale) {
     set_text(text);
   }
 
@@ -346,6 +357,14 @@ class CanvasText : public CanvasElement {
     mark_dirty();
   }
 
+  void set_scale(int s) {
+    s = s < 1 ? 1 : s;
+    if (s == scale_)
+      return;
+    scale_ = s;
+    mark_dirty();
+  }
+
   int x() const {
     return x_;
   }
@@ -355,34 +374,43 @@ class CanvasText : public CanvasElement {
   const char* text() const {
     return text_;
   }
+  int scale() const {
+    return scale_;
+  }
+  int text_width() const {
+    return static_cast<int>(len_) * kGlyphW * scale_;
+  }
+  int text_height() const {
+    return (len_ > 0) ? kGlyphH * scale_ : 0;
+  }
 
  protected:
   void draw_content(DisplayQueue& queue) const override {
     if (len_ == 0)
       return;
-    const int tw = static_cast<int>(len_) * kGlyphW;
+    const int s = scale_;
+    const int tw = static_cast<int>(len_) * kGlyphW * s;
+    const int th = kGlyphH * s;
     const int px = x_, py = y_;
     const bool w = white_;
     const size_t n = len_;
-    // Copy text into lambda capture (small buffer).
     char buf[kMaxLen + 1];
     std::memcpy(buf, text_, n + 1);
-    queue.submit(px, py, tw, kGlyphH, [=](uint8_t* frame) {
+    queue.submit(px, py, tw, th, [=](DisplayFrame& frame) {
       // Fill background (opposite of text color).
-      for (int row = 0; row < kGlyphH; ++row)
-        DisplayQueue::fill_row(frame, py + row, px, px + tw, w);
+      for (int row = 0; row < th; ++row)
+        frame.fill_row(py + row, px, px + tw, w);
       // Draw glyphs on top.
       for (size_t i = 0; i < n; ++i) {
         const int idx = static_cast<unsigned char>(buf[i]) - 0x20;
         if (idx < 0 || idx >= 95)
           continue;
         const auto& glyph = detail::kFont8x8[idx];
-        const int gx = px + static_cast<int>(i) * kGlyphW;
-        for (int row = 0; row < kGlyphH; ++row) {
-          const uint8_t bits = glyph[row];
+        const int gx = px + static_cast<int>(i) * kGlyphW * s;
+        for (int grow = 0; grow < kGlyphH; ++grow) {
+          const uint8_t bits = glyph[grow];
           if (bits == 0)
             continue;
-          // Walk set-bit runs to minimise fill_row calls.
           int col = 0;
           while (col < kGlyphW) {
             if (!(bits & (0x80u >> col))) {
@@ -392,7 +420,8 @@ class CanvasText : public CanvasElement {
             const int start = col;
             while (col < kGlyphW && (bits & (0x80u >> col)))
               ++col;
-            DisplayQueue::fill_row(frame, py + row, gx + start, gx + col, !w);
+            for (int sr = 0; sr < s; ++sr)
+              frame.fill_row(py + grow * s + sr, gx + start * s, gx + col * s, !w);
           }
         }
       }
@@ -402,16 +431,17 @@ class CanvasText : public CanvasElement {
   void current_bounds(int& x, int& y, int& w, int& h) const override {
     x = x_;
     y = y_;
-    w = static_cast<int>(len_) * kGlyphW;
-    h = (len_ > 0) ? kGlyphH : 0;
+    w = static_cast<int>(len_) * kGlyphW * scale_;
+    h = (len_ > 0) ? kGlyphH * scale_ : 0;
   }
 
  private:
   static constexpr size_t kMaxLen = 128;
   int x_ = 0, y_ = 0;
+  bool white_ = false;
+  int scale_ = 1;
   size_t len_ = 0;
   char text_[kMaxLen + 1] = {};
-  bool white_ = false;
 };
 
 }  // namespace microreader
