@@ -108,7 +108,11 @@ void MenuDemo::ota_action_(MenuDemo& /*self*/, DisplayQueue& /*queue*/) {
   esp_ota_set_boot_partition(next);
   esp_restart();
 }
+
+}  // namespace microreader
 #endif
+
+namespace microreader {
 
 void MenuDemo::start(Canvas& canvas, DisplayQueue& queue) {
   chosen_ = nullptr;

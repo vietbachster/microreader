@@ -34,7 +34,8 @@ class DesktopEmulatorDisplay final : public microreader::IDisplay {
   }
 
   // Called each loop tick. Steps sim toward target, then renders.
-  void tick(const uint8_t* ground_truth, bool /*gt_dirty*/, const uint8_t* target, bool /*target_dirty*/) override {
+  void tick(const uint8_t* ground_truth, bool /*gt_dirty*/, const uint8_t* target, bool /*target_dirty*/,
+            bool /*refresh*/ = true) override {
     step_and_render(ground_truth, target);
   }
 

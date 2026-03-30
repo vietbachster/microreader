@@ -142,7 +142,9 @@ class IDisplay {
   // Called each tick while commands are in flight.
   // ground_truth = settled pixel state; target = where pixels are heading.
   // Dirty flags indicate which buffers changed since the last call.
-  virtual void tick(const uint8_t* ground_truth, bool gt_dirty, const uint8_t* target, bool target_dirty) = 0;
+  // refresh: if false, upload data but skip the display refresh cycle.
+  virtual void tick(const uint8_t* ground_truth, bool gt_dirty, const uint8_t* target, bool target_dirty,
+                    bool refresh = true) = 0;
 
   // Full physical refresh.  `pixels` is the settled (ground_truth == target) state.
   virtual void full_refresh(const uint8_t* pixels, RefreshMode mode) = 0;
