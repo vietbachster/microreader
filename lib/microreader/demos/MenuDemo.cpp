@@ -25,7 +25,15 @@ void MenuDemo::build_items_(DisplayQueue& queue) {
     update_phases_label_(queue.phases);
     items_[count_++] = {phases_label_, nullptr, phases_action_};
   }
+  if (count_ < kMaxItems) {
+    update_settle_label_(queue.settle_enabled);
+    items_[count_++] = {settle_label_, nullptr, settle_action_};
+  }
 #ifdef ESP_PLATFORM
+  if (count_ < kMaxItems) {
+    update_lut_target_label_();
+    items_[count_++] = {lut_target_label_, nullptr, lut_target_action_};
+  }
   if (count_ < kMaxItems)
     items_[count_++] = {"Switch OTA", nullptr, ota_action_};
 #endif
@@ -42,6 +50,17 @@ void MenuDemo::update_phases_label_(int phases) {
   *p = '\0';
 }
 
+void MenuDemo::update_settle_label_(bool enabled) {
+  char* p = settle_label_;
+  const char* prefix = "Settle: ";
+  while (*prefix)
+    *p++ = *prefix++;
+  const char* val = enabled ? "On" : "Off";
+  while (*val)
+    *p++ = *val++;
+  *p = '\0';
+}
+
 void MenuDemo::rotate_action_(MenuDemo& /*self*/, DisplayQueue& queue) {
   Rotation next = queue.rotation() == Rotation::Deg0 ? Rotation::Deg90 : Rotation::Deg0;
   queue.set_rotation(next);
@@ -55,7 +74,34 @@ void MenuDemo::phases_action_(MenuDemo& self, DisplayQueue& queue) {
   self.update_phases_label_(next);
 }
 
+void MenuDemo::settle_action_(MenuDemo& self, DisplayQueue& queue) {
+  queue.settle_enabled = !queue.settle_enabled;
+  self.update_settle_label_(queue.settle_enabled);
+}
+
+}  // namespace microreader
+
 #ifdef ESP_PLATFORM
+extern bool g_lut_target_settle;
+
+namespace microreader {
+
+void MenuDemo::update_lut_target_label_() {
+  char* p = lut_target_label_;
+  const char* prefix = "LUT Target: ";
+  while (*prefix)
+    *p++ = *prefix++;
+  const char* val = g_lut_target_settle ? "Settle" : "Fast";
+  while (*val)
+    *p++ = *val++;
+  *p = '\0';
+}
+
+void MenuDemo::lut_target_action_(MenuDemo& self, DisplayQueue& /*queue*/) {
+  g_lut_target_settle = !g_lut_target_settle;
+  self.update_lut_target_label_();
+}
+
 void MenuDemo::ota_action_(MenuDemo& /*self*/, DisplayQueue& /*queue*/) {
   auto running = esp_ota_get_running_partition();
   auto next = esp_ota_get_next_update_partition(running);

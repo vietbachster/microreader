@@ -20,6 +20,10 @@ static void verify_ota() {
   }
 }
 
+// Toggled by the menu; controls whether the serial LUT editor
+// overrides the fast (active) LUT or the settle LUT.
+bool g_lut_target_settle = false;
+
 extern "C" void app_main(void) {
   verify_ota();
 
@@ -46,8 +50,12 @@ extern "C" void app_main(void) {
   input.clear_button(microreader::Button::Power);
 
   while (runtime.should_continue() && app.running()) {
-    if (serial_lut_take(lut_buf))
-      epd.setCustomLUT(lut_buf);
+    if (serial_lut_take(lut_buf)) {
+      if (g_lut_target_settle)
+        epd.setCustomSettleLUT(lut_buf);
+      else
+        epd.setCustomLUT(lut_buf);
+    }
 
     microreader::run_loop_iteration(app, queue, input, runtime, logger);
   }

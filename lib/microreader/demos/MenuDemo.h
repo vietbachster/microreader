@@ -64,17 +64,27 @@ class MenuDemo final : public IScreen {
 
   // Mutable label for the phases action.
   char phases_label_[16] = {};
+  // Mutable label for the settle toggle.
+  char settle_label_[16] = {};
+  // Mutable label for the LUT target toggle.
+  char lut_target_label_[24] = {};
 
   CanvasText title_{0, 0, "Select Demo:", true, kScale};
   std::array<CanvasText, kMaxItems> labels_;
 
   void build_items_(DisplayQueue& queue);
   void update_phases_label_(int phases);
+  void update_settle_label_(bool enabled);
+#ifdef ESP_PLATFORM
+  void update_lut_target_label_();
+#endif
 
   static void rotate_action_(MenuDemo& self, DisplayQueue& queue);
   static void phases_action_(MenuDemo& self, DisplayQueue& queue);
+  static void settle_action_(MenuDemo& self, DisplayQueue& queue);
 #ifdef ESP_PLATFORM
   static void ota_action_(MenuDemo& self, DisplayQueue& queue);
+  static void lut_target_action_(MenuDemo& self, DisplayQueue& queue);
 #endif
 
   void update_cursor(Canvas& canvas, DisplayQueue& queue);

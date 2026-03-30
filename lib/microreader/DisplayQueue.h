@@ -42,7 +42,8 @@ struct UpdateCommand {
 // their bounding-box pixels not covered by active commands.
 class DisplayQueue {
  public:
-  int phases = 6;
+  int phases = 4;
+  bool settle_enabled = false;
 
   explicit DisplayQueue(IDisplay& display) : display_(display), next_ts_(0) {
     memset(ground_truth_, 0xFF, DisplayFrame::kPixelBytes);
@@ -152,7 +153,8 @@ class DisplayQueue {
     // Settle refresh fires once, the tick after all commands finish.
     if (needs_settle_ && commands_.empty()) {
       needs_settle_ = false;
-      display_.settle_refresh(target_);
+      if (settle_enabled)
+        display_.settle_refresh(target_);
       if (!force)
         return;
     }
@@ -178,7 +180,7 @@ class DisplayQueue {
     }
 
     // Queue just went idle — request settle on the next tick.
-    if (commands_.empty())
+    if (commands_.empty() && settle_enabled)
       needs_settle_ = true;
 
     display_.tick(ground_truth_, ground_truth_dirty_, target_, target_dirty_);
@@ -212,7 +214,7 @@ class DisplayQueue {
   // to RED RAM and target (new image) to BW RAM for a fast differential refresh.
   void partial_refresh() {
     flush();
-    needs_settle_ = true;
+    needs_settle_ = settle_enabled;
     display_.partial_refresh(ground_truth_, target_);
     memcpy(ground_truth_, target_, DisplayFrame::kPixelBytes);
     ground_truth_dirty_ = false;
