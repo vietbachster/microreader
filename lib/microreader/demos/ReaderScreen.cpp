@@ -94,7 +94,7 @@ show_error:
     const int px = kPadding, py = kPadding;
     for (int i = 0; i < n; ++i) {
       const int idx = static_cast<unsigned char>(msg[i]) - 0x20;
-      if (idx < 0 || idx >= 95)
+      if (idx < 0 || idx >= detail::kAsciiGlyphCount)
         continue;
       const auto& glyph = detail::kFont8x8[idx];
       const int gx = px + i * kGlyphW * kScale;
@@ -170,6 +170,7 @@ void ReaderScreen::render_page_(DisplayQueue& queue) {
   // glyph_width=16 (8*2), line_height=20 (8*2 + 4 leading).
   FixedFont font(kGlyphW * kScale, kGlyphH * kScale + 4);
   PageOptions opts(static_cast<uint16_t>(W), static_cast<uint16_t>(H), kPadding, kParaSpacing, Alignment::Start);
+  opts.padding_top = kPaddingTop;
   page_ = layout_page(font, opts, *chapter_src_, page_pos_);
 
   // Build a local copy of the text items for the paint lambda.
@@ -186,7 +187,7 @@ void ReaderScreen::render_page_(DisplayQueue& queue) {
     for (const auto& w : item.line.words) {
       DrawWord dw;
       dw.x = kPadding + w.x;
-      dw.y = item.y_offset + page_.vertical_offset;
+      dw.y = kPaddingTop + item.y_offset + page_.vertical_offset;
       dw.len = static_cast<int>(w.len);
       if (dw.len > 63)
         dw.len = 63;
@@ -203,52 +204,71 @@ void ReaderScreen::render_page_(DisplayQueue& queue) {
   };
   std::vector<DrawHr> hrs;
   for (const auto& hr : page_.hr_items) {
-    hrs.push_back({static_cast<int>(hr.x_offset), static_cast<int>(hr.y_offset + page_.vertical_offset),
+    hrs.push_back({static_cast<int>(hr.x_offset), static_cast<int>(kPaddingTop + hr.y_offset + page_.vertical_offset),
                    static_cast<int>(hr.width)});
   }
 
-  const int scale = kScale;
-  queue.submit(0, 0, W, H, [words = std::move(words), hrs = std::move(hrs), W, H, scale](DisplayFrame& frame) {
-    // White background.
-    for (int row = 0; row < H; ++row)
-      frame.fill_row(row, 0, W, true);
+  // Draw images as black boxes.
+  struct DrawImg {
+    int x, y, w, h;
+  };
+  std::vector<DrawImg> imgs;
+  for (const auto& img : page_.image_items) {
+    imgs.push_back({static_cast<int>(img.x_offset),
+                    static_cast<int>(kPaddingTop + img.y_offset + page_.vertical_offset), static_cast<int>(img.width),
+                    static_cast<int>(img.height)});
+  }
 
-    // Draw each word's glyphs at 2× scale (UTF-8 aware).
-    for (const auto& dw : words) {
-      const char* p = dw.text;
-      const char* end = dw.text + dw.len;
-      int ci = 0;
-      while (p < end && *p) {
-        const int idx = next_glyph_index(p);
-        const auto& glyph = detail::kFont8x8[idx];
-        const int gx = dw.x + ci * dw.glyph_advance;
-        const int gy = dw.y;
-        for (int grow = 0; grow < 8; ++grow) {
-          const uint8_t bits = glyph[grow];
-          if (bits == 0)
-            continue;
-          int col = 0;
-          while (col < 8) {
-            if (!(bits & (0x80u >> col))) {
-              ++col;
-              continue;
+  const int scale = kScale;
+  queue.submit(
+      0, 0, W, H,
+      [words = std::move(words), hrs = std::move(hrs), imgs = std::move(imgs), W, H, scale](DisplayFrame& frame) {
+        // White background.
+        for (int row = 0; row < H; ++row)
+          frame.fill_row(row, 0, W, true);
+
+        // Draw each word's glyphs at 2× scale (UTF-8 aware).
+        for (const auto& dw : words) {
+          const char* p = dw.text;
+          const char* end = dw.text + dw.len;
+          int ci = 0;
+          while (p < end && *p) {
+            const int idx = next_glyph_index(p);
+            const auto& glyph = detail::kFont8x8[idx];
+            const int gx = dw.x + ci * dw.glyph_advance;
+            const int gy = dw.y;
+            for (int grow = 0; grow < 8; ++grow) {
+              const uint8_t bits = glyph[grow];
+              if (bits == 0)
+                continue;
+              int col = 0;
+              while (col < 8) {
+                if (!(bits & (0x80u >> col))) {
+                  ++col;
+                  continue;
+                }
+                const int start = col;
+                while (col < 8 && (bits & (0x80u >> col)))
+                  ++col;
+                for (int sr = 0; sr < scale; ++sr)
+                  frame.fill_row(gy + grow * scale + sr, gx + start * scale, gx + col * scale, false);
+              }
             }
-            const int start = col;
-            while (col < 8 && (bits & (0x80u >> col)))
-              ++col;
-            for (int sr = 0; sr < scale; ++sr)
-              frame.fill_row(gy + grow * scale + sr, gx + start * scale, gx + col * scale, false);
+            ++ci;
           }
         }
-        ++ci;
-      }
-    }
 
-    // Draw HRs.
-    for (const auto& hr : hrs) {
-      frame.fill_row(hr.y, hr.x, hr.x + hr.w, false);
-    }
-  });
+        // Draw HRs.
+        for (const auto& hr : hrs) {
+          frame.fill_row(hr.y, hr.x, hr.x + hr.w, false);
+        }
+
+        // Draw images as black rectangles.
+        for (const auto& img : imgs) {
+          for (int row = img.y; row < img.y + img.h && row < H; ++row)
+            frame.fill_row(row, img.x, img.x + img.w, false);
+        }
+      });
 }
 
 bool ReaderScreen::next_page_() {
@@ -274,6 +294,7 @@ bool ReaderScreen::prev_page_() {
       FixedFont font(kGlyphW * kScale, kGlyphH * kScale + 4);
       PageOptions opts(static_cast<uint16_t>(screen_w_), static_cast<uint16_t>(screen_h_), kPadding, kParaSpacing,
                        Alignment::Start);
+      opts.padding_top = kPaddingTop;
       PagePosition pos{0, 0};
       PagePosition prev_pos = pos;
       while (true) {
@@ -293,6 +314,7 @@ bool ReaderScreen::prev_page_() {
   FixedFont font(kGlyphW * kScale, kGlyphH * kScale + 4);
   PageOptions opts(static_cast<uint16_t>(screen_w_), static_cast<uint16_t>(screen_h_), kPadding, kParaSpacing,
                    Alignment::Start);
+  opts.padding_top = kPaddingTop;
   PagePosition pos{0, 0};
   PagePosition prev_pos = pos;
   while (pos < page_pos_) {

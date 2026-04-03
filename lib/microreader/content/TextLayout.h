@@ -211,12 +211,17 @@ struct PageOptions {
   uint16_t width = 300;
   uint16_t height = 400;
   uint16_t padding = 10;
+  uint16_t padding_top = 0;   // 0 = use padding; otherwise separate top padding
   uint16_t para_spacing = 8;  // extra pixels between paragraphs
   Alignment alignment = Alignment::Justify;
 
   PageOptions() = default;
   PageOptions(uint16_t w, uint16_t h, uint16_t pad = 10, uint16_t ps = 8, Alignment a = Alignment::Justify)
       : width(w), height(h), padding(pad), para_spacing(ps), alignment(a) {}
+
+  uint16_t effective_padding_top() const {
+    return padding_top > 0 ? padding_top : padding;
+  }
 };
 
 // Layout one page worth of content starting at `start`.

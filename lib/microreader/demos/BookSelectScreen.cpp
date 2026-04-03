@@ -67,7 +67,6 @@ void BookSelectScreen::scan_directory_() {
 
 void BookSelectScreen::start(Canvas& canvas, DisplayQueue& queue) {
   chosen_ = nullptr;
-  selected_ = 0;
   scan_directory_();
 
   const int W = queue.width();

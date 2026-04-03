@@ -21,7 +21,8 @@ set(lib_sources
     ${LIB}/content/Book.cpp
     ${LIB}/content/MrbWriter.cpp
     ${LIB}/content/MrbReader.cpp
-    ${LIB}/content/MrbConverter.cpp)
+    ${LIB}/content/MrbConverter.cpp
+    ${LIB}/content/ImageDecoder.cpp)
 
 # miniz: use the copy cached by the test build (FetchContent).
 # If not available, clone miniz 3.0.2 into test/build2/_deps/miniz-src first.

@@ -119,6 +119,11 @@ class XmlReader {
   // When EndOfFile is returned via the event, the stream is done.
   XmlError next_event(XmlEvent& event);
 
+  // Skip past the current element when BufferTooSmall is returned.
+  // Scans forward to find '>' then resumes normal parsing.
+  // Returns Ok if recovery succeeded, Eof if the stream is exhausted.
+  XmlError skip_element();
+
  private:
   IXmlInput* input_ = nullptr;
   uint8_t* buf_ = nullptr;

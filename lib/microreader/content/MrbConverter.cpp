@@ -38,6 +38,7 @@ void remap_paragraph_images(Paragraph& para, MrbWriter& writer, std::vector<Imag
     img.key = get_or_add_image(writer, image_map, img.key, img.width, img.height);
   }
 }
+
 }  // namespace
 
 bool convert_epub_to_mrb(Book& book, const char* output_path) {
@@ -86,7 +87,8 @@ bool convert_epub_to_mrb_streaming(Book& book, const char* output_path) {
   };
   SinkCtx ctx{&writer, &image_map, false};
 
-  // Paragraph sink: remap images and write to MRB as each paragraph arrives.
+  // Paragraph sink: remap image keys and write to MRB.
+  // Image resolution and promotion are handled by parse_chapter_streaming.
   auto sink = [](void* raw_ctx, Paragraph&& para) {
     auto& c = *static_cast<SinkCtx*>(raw_ctx);
     if (c.error)

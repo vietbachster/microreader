@@ -299,7 +299,7 @@ PageContent layout_page(const IFont& font, const PageOptions& opts, IParagraphSo
 
   const uint16_t content_width = opts.width - 2 * opts.padding;
   const uint16_t default_y_advance = font.y_advance();
-  const uint16_t page_height = opts.height - 2 * opts.padding;
+  const uint16_t page_height = opts.height - opts.effective_padding_top() - opts.padding;
 
   LayoutOptions lo;
   lo.width = content_width;

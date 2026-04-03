@@ -6,6 +6,7 @@
 #include <cstring>
 #include <memory>
 
+#ifndef MICROREADER_NO_IMAGES
 // We use stb_image for JPEG/PNG decoding on desktop.
 // On embedded (ESP32), this would be replaced with a streaming decoder.
 #define STB_IMAGE_IMPLEMENTATION
@@ -15,6 +16,7 @@
 #define STBI_NO_LINEAR
 #define STBI_NO_HDR
 #include "stb_image.h"
+#endif
 
 namespace microreader {
 
@@ -146,8 +148,10 @@ ImageError read_image_size(const uint8_t* data, size_t size, uint16_t& width, ui
 
 void scaled_size(uint16_t raw_w, uint16_t raw_h, uint16_t max_w, uint16_t max_h, uint16_t& out_w, uint16_t& out_h) {
   // 0 means no limit
-  if (max_w == 0) max_w = raw_w;
-  if (max_h == 0) max_h = raw_h;
+  if (max_w == 0)
+    max_w = raw_w;
+  if (max_h == 0)
+    max_h = raw_h;
 
   if (raw_w <= max_w && raw_h <= max_h) {
     out_w = raw_w;
@@ -172,6 +176,7 @@ void scaled_size(uint16_t raw_w, uint16_t raw_h, uint16_t max_w, uint16_t max_h,
     out_h = 1;
 }
 
+#ifndef MICROREADER_NO_IMAGES
 // ---------------------------------------------------------------------------
 // Floyd-Steinberg dithering
 // ---------------------------------------------------------------------------
@@ -274,5 +279,7 @@ ImageError decode_image(const uint8_t* data, size_t size, uint16_t max_w, uint16
 
   return ImageError::Ok;
 }
+
+#endif  // MICROREADER_NO_IMAGES
 
 }  // namespace microreader

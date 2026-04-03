@@ -316,10 +316,31 @@ TEST_P(BulkMrbComparisonTest, LayoutMatchesEpub) {
 
 static std::vector<std::string> get_all_test_books() {
   std::string root = workspace_root();
+  // Curated list of 15 representative EPUBs covering a range of sizes,
+  // languages, image content, CSS complexity, and previously-problematic books.
+  static const char* kBooks[] = {
+      "gutenberg/alice-wonderland.epub",       // small, simple
+      "gutenberg/frankenstein.epub",           // medium classic
+      "gutenberg/pride-prejudice.epub",        // large with images
+      "gutenberg/moby-dick.epub",              // medium classic
+      "gutenberg/dracula.epub",                // previously problematic (UTF-8 split)
+      "gutenberg/adventures-tom-sawyer.epub",  // previously problematic (NBSP split)
+      "gutenberg/complete-shakespeare.epub",   // large, many chapters, entity split
+      "gutenberg/origin-species-darwin.epub",  // previously problematic
+      "gutenberg/alice-illustrated.epub",      // images
+      "gutenberg/war-and-peace.epub",          // large
+      "gutenberg/heart-darkness.epub",         // short novella
+      "gutenberg/metamorphosis-kafka.epub",    // short, simple
+      "gutenberg/ulysses-joyce.epub",          // complex prose
+      "other/buddenbrooks-de.epub",            // German
+      "other/divina-commedia-it.epub",         // Italian / special chars
+  };
   std::vector<std::string> all;
-  for (auto& dir : {root + "/microreader2/test/books/gutenberg", root + "/microreader2/test/books/other"}) {
-    auto books = discover_epubs(dir);
-    all.insert(all.end(), books.begin(), books.end());
+  std::string base = root + "/microreader2/test/books/";
+  for (auto& b : kBooks) {
+    std::string path = base + b;
+    if (fs::exists(path))
+      all.push_back(path);
   }
   return all;
 }

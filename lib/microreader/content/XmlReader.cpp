@@ -233,6 +233,29 @@ void XmlReader::split_name_attrs(const char* block, size_t block_len, XmlStringV
   }
 }
 
+XmlError XmlReader::skip_element() {
+  // Called after BufferTooSmall when pos_ points at '<'.
+  // Scan forward through the buffer (and the input) until we find '>',
+  // then position just past it so the next next_event() call succeeds.
+  for (;;) {
+    size_t gt = find_byte('>');
+    if (gt != SIZE_MAX) {
+      pos_ += gt + 1;
+      return XmlError::Ok;
+    }
+    // Consume the whole view and try to read more.
+    if (remaining_ == 0) {
+      pos_ = end_;
+      return XmlError::Eof;
+    }
+    XmlError err = advance(pos_);
+    if (err != XmlError::Ok)
+      return err;
+    if (view_len() == 0)
+      return XmlError::Eof;
+  }
+}
+
 XmlError XmlReader::next_event(XmlEvent& event) {
   // Handle pending self-closing end element
   if (has_self_closing_) {

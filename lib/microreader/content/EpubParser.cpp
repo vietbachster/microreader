@@ -587,8 +587,68 @@ class BodyParser {
       return;
     }
 
+    // If previous text event ended with an incomplete multi-byte sequence
+    // (UTF-8 lead byte or partial entity like "&amp"), prepend it so the
+    // full sequence is processed as a whole.
+    std::string joined;
     const char* t = text;
     size_t tlen = len;
+    if (!pending_utf8_.empty()) {
+      joined = std::move(pending_utf8_);
+      pending_utf8_.clear();
+      joined.append(text, len);
+      t = joined.data();
+      tlen = joined.size();
+    }
+
+    // Check if this chunk ends with an incomplete UTF-8 lead byte.
+    if (tlen > 0) {
+      size_t check = (tlen >= 4) ? tlen - 4 : 0;
+      for (size_t j = tlen; j > check; --j) {
+        unsigned char uc = static_cast<unsigned char>(t[j - 1]);
+        if ((uc & 0xC0) != 0x80) {
+          size_t expected = 1;
+          if (uc >= 0xC0 && uc < 0xE0)
+            expected = 2;
+          else if (uc >= 0xE0 && uc < 0xF0)
+            expected = 3;
+          else if (uc >= 0xF0)
+            expected = 4;
+          size_t available = tlen - (j - 1);
+          if (available < expected) {
+            pending_utf8_.assign(t + j - 1, available);
+            tlen = j - 1;
+          }
+          break;
+        }
+      }
+    }
+
+    // Check if this chunk ends with a partial entity (& followed by up to
+    // 11 chars of entity name but no terminating ';').  Buffer it for the
+    // next text event so the entity decoder sees the complete token.
+    if (tlen > 0) {
+      // Scan backwards for '&' within the last 12 bytes (max entity length)
+      size_t scan_start = (tlen > 12) ? tlen - 12 : 0;
+      for (size_t j = tlen; j > scan_start; --j) {
+        if (t[j - 1] == '&') {
+          // Found '&' — check if there's a ';' after it.
+          bool has_semi = false;
+          for (size_t k = j; k < tlen; ++k) {
+            if (t[k] == ';') {
+              has_semi = true;
+              break;
+            }
+          }
+          if (!has_semi) {
+            // Partial entity — save from '&' onwards
+            pending_utf8_.assign(t + j - 1, tlen - (j - 1));
+            tlen = j - 1;
+          }
+          break;
+        }
+      }
+    }
 
     // If at start of paragraph, trim leading whitespace
     if (runs_.empty() && current_run_.empty()) {
@@ -600,13 +660,6 @@ class BodyParser {
 
     if (tlen == 0)
       return;
-
-    bool starts_whitespace = std::isspace(static_cast<unsigned char>(t[0]));
-    bool ends_whitespace = std::isspace(static_cast<unsigned char>(t[tlen - 1]));
-
-    if (!has_trailing_space_ && starts_whitespace) {
-      current_run_ += ' ';
-    }
 
     // Fused decode_entities + whitespace normalization in a single pass.
     // Writes directly into normalized_ scratch buffer to avoid allocations.
@@ -744,6 +797,14 @@ class BodyParser {
       ++i;
     }
 
+    // Determine whitespace boundaries from NORMALIZED text (not raw text),
+    // because entities like &nbsp; decode to spaces during normalization.
+    // Raw-text checks would miss entity-encoded whitespace split across
+    // text event boundaries by the streaming XML buffer.
+    bool starts_ws = !normalized_.empty() && normalized_[0] == ' ';
+    bool ends_ws = !normalized_.empty() && normalized_.back() == ' ';
+    bool at_para_start = runs_.empty() && current_run_.empty();
+
     // Trim leading/trailing spaces from normalized_
     size_t start = 0;
     while (start < normalized_.size() && normalized_[start] == ' ')
@@ -753,8 +814,16 @@ class BodyParser {
       --end;
 
     if (start == end) {
-      has_trailing_space_ = ends_whitespace;
+      // All whitespace — propagate trailing-space state (but not at paragraph start)
+      if (!has_trailing_space_ && !at_para_start) {
+        current_run_ += ' ';
+        has_trailing_space_ = true;
+      }
       return;
+    }
+
+    if (!has_trailing_space_ && starts_ws && !at_para_start) {
+      current_run_ += ' ';
     }
 
     if (text_transform_ != TextTransform::None) {
@@ -763,7 +832,7 @@ class BodyParser {
       current_run_.append(normalized_, start, end - start);
     }
 
-    has_trailing_space_ = ends_whitespace;
+    has_trailing_space_ = ends_ws;
     if (has_trailing_space_) {
       current_run_ += ' ';
     }
@@ -1053,7 +1122,8 @@ class BodyParser {
   std::vector<Paragraph> paragraphs_;
   std::vector<Run> runs_;
   std::string current_run_;
-  std::string normalized_;  // reusable scratch buffer for push_text()
+  std::string normalized_;    // reusable scratch buffer for push_text()
+  std::string pending_utf8_;  // incomplete UTF-8 lead byte(s) from end of previous text event
   bool bold_ = false;
   bool italic_ = false;
   FontSize font_size_ = FontSize::Normal;
@@ -1082,15 +1152,32 @@ static EpubError parse_xhtml_events(XmlReader& reader, const CssStylesheet* inli
   // Skip to <body>
   CssStylesheet parsed_inline_css(extern_css ? extern_css->config() : CssConfig{});
   XmlEvent ev;
-  while (reader.next_event(ev) == XmlError::Ok) {
+  for (;;) {
+    XmlError xerr = reader.next_event(ev);
+    if (xerr == XmlError::BufferTooSmall) {
+      reader.skip_element();
+      continue;
+    }
+    if (xerr != XmlError::Ok)
+      break;
     if (ev.type == XmlEventType::EndOfFile)
       break;
     if (ev.type == XmlEventType::StartElement) {
       if (sv_eq(ev.name, "style")) {
-        // Parse inline stylesheet
-        XmlEvent text;
-        if (reader.next_event(text) == XmlError::Ok && text.type == XmlEventType::Text) {
-          parsed_inline_css.extend_from_sheet(text.content.data, text.content.length);
+        // Consume all text events inside <style>...</style>, then skip to </style>.
+        // With streaming XML buffers the CSS may arrive as multiple Text events.
+        for (;;) {
+          XmlEvent inner;
+          XmlError serr = reader.next_event(inner);
+          if (serr != XmlError::Ok)
+            break;
+          if (inner.type == XmlEventType::Text || inner.type == XmlEventType::CData) {
+            parsed_inline_css.extend_from_sheet(inner.content.data, inner.content.length);
+          } else if (inner.type == XmlEventType::EndElement) {
+            break;  // </style>
+          } else if (inner.type == XmlEventType::EndOfFile) {
+            break;
+          }
         }
       } else if (sv_eq(ev.name, "body")) {
         break;
@@ -1100,11 +1187,51 @@ static EpubError parse_xhtml_events(XmlReader& reader, const CssStylesheet* inli
 
   const CssStylesheet* effective_inline = inline_css ? inline_css : &parsed_inline_css;
 
-  while (reader.next_event(ev) == XmlError::Ok) {
-    if (ev.type == XmlEventType::EndOfFile)
+#ifdef MICROREADER_DIAG_STREAMING
+  size_t event_count = 0;
+  size_t start_count = 0;
+  size_t end_count = 0;
+  size_t text_count = 0;
+  XmlError last_err = XmlError::Ok;
+  const char* exit_reason = "unknown";
+#endif
+
+  for (;;) {
+    XmlError xerr = reader.next_event(ev);
+    if (xerr == XmlError::BufferTooSmall) {
+      reader.skip_element();
+      continue;
+    }
+    if (xerr != XmlError::Ok) {
+#ifdef MICROREADER_DIAG_STREAMING
+      last_err = xerr;
+      exit_reason = "error";
+#endif
       break;
-    if (ev.type == XmlEventType::EndElement && sv_eq(ev.name, "body"))
+    }
+    if (ev.type == XmlEventType::EndOfFile) {
+#ifdef MICROREADER_DIAG_STREAMING
+      exit_reason = "eof";
+#endif
       break;
+    }
+    if (ev.type == XmlEventType::EndElement && sv_eq(ev.name, "body")) {
+#ifdef MICROREADER_DIAG_STREAMING
+      exit_reason = "body";
+#endif
+      break;
+    }
+
+#ifdef MICROREADER_DIAG_STREAMING
+    event_count++;
+    if (ev.type == XmlEventType::StartElement) {
+      start_count++;
+      // Track if we see unexpected elements
+    } else if (ev.type == XmlEventType::EndElement)
+      end_count++;
+    else if (ev.type == XmlEventType::Text)
+      text_count++;
+#endif
 
     if (ev.type == XmlEventType::StartElement) {
       if (sv_eq(ev.name, "img") || sv_eq(ev.name, "image")) {
@@ -1469,6 +1596,11 @@ static EpubError parse_xhtml_events(XmlReader& reader, const CssStylesheet* inli
     }
   }
 
+#ifdef MICROREADER_DIAG_STREAMING
+  fprintf(stderr, "DIAG: events=%zu start=%zu end=%zu text=%zu exit=%s err=%d\n", event_count, start_count, end_count,
+          text_count, exit_reason, (int)last_err);
+#endif
+
   return EpubError::Ok;
 }
 
@@ -1593,10 +1725,12 @@ EpubError Epub::parse_chapter_streaming(IZipFile& file, size_t index, ParagraphS
     base_dir = entry.name.substr(0, slash + 1);
   }
 
-  // Single heap allocation for work buffer + XML buffer (~48KB).
+  // Single heap allocation for work buffer + XML buffer.
   // Work buffer layout: [tinfl_decompressor(~11KB) | dict(32KB) | input(1KB)].
+  // XML buffer must be large enough to hold any single element + attributes;
+  // 16KB handles virtually all real-world EPUB XHTML elements.
   static constexpr size_t kWorkBufSize = ZipEntryInput::kDecompSize + ZipEntryInput::kDictSize + 1024;
-  static constexpr size_t kXmlBufSize = 4096;
+  static constexpr size_t kXmlBufSize = 16384;
   auto mem = std::make_unique<uint8_t[]>(kWorkBufSize + kXmlBufSize);
 
   ZipEntryInput zip_input;
@@ -1607,14 +1741,69 @@ EpubError Epub::parse_chapter_streaming(IZipFile& file, size_t index, ParagraphS
   if (reader.open(zip_input, mem.get() + kWorkBufSize, kXmlBufSize) != XmlError::Ok)
     return EpubError::XmlError;
 
+  // Buffer paragraphs locally so we can do image resolution + promotion
+  // after the ZipEntryInput releases the file handle (can't seek during
+  // streaming decompression). On ESP32 the image resolution is a no-op
+  // (MICROREADER_NO_IMAGES) so the buffer overhead is the only cost.
+  std::vector<Paragraph> paragraphs;
+  auto buffer_sink = [](void* ctx, Paragraph&& para) {
+    static_cast<std::vector<Paragraph>*>(ctx)->push_back(std::move(para));
+  };
+
   BodyParser parser;
-  parser.set_sink(sink, sink_ctx);
+  parser.set_sink(buffer_sink, &paragraphs);
 
   EpubError err = parse_xhtml_events(reader, nullptr, &stylesheet_, base_dir, zip_, parser);
   if (err != EpubError::Ok)
     return err;
 
-  parser.finish();  // flush remaining content via sink
+  parser.finish();
+
+  // ZipEntryInput is done — file handle is now free for seeking.
+
+#ifndef MICROREADER_NO_IMAGES
+  // Resolve image dimensions (same as parse_chapter).
+  for (auto& para : paragraphs) {
+    if (para.type == ParagraphType::Image && para.image.width == 0 && para.image.height == 0) {
+      if (para.image.key < zip_.entry_count()) {
+        std::vector<uint8_t> img_data;
+        if (zip_.extract(file, zip_.entry(para.image.key), img_data) == ZipError::Ok) {
+          read_image_size(img_data.data(), img_data.size(), para.image.width, para.image.height);
+        }
+      }
+    }
+    if (para.type == ParagraphType::Text && para.text.inline_image.has_value()) {
+      auto& img = *para.text.inline_image;
+      if (img.width == 0 && img.height == 0 && img.key < zip_.entry_count()) {
+        std::vector<uint8_t> img_data;
+        if (zip_.extract(file, zip_.entry(img.key), img_data) == ZipError::Ok) {
+          read_image_size(img_data.data(), img_data.size(), img.width, img.height);
+        }
+      }
+    }
+  }
+#endif
+
+  // Promote large inline images to standalone paragraphs (same as parse_chapter).
+  const uint16_t content_w = stylesheet_.config().content_width;
+  for (size_t i = 0; i < paragraphs.size(); ++i) {
+    auto& para = paragraphs[i];
+    if (para.type == ParagraphType::Text && para.text.inline_image.has_value()) {
+      const auto& img = *para.text.inline_image;
+      if (img.width > content_w / 3 || img.height > 120) {
+        auto img_para = Paragraph::make_image(img.key, img.width, img.height);
+        para.text.inline_image.reset();
+        paragraphs.insert(paragraphs.begin() + static_cast<ptrdiff_t>(i), std::move(img_para));
+        ++i;
+      }
+    }
+  }
+
+  // Forward all paragraphs through the caller's sink.
+  for (auto& para : paragraphs) {
+    sink(sink_ctx, std::move(para));
+  }
+
   return EpubError::Ok;
 }
 
