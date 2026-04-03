@@ -52,17 +52,17 @@ class DesktopEmulatorDisplay final : public microreader::IDisplay {
     step_and_render(pixels, pixels);
   }
 
-  // Partial refresh: simulate a transition from old to new.
-  void partial_refresh(const uint8_t* old_pixels, const uint8_t* new_pixels) override {
-    // Snap sim to old state, then render with new as target so transitions animate.
+  // Partial refresh: snap sim fully to new state (real hardware drives pixels
+  // to target in a single partial-update command).
+  void partial_refresh(const uint8_t* /*old_pixels*/, const uint8_t* new_pixels) override {
     for (int y = 0; y < microreader::DisplayFrame::kPhysicalHeight; ++y) {
       for (int x = 0; x < microreader::DisplayFrame::kPhysicalWidth; ++x) {
         const std::size_t byte_idx = static_cast<std::size_t>(y * microreader::DisplayFrame::kStride + x / 8);
         const uint8_t bit = static_cast<uint8_t>(0x80u >> (x & 7));
-        sim_[y * microreader::DisplayFrame::kPhysicalWidth + x] = (old_pixels[byte_idx] & bit) ? 1.0f : 0.0f;
+        sim_[y * microreader::DisplayFrame::kPhysicalWidth + x] = (new_pixels[byte_idx] & bit) ? 1.0f : 0.0f;
       }
     }
-    step_and_render(old_pixels, new_pixels);
+    step_and_render(new_pixels, new_pixels);
   }
 
   // Settle refresh: snap sim firmly to the final pixel state.

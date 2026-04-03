@@ -1,8 +1,9 @@
 #include "ZipReader.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
-#include <algorithm>
+#include <memory>
 
 // We only need the tinfl decompressor from miniz.
 // Define MINIZ_NO_ZLIB_COMPATIBLE_NAMES to avoid polluting the namespace.
@@ -12,6 +13,8 @@
 #include "miniz.h"
 
 namespace microreader {
+
+static_assert(sizeof(tinfl_decompressor) <= ZipEntryInput::kDecompSize, "kDecompSize too small for tinfl_decompressor");
 
 // ---------------------------------------------------------------------------
 // ZIP format constants and on-disk structures
@@ -112,37 +115,66 @@ static ZipError find_end_central_dir(IZipFile& file, EndCentralDir& eocd) {
 
 ZipError ZipReader::open(IZipFile& file) {
   entries_.clear();
+  name_blob_.clear();
 
   EndCentralDir eocd{};
   ZipError err = find_end_central_dir(file, eocd);
-  if (err != ZipError::Ok) return err;
+  if (err != ZipError::Ok)
+    return err;
 
-  if (eocd.total_entries == 0) return ZipError::InvalidData;
+  if (eocd.total_entries == 0)
+    return ZipError::InvalidData;
 
   entries_.reserve(eocd.total_entries);
 
-  file.seek(eocd.central_dir_offset, SEEK_SET);
+  // First pass: compute total name bytes so we can pre-allocate the blob.
+  // We read the central directory twice to avoid per-entry heap allocations.
+  const int64_t cd_start = eocd.central_dir_offset;
+  file.seek(cd_start, SEEK_SET);
+
+  size_t total_name_bytes = 0;
+  for (uint16_t i = 0; i < eocd.total_entries; ++i) {
+    CentralDirEntry cde{};
+    if (!read_exact(file, &cde, sizeof(cde)))
+      return ZipError::ReadError;
+    if (cde.signature != kCentralDirEntrySig)
+      return ZipError::InvalidSignature;
+    total_name_bytes += cde.filename_len;
+    file.seek(cde.filename_len + cde.extra_len + cde.comment_len, SEEK_CUR);
+  }
+
+  name_blob_.resize(total_name_bytes);
+
+  // Second pass: read names into blob and build entries.
+  file.seek(cd_start, SEEK_SET);
+  size_t blob_offset = 0;
 
   for (uint16_t i = 0; i < eocd.total_entries; ++i) {
     CentralDirEntry cde{};
-    if (!read_exact(file, &cde, sizeof(cde))) return ZipError::ReadError;
-    if (cde.signature != kCentralDirEntrySig) return ZipError::InvalidSignature;
+    if (!read_exact(file, &cde, sizeof(cde)))
+      return ZipError::ReadError;
+    if (cde.signature != kCentralDirEntrySig)
+      return ZipError::InvalidSignature;
 
-    // Read filename
-    std::string name(cde.filename_len, '\0');
-    if (!read_exact(file, name.data(), cde.filename_len)) return ZipError::ReadError;
+    // Read filename directly into the blob.
+    if (!read_exact(file, name_blob_.data() + blob_offset, cde.filename_len))
+      return ZipError::ReadError;
 
     // Skip extra field and comment
-    if (cde.extra_len > 0) file.seek(cde.extra_len, SEEK_CUR);
-    if (cde.comment_len > 0) file.seek(cde.comment_len, SEEK_CUR);
+    if (cde.extra_len > 0)
+      file.seek(cde.extra_len, SEEK_CUR);
+    if (cde.comment_len > 0)
+      file.seek(cde.comment_len, SEEK_CUR);
 
     ZipEntry entry;
-    entry.name = std::move(name);
+    entry.name = std::string_view(name_blob_.data() + blob_offset, cde.filename_len);
     entry.uncompressed_size = cde.uncompressed_size;
     entry.compressed_size = cde.compressed_size;
     entry.local_header_offset = cde.local_header_offset;
     entry.compression = cde.compression;
-    entries_.push_back(std::move(entry));
+    entries_.push_back(entry);
+
+    blob_offset += cde.filename_len;
   }
 
   return ZipError::Ok;
@@ -150,7 +182,8 @@ ZipError ZipReader::open(IZipFile& file) {
 
 const ZipEntry* ZipReader::find(const char* name) const {
   for (const auto& e : entries_) {
-    if (e.name == name) return &e;
+    if (e.name == name)
+      return &e;
   }
   return nullptr;
 }
@@ -160,8 +193,10 @@ static ZipError seek_to_data(IZipFile& file, const ZipEntry& entry) {
   file.seek(entry.local_header_offset, SEEK_SET);
 
   LocalFileHeader lfh{};
-  if (!read_exact(file, &lfh, sizeof(lfh))) return ZipError::ReadError;
-  if (lfh.signature != kLocalHeaderSig) return ZipError::InvalidSignature;
+  if (!read_exact(file, &lfh, sizeof(lfh)))
+    return ZipError::ReadError;
+  if (lfh.signature != kLocalHeaderSig)
+    return ZipError::InvalidSignature;
 
   // Skip filename + extra field to reach the data
   int64_t skip = static_cast<int64_t>(lfh.filename_len) + lfh.extra_len;
@@ -171,33 +206,36 @@ static ZipError seek_to_data(IZipFile& file, const ZipEntry& entry) {
 }
 
 ZipError ZipReader::extract(IZipFile& file, const ZipEntry& entry, std::vector<uint8_t>& out) const {
-  out.resize(entry.uncompressed_size);
-  if (entry.uncompressed_size == 0) return ZipError::Ok;
+  // Allocate a work buffer internally: decomp + dict + input.
+  static constexpr size_t kWorkBufSize = ZipEntryInput::kDecompSize + TINFL_LZ_DICT_SIZE + 1024;
+  std::vector<uint8_t> work_buf(kWorkBufSize);
+  return extract(file, entry, out, work_buf.data(), work_buf.size());
+}
 
-  size_t offset = 0;
+ZipError ZipReader::extract(IZipFile& file, const ZipEntry& entry, std::vector<uint8_t>& out, uint8_t* work_buf,
+                            size_t work_buf_size) const {
+  out.resize(entry.uncompressed_size);
+  if (entry.uncompressed_size == 0)
+    return ZipError::Ok;
+
   auto cb = [](const uint8_t* data, size_t size, void* user_data) -> bool {
     auto* ctx = static_cast<std::pair<std::vector<uint8_t>*, size_t>*>(user_data);
-    if (ctx->second + size > ctx->first->size()) return false;
+    if (ctx->second + size > ctx->first->size())
+      return false;
     memcpy(ctx->first->data() + ctx->second, data, size);
     ctx->second += size;
     return true;
   };
 
   std::pair<std::vector<uint8_t>*, size_t> ctx{&out, 0};
-
-  // Use a stack-allocated work buffer for extract()
-  // 32KB dict + 1KB input = 33KB
-  static constexpr size_t kWorkBufSize = TINFL_LZ_DICT_SIZE + 1024;
-  std::vector<uint8_t> work_buf(kWorkBufSize);
-
-  return extract_streaming(file, entry, cb, &ctx, work_buf.data(), work_buf.size());
+  return extract_streaming(file, entry, cb, &ctx, work_buf, work_buf_size);
 }
 
-ZipError ZipReader::extract_streaming(IZipFile& file, const ZipEntry& entry,
-                                      ZipDataCallback callback, void* user_data,
+ZipError ZipReader::extract_streaming(IZipFile& file, const ZipEntry& entry, ZipDataCallback callback, void* user_data,
                                       uint8_t* work_buf, size_t work_buf_size) const {
   ZipError err = seek_to_data(file, entry);
-  if (err != ZipError::Ok) return err;
+  if (err != ZipError::Ok)
+    return err;
 
   if (entry.compression == 0) {
     // Stored: read directly, use work_buf as copy buffer
@@ -206,8 +244,10 @@ ZipError ZipReader::extract_streaming(IZipFile& file, const ZipEntry& entry,
     while (remaining > 0) {
       size_t to_read = std::min(remaining, chunk);
       size_t got = file.read(work_buf, to_read);
-      if (got == 0) return ZipError::ReadError;
-      if (!callback(work_buf, got, user_data)) return ZipError::Ok;  // user abort
+      if (got == 0)
+        return ZipError::ReadError;
+      if (!callback(work_buf, got, user_data))
+        return ZipError::Ok;  // user abort
       remaining -= got;
     }
     return ZipError::Ok;
@@ -218,16 +258,16 @@ ZipError ZipReader::extract_streaming(IZipFile& file, const ZipEntry& entry,
   }
 
   // Deflate: use tinfl with dictionary/wrapping mode (raw deflate, no zlib header).
-  // Layout of work_buf: [dict(32KB) | input_buf(remaining)]
-  // The decompressor is heap-allocated to guarantee alignment.
-  size_t min_size = TINFL_LZ_DICT_SIZE + 256;
-  if (work_buf_size < min_size) return ZipError::DecompressionFailed;
+  // Layout of work_buf: [tinfl_decompressor | dict(32KB) | input_buf(remaining)]
+  static constexpr size_t kDecompSize = ZipEntryInput::kDecompSize;
+  size_t min_size = kDecompSize + TINFL_LZ_DICT_SIZE + 256;
+  if (work_buf_size < min_size)
+    return ZipError::DecompressionFailed;
 
-  tinfl_decompressor decomp_storage;
-  tinfl_decompressor* decomp = &decomp_storage;
-  uint8_t* dict = work_buf;
-  uint8_t* in_buf = work_buf + TINFL_LZ_DICT_SIZE;
-  size_t in_buf_capacity = work_buf_size - TINFL_LZ_DICT_SIZE;
+  auto* decomp = reinterpret_cast<tinfl_decompressor*>(work_buf);
+  uint8_t* dict = work_buf + kDecompSize;
+  uint8_t* in_buf = dict + TINFL_LZ_DICT_SIZE;
+  size_t in_buf_capacity = work_buf_size - kDecompSize - TINFL_LZ_DICT_SIZE;
 
   tinfl_init(decomp);
 
@@ -241,7 +281,8 @@ ZipError ZipReader::extract_streaming(IZipFile& file, const ZipEntry& entry,
     if (in_buf_ofs >= in_buf_size && in_remaining > 0) {
       size_t to_read = std::min(in_remaining, in_buf_capacity);
       in_buf_size = file.read(in_buf, to_read);
-      if (in_buf_size == 0) return ZipError::ReadError;
+      if (in_buf_size == 0)
+        return ZipError::ReadError;
       in_remaining -= in_buf_size;
       in_buf_ofs = 0;
     }
@@ -250,11 +291,11 @@ ZipError ZipReader::extract_streaming(IZipFile& file, const ZipEntry& entry,
     size_t out_bytes = TINFL_LZ_DICT_SIZE - dict_ofs;
 
     mz_uint32 flags = 0;
-    if (in_remaining > 0) flags |= TINFL_FLAG_HAS_MORE_INPUT;
+    if (in_remaining > 0)
+      flags |= TINFL_FLAG_HAS_MORE_INPUT;
 
-    tinfl_status status = tinfl_decompress(
-        decomp, in_buf + in_buf_ofs, &in_bytes,
-        dict, dict + dict_ofs, &out_bytes, flags);
+    tinfl_status status =
+        tinfl_decompress(decomp, in_buf + in_buf_ofs, &in_bytes, dict, dict + dict_ofs, &out_bytes, flags);
 
     in_buf_ofs += in_bytes;
 
@@ -265,8 +306,10 @@ ZipError ZipReader::extract_streaming(IZipFile& file, const ZipEntry& entry,
       dict_ofs = (dict_ofs + out_bytes) & (TINFL_LZ_DICT_SIZE - 1);
     }
 
-    if (status == TINFL_STATUS_DONE) break;
-    if (status < TINFL_STATUS_DONE) return ZipError::DecompressionFailed;
+    if (status == TINFL_STATUS_DONE)
+      break;
+    if (status < TINFL_STATUS_DONE)
+      return ZipError::DecompressionFailed;
   }
 
   return ZipError::Ok;
@@ -298,7 +341,8 @@ bool StdioZipFile::is_open() const {
 }
 
 bool StdioZipFile::seek(int64_t offset, int whence) {
-  if (!fp_) return false;
+  if (!fp_)
+    return false;
 #ifdef _WIN32
   return _fseeki64(static_cast<FILE*>(fp_), offset, whence) == 0;
 #else
@@ -307,7 +351,8 @@ bool StdioZipFile::seek(int64_t offset, int whence) {
 }
 
 int64_t StdioZipFile::tell() {
-  if (!fp_) return -1;
+  if (!fp_)
+    return -1;
 #ifdef _WIN32
   return _ftelli64(static_cast<FILE*>(fp_));
 #else
@@ -316,8 +361,150 @@ int64_t StdioZipFile::tell() {
 }
 
 size_t StdioZipFile::read(void* buf, size_t size) {
-  if (!fp_) return 0;
+  if (!fp_)
+    return 0;
   return std::fread(buf, 1, size, static_cast<FILE*>(fp_));
+}
+
+// ---------------------------------------------------------------------------
+// ZipEntryInput — streaming IXmlInput backed by a ZIP entry
+// ---------------------------------------------------------------------------
+
+ZipEntryInput::~ZipEntryInput() {
+  // decomp_ points into the borrowed work_buf — nothing to delete.
+}
+
+ZipError ZipEntryInput::open(IZipFile& file, const ZipEntry& entry, uint8_t* work_buf, size_t work_buf_size) {
+  file_ = &file;
+  compression_ = entry.compression;
+  done_ = false;
+  error_ = false;
+  out_avail_ = 0;
+
+  ZipError err = seek_to_data(file, entry);
+  if (err != ZipError::Ok)
+    return err;
+
+  if (compression_ == 0) {
+    // Stored: use work_buf as a read-through buffer
+    store_buf_ = work_buf;
+    store_buf_capacity_ = work_buf_size;
+    store_remaining_ = entry.uncompressed_size;
+    return ZipError::Ok;
+  }
+
+  if (compression_ != 8)
+    return ZipError::UnsupportedCompression;
+
+  if (work_buf_size < kMinWorkBufSize)
+    return ZipError::DecompressionFailed;
+
+  // Layout: [tinfl_decompressor | dict(32KB) | input_buf(remaining)]
+  auto* d = reinterpret_cast<tinfl_decompressor*>(work_buf);
+  tinfl_init(d);
+  decomp_ = d;
+
+  dict_ = work_buf + kDecompSize;
+  in_buf_ = dict_ + kDictSize;
+  in_buf_capacity_ = work_buf_size - kDecompSize - kDictSize;
+  in_buf_size_ = 0;
+  in_buf_ofs_ = 0;
+  in_remaining_ = entry.compressed_size;
+  dict_ofs_ = 0;
+  out_start_ = 0;
+  out_avail_ = 0;
+
+  return ZipError::Ok;
+}
+
+size_t ZipEntryInput::read(void* buf, size_t max_size) {
+  if (error_)
+    return 0;
+
+  auto* out = static_cast<uint8_t*>(buf);
+  size_t total = 0;
+
+  if (compression_ == 0) {
+    // Stored: read through work buffer (avoids requiring caller to provide
+    // a large buffer aligned with the file's read interface)
+    while (total < max_size && store_remaining_ > 0) {
+      size_t want = std::min(max_size - total, store_remaining_);
+      want = std::min(want, store_buf_capacity_);
+      size_t got = file_->read(store_buf_, want);
+      if (got == 0) {
+        error_ = true;
+        break;
+      }
+      std::memcpy(out + total, store_buf_, got);
+      total += got;
+      store_remaining_ -= got;
+    }
+    if (store_remaining_ == 0)
+      done_ = true;
+    return total;
+  }
+
+  // Deflate: incremental decompression
+  auto* decomp = static_cast<tinfl_decompressor*>(decomp_);
+
+  while (total < max_size) {
+    // 1. Drain pending output from dict
+    if (out_avail_ > 0) {
+      size_t n = std::min(out_avail_, max_size - total);
+      std::memcpy(out + total, dict_ + out_start_, n);
+      out_start_ += n;
+      out_avail_ -= n;
+      total += n;
+      continue;
+    }
+
+    if (done_)
+      break;
+
+    // 2. Refill compressed input buffer if needed
+    if (in_buf_ofs_ >= in_buf_size_ && in_remaining_ > 0) {
+      size_t to_read = std::min(in_remaining_, in_buf_capacity_);
+      in_buf_size_ = file_->read(in_buf_, to_read);
+      if (in_buf_size_ == 0) {
+        error_ = true;
+        break;
+      }
+      in_remaining_ -= in_buf_size_;
+      in_buf_ofs_ = 0;
+    }
+
+    // 3. Decompress one chunk
+    size_t in_bytes = in_buf_size_ - in_buf_ofs_;
+    size_t out_bytes = kDictSize - dict_ofs_;
+
+    mz_uint32 flags = 0;
+    if (in_remaining_ > 0)
+      flags |= TINFL_FLAG_HAS_MORE_INPUT;
+
+    tinfl_status status =
+        tinfl_decompress(decomp, in_buf_ + in_buf_ofs_, &in_bytes, dict_, dict_ + dict_ofs_, &out_bytes, flags);
+
+    in_buf_ofs_ += in_bytes;
+
+    if (out_bytes > 0) {
+      out_start_ = dict_ofs_;
+      out_avail_ = out_bytes;
+      dict_ofs_ = (dict_ofs_ + out_bytes) & (kDictSize - 1);
+    }
+
+    if (status == TINFL_STATUS_DONE) {
+      done_ = true;
+    } else if (status < TINFL_STATUS_DONE) {
+      error_ = true;
+      break;
+    } else if (out_bytes == 0 && in_bytes == 0) {
+      // tinfl made no progress — avoid infinite loop
+      error_ = true;
+      break;
+    }
+  }
+
+  return total;
 }
 
 }  // namespace microreader

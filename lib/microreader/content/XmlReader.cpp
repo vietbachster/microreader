@@ -185,7 +185,7 @@ XmlError XmlReader::advance(size_t from) {
 XmlError XmlReader::ensure(size_t min_bytes) {
   if (view_len() >= min_bytes)
     return XmlError::Ok;
-  if (view_len() + remaining_ < min_bytes)
+  if (remaining_ == 0)
     return XmlError::Eof;
   return advance(pos_);
 }

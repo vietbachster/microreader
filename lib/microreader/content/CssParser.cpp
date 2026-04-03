@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <cstring>
 
 namespace microreader {
@@ -16,20 +17,28 @@ namespace microreader {
 static std::optional<int> parse_css_length(const std::string& value, uint16_t glyph_width, uint16_t ref_width) {
   if (value == "0" || value == "auto")
     return 0;
-  try {
-    if (value.size() > 2 && value.substr(value.size() - 2) == "px") {
-      return std::stoi(value.substr(0, value.size() - 2));
-    } else if (value.size() > 2 && value.substr(value.size() - 2) == "pt") {
-      // 1pt = 1.333px at 96dpi
-      return static_cast<int>(std::stof(value.substr(0, value.size() - 2)) * 4 / 3 + 0.5f);
-    } else if (value.size() > 3 && value.substr(value.size() - 3) == "rem") {
-      return static_cast<int>(std::stof(value.substr(0, value.size() - 3)) * glyph_width + 0.5f);
-    } else if (value.size() > 2 && value.substr(value.size() - 2) == "em") {
-      return static_cast<int>(std::stof(value.substr(0, value.size() - 2)) * glyph_width + 0.5f);
-    } else if (value.size() > 1 && value.back() == '%') {
-      return static_cast<int>(std::stof(value.substr(0, value.size() - 1)) * ref_width / 100 + 0.5f);
-    }
-  } catch (...) {}
+  char* end = nullptr;
+  if (value.size() > 2 && value.substr(value.size() - 2) == "px") {
+    long v = std::strtol(value.c_str(), &end, 10);
+    if (end != value.c_str())
+      return static_cast<int>(v);
+  } else if (value.size() > 2 && value.substr(value.size() - 2) == "pt") {
+    float v = std::strtof(value.c_str(), &end);
+    if (end != value.c_str())
+      return static_cast<int>(v * 4 / 3 + 0.5f);
+  } else if (value.size() > 3 && value.substr(value.size() - 3) == "rem") {
+    float v = std::strtof(value.c_str(), &end);
+    if (end != value.c_str())
+      return static_cast<int>(v * glyph_width + 0.5f);
+  } else if (value.size() > 2 && value.substr(value.size() - 2) == "em") {
+    float v = std::strtof(value.c_str(), &end);
+    if (end != value.c_str())
+      return static_cast<int>(v * glyph_width + 0.5f);
+  } else if (value.size() > 1 && value.back() == '%') {
+    float v = std::strtof(value.c_str(), &end);
+    if (end != value.c_str())
+      return static_cast<int>(v * ref_width / 100 + 0.5f);
+  }
   return std::nullopt;
 }
 
@@ -252,26 +261,29 @@ CssRule CssRule::parse(const char* decl, size_t length, const CssConfig& config)
       } else if (key == "line-height") {
         // Parse line-height as percentage of default (100 = normal ~1.2)
         // Common values: "normal", "1.2", "1.5", "140%", "1.4em"
-        try {
-          if (value == "normal" || value == "inherit") {
-            rule.line_height_pct = 100;
-          } else if (value.size() > 1 && value.back() == '%') {
-            float pct = std::stof(value.substr(0, value.size() - 1));
-            // Normalize: browser default ~120%, our default = 100%
-            // So 120% = our 100%, 150% = our 125%, etc.
+        char* end = nullptr;
+        if (value == "normal" || value == "inherit") {
+          rule.line_height_pct = 100;
+        } else if (value.size() > 1 && value.back() == '%') {
+          float pct = std::strtof(value.c_str(), &end);
+          if (end != value.c_str()) {
             uint8_t val = static_cast<uint8_t>(std::clamp(pct * 100.0f / 120.0f, 70.0f, 200.0f));
             rule.line_height_pct = val;
-          } else if (value.size() > 2 && value.substr(value.size() - 2) == "em") {
-            float em = std::stof(value.substr(0, value.size() - 2));
+          }
+        } else if (value.size() > 2 && value.substr(value.size() - 2) == "em") {
+          float em = std::strtof(value.c_str(), &end);
+          if (end != value.c_str()) {
             uint8_t val = static_cast<uint8_t>(std::clamp(em * 100.0f / 1.2f, 70.0f, 200.0f));
             rule.line_height_pct = val;
-          } else {
-            // Unitless number (e.g. "1.5")
-            float num = std::stof(value);
+          }
+        } else {
+          // Unitless number (e.g. "1.5")
+          float num = std::strtof(value.c_str(), &end);
+          if (end != value.c_str()) {
             uint8_t val = static_cast<uint8_t>(std::clamp(num * 100.0f / 1.2f, 70.0f, 200.0f));
             rule.line_height_pct = val;
           }
-        } catch (...) {}
+        }
       } else if (key == "font-size") {
         if (value == "small" || value == "x-small" || value == "xx-small" || value == "smaller")
           rule.font_size = FontSize::Small;
@@ -281,34 +293,40 @@ CssRule CssRule::parse(const char* decl, size_t length, const CssConfig& config)
           rule.font_size = FontSize::Normal;
         else {
           // Try parsing numeric values: percentages (90%) and em (0.9em)
-          try {
-            if (value.size() > 1 && value.back() == '%') {
-              float pct = std::stof(value.substr(0, value.size() - 1));
+          char* end = nullptr;
+          if (value.size() > 1 && value.back() == '%') {
+            float pct = std::strtof(value.c_str(), &end);
+            if (end != value.c_str()) {
               if (pct < 85.0f)
                 rule.font_size = FontSize::Small;
               else if (pct > 115.0f)
                 rule.font_size = FontSize::Large;
               else
                 rule.font_size = FontSize::Normal;
-            } else if (value.size() > 2 && value.substr(value.size() - 2) == "em") {
-              float em = std::stof(value.substr(0, value.size() - 2));
+            }
+          } else if (value.size() > 2 && value.substr(value.size() - 2) == "em") {
+            float em = std::strtof(value.c_str(), &end);
+            if (end != value.c_str()) {
               if (em < 0.85f)
                 rule.font_size = FontSize::Small;
               else if (em > 1.15f)
                 rule.font_size = FontSize::Large;
               else
                 rule.font_size = FontSize::Normal;
-            } else if (value.size() > 3 && value.substr(value.size() - 3) == "rem") {
-              float rem = std::stof(value.substr(0, value.size() - 3));
+            }
+          } else if (value.size() > 3 && value.substr(value.size() - 3) == "rem") {
+            float rem = std::strtof(value.c_str(), &end);
+            if (end != value.c_str()) {
               if (rem < 0.85f)
                 rule.font_size = FontSize::Small;
               else if (rem > 1.15f)
                 rule.font_size = FontSize::Large;
               else
                 rule.font_size = FontSize::Normal;
-            } else if (value.size() > 2 && value.substr(value.size() - 2) == "pt") {
-              // Base font ~12pt; map relative to that
-              float pt = std::stof(value.substr(0, value.size() - 2));
+            }
+          } else if (value.size() > 2 && value.substr(value.size() - 2) == "pt") {
+            float pt = std::strtof(value.c_str(), &end);
+            if (end != value.c_str()) {
               float ratio = pt / 12.0f;
               if (ratio < 0.85f)
                 rule.font_size = FontSize::Small;
@@ -317,7 +335,7 @@ CssRule CssRule::parse(const char* decl, size_t length, const CssConfig& config)
               else
                 rule.font_size = FontSize::Normal;
             }
-          } catch (...) {}
+          }
         }
       }
     }
@@ -559,22 +577,44 @@ void CssStylesheet::extend_from_sheet(const char* css, size_t length) {
   }
 }
 
-CssRule CssStylesheet::get(const char* element, const char* id, const char* cls) const {
-  // Parse class attribute into individual classes
-  std::vector<std::string> classes;
-  if (cls) {
-    std::string c(cls);
-    size_t pos = 0;
-    while (pos < c.size()) {
-      while (pos < c.size() && std::isspace(static_cast<unsigned char>(c[pos])))
-        ++pos;
-      size_t start = pos;
-      while (pos < c.size() && !std::isspace(static_cast<unsigned char>(c[pos])))
-        ++pos;
-      if (pos > start)
-        classes.push_back(c.substr(start, pos - start));
-    }
+// Check if a whitespace-separated class string contains a specific class.
+static bool class_list_contains(const char* cls, const std::string& target) {
+  if (!cls || target.empty())
+    return false;
+  size_t tlen = target.size();
+  const char* p = cls;
+  while (*p) {
+    while (*p && std::isspace(static_cast<unsigned char>(*p)))
+      ++p;
+    const char* start = p;
+    while (*p && !std::isspace(static_cast<unsigned char>(*p)))
+      ++p;
+    size_t len = static_cast<size_t>(p - start);
+    if (len == tlen && std::memcmp(start, target.c_str(), len) == 0)
+      return true;
   }
+  return false;
+}
+
+// Match a selector against element/id/class without allocating vectors.
+static bool selector_matches_raw(const CssStylesheet::Selector& sel, const char* element, const char* id,
+                                 const char* cls) {
+  if (!sel.element.empty() && (element == nullptr || sel.element != element))
+    return false;
+  if (!sel.id.empty()) {
+    if (id == nullptr || sel.id != id)
+      return false;
+  }
+  for (const auto& c : sel.classes) {
+    if (!class_list_contains(cls, c))
+      return false;
+  }
+  return true;
+}
+
+CssRule CssStylesheet::get(const char* element, const char* id, const char* cls) const {
+  if (rules_.empty())
+    return {};
 
   // Collect matching rules, sort by specificity then source order
   struct Match {
@@ -582,22 +622,126 @@ CssRule CssStylesheet::get(const char* element, const char* id, const char* cls)
     size_t index;
     const CssRule* rule;
   };
-  std::vector<Match> matches;
+  // Use a small inline buffer to avoid heap allocation for typical cases.
+  Match inline_buf[8];
+  size_t match_count = 0;
+  bool used_heap = false;
+  std::vector<Match> heap_matches;
+
   for (size_t i = 0; i < rules_.size(); ++i) {
-    if (rules_[i].first.matches(element, id, classes)) {
-      matches.push_back({rules_[i].first.specificity(), i, &rules_[i].second});
+    if (selector_matches_raw(rules_[i].first, element, id, cls)) {
+      Match m{rules_[i].first.specificity(), i, &rules_[i].second};
+      if (!used_heap && match_count < 8) {
+        inline_buf[match_count++] = m;
+      } else {
+        if (!used_heap) {
+          heap_matches.assign(inline_buf, inline_buf + match_count);
+          used_heap = true;
+        }
+        heap_matches.push_back(m);
+        match_count = heap_matches.size();
+      }
     }
   }
 
-  std::sort(matches.begin(), matches.end(), [](const Match& a, const Match& b) {
+  if (match_count == 0)
+    return {};
+
+  Match* matches = used_heap ? heap_matches.data() : inline_buf;
+  std::sort(matches, matches + match_count, [](const Match& a, const Match& b) {
     if (a.specificity != b.specificity)
       return a.specificity < b.specificity;
     return a.index < b.index;
   });
 
   CssRule result;
-  for (auto& m : matches) {
-    result = result + *m.rule;
+  for (size_t i = 0; i < match_count; ++i) {
+    result = result + *matches[i].rule;
+  }
+  return result;
+}
+
+// Length-based class list check: does whitespace-separated cls contain target?
+static bool class_list_contains_n(const char* cls, size_t cls_len, const std::string& target) {
+  if (!cls || cls_len == 0 || target.empty())
+    return false;
+  size_t tlen = target.size();
+  const char* end = cls + cls_len;
+  const char* p = cls;
+  while (p < end) {
+    while (p < end && std::isspace(static_cast<unsigned char>(*p)))
+      ++p;
+    const char* start = p;
+    while (p < end && !std::isspace(static_cast<unsigned char>(*p)))
+      ++p;
+    size_t len = static_cast<size_t>(p - start);
+    if (len == tlen && std::memcmp(start, target.c_str(), len) == 0)
+      return true;
+  }
+  return false;
+}
+
+static bool selector_matches_n(const CssStylesheet::Selector& sel, const char* element, size_t element_len,
+                               const char* id, size_t id_len, const char* cls, size_t cls_len) {
+  if (!sel.element.empty()) {
+    if (element_len != sel.element.size() || std::memcmp(element, sel.element.c_str(), element_len) != 0)
+      return false;
+  }
+  if (!sel.id.empty()) {
+    if (id_len != sel.id.size() || std::memcmp(id, sel.id.c_str(), id_len) != 0)
+      return false;
+  }
+  for (const auto& c : sel.classes) {
+    if (!class_list_contains_n(cls, cls_len, c))
+      return false;
+  }
+  return true;
+}
+
+CssRule CssStylesheet::get(const char* element, size_t element_len, const char* id, size_t id_len, const char* cls,
+                           size_t cls_len) const {
+  if (rules_.empty())
+    return {};
+
+  struct Match {
+    uint32_t specificity;
+    size_t index;
+    const CssRule* rule;
+  };
+  Match inline_buf[8];
+  size_t match_count = 0;
+  bool used_heap = false;
+  std::vector<Match> heap_matches;
+
+  for (size_t i = 0; i < rules_.size(); ++i) {
+    if (selector_matches_n(rules_[i].first, element, element_len, id, id_len, cls, cls_len)) {
+      Match m{rules_[i].first.specificity(), i, &rules_[i].second};
+      if (!used_heap && match_count < 8) {
+        inline_buf[match_count++] = m;
+      } else {
+        if (!used_heap) {
+          heap_matches.assign(inline_buf, inline_buf + match_count);
+          used_heap = true;
+        }
+        heap_matches.push_back(m);
+        match_count = heap_matches.size();
+      }
+    }
+  }
+
+  if (match_count == 0)
+    return {};
+
+  Match* matches = used_heap ? heap_matches.data() : inline_buf;
+  std::sort(matches, matches + match_count, [](const Match& a, const Match& b) {
+    if (a.specificity != b.specificity)
+      return a.specificity < b.specificity;
+    return a.index < b.index;
+  });
+
+  CssRule result;
+  for (size_t i = 0; i < match_count; ++i) {
+    result = result + *matches[i].rule;
   }
   return result;
 }

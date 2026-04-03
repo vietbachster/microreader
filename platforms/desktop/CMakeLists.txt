@@ -20,6 +20,38 @@ set(SDL_STATIC ON  CACHE BOOL "" FORCE)
 set(SDL_TEST   OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(SDL2)
 
+# miniz (for DEFLATE decompression — required by content library)
+FetchContent_Declare(
+    miniz
+    GIT_REPOSITORY https://github.com/richgel999/miniz.git
+    GIT_TAG        3.0.2
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(miniz)
+
+# ---------------------------------------------------------------------------
+# Content library (EPUB, ZIP, XML, layout)
+# ---------------------------------------------------------------------------
+set(CONTENT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/microreader/content)
+
+add_library(microreader_content STATIC
+    ${CONTENT_DIR}/ZipReader.cpp
+    ${CONTENT_DIR}/XmlReader.cpp
+    ${CONTENT_DIR}/CssParser.cpp
+    ${CONTENT_DIR}/EpubParser.cpp
+    ${CONTENT_DIR}/ImageDecoder.cpp
+    ${CONTENT_DIR}/Book.cpp
+    ${CONTENT_DIR}/TextLayout.cpp
+    ${CONTENT_DIR}/HtmlExporter.cpp
+    ${CONTENT_DIR}/MrbWriter.cpp
+    ${CONTENT_DIR}/MrbReader.cpp
+    ${CONTENT_DIR}/MrbConverter.cpp
+)
+target_include_directories(microreader_content PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../lib
+)
+target_link_libraries(microreader_content PUBLIC miniz)
+
 # ---------------------------------------------------------------------------
 # Platform-agnostic core library
 # ---------------------------------------------------------------------------
@@ -30,10 +62,13 @@ add_library(microreader_core STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/microreader/demos/MenuDemo.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/microreader/demos/TextShowcaseDemo.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/microreader/demos/PatternDemo.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/microreader/demos/ReaderScreen.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/microreader/demos/BookSelectScreen.cpp
 )
 target_include_directories(microreader_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/../../lib
 )
+target_link_libraries(microreader_core PUBLIC microreader_content)
 
 # ---------------------------------------------------------------------------
 # Desktop executable

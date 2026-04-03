@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "microreader/content/Book.h"
+#include "microreader/content/TextLayout.h"
 #include "microreader/content/XmlReader.h"
 #include "microreader/content/ZipReader.h"
 
@@ -46,7 +47,8 @@ TEST(DebugOhler, InspectZipEntries) {
 
   // Show first 20 entries
   for (size_t i = 0; i < std::min(zip.entry_count(), size_t(20)); ++i) {
-    printf("  [%zu] %s (%u bytes)\n", i, zip.entry(i).name.c_str(), zip.entry(i).uncompressed_size);
+    printf("  [%zu] %.*s (%u bytes)\n", i, (int)zip.entry(i).name.size(), zip.entry(i).name.data(),
+           zip.entry(i).uncompressed_size);
   }
 
   // Check specific entries
@@ -66,7 +68,7 @@ TEST(DebugOhler, InspectZipEntries) {
   // List all XHTML entries
   size_t xhtml_count = 0;
   for (size_t i = 0; i < zip.entry_count(); ++i) {
-    if (zip.entry(i).name.find(".xhtml") != std::string::npos) {
+    if (zip.entry(i).name.find(".xhtml") != std::string_view::npos) {
       xhtml_count++;
     }
   }
@@ -90,9 +92,31 @@ TEST(DebugOhler, ParseOPF) {
   // Extract and parse the OPF manually
   auto* opf_entry = zip.find("OEBPS/content.opf");
   ASSERT_NE(opf_entry, nullptr);
+  printf("Entry: uncomp=%u comp=%u compression=%u\n", opf_entry->uncompressed_size, opf_entry->compressed_size,
+         opf_entry->compression);
 
+  // Test: verify ZipEntryInput produces the same data as one-shot extract
+  static constexpr size_t kWorkBufSize = ZipEntryInput::kDecompSize + ZipEntryInput::kDictSize + 1024;
+  std::vector<uint8_t> work_buf(kWorkBufSize);
+  ZipEntryInput zip_input;
+  ASSERT_EQ(zip_input.open(zf, *opf_entry, work_buf.data(), work_buf.size()), ZipError::Ok);
+
+  std::vector<uint8_t> streamed;
+  uint8_t chunk[512];
+  for (;;) {
+    size_t n = zip_input.read(chunk, sizeof(chunk));
+    if (n == 0)
+      break;
+    streamed.insert(streamed.end(), chunk, chunk + n);
+  }
+  printf("Streamed: %zu bytes (expected 77799), error: %d\n", streamed.size(), (int)zip_input.has_error());
+
+  // Now extract one-shot to compare
   std::vector<uint8_t> opf_data;
   ASSERT_EQ(zip.extract(zf, *opf_entry, opf_data), ZipError::Ok);
+  printf("One-shot: %zu bytes\n", opf_data.size());
+  ASSERT_EQ(streamed.size(), opf_data.size());
+  EXPECT_EQ(streamed, opf_data);
   printf("OPF size: %zu bytes\n", opf_data.size());
 
   // Parse with XmlReader and count elements
@@ -283,4 +307,133 @@ TEST(DebugOhler, FullBookOpen) {
 
   EXPECT_EQ(err, EpubError::Ok);
   EXPECT_GT(book.chapter_count(), 0u);
+}
+
+TEST(DebugOhler, ChapterMemoryProfile) {
+  std::string path = workspace_root() + "/microreader/resources/books/ohler.epub";
+  std::ifstream f(path);
+  if (!f.good()) {
+    GTEST_SKIP() << "Not found: " << path;
+    return;
+  }
+
+  Book book;
+  ASSERT_EQ(book.open(path.c_str()), EpubError::Ok);
+
+  // Measure chapter sizes: paragraphs, runs, total text bytes
+  size_t max_paras = 0, max_runs = 0, max_text_bytes = 0;
+  size_t max_chapter_idx = 0;
+
+  for (size_t i = 0; i < book.chapter_count(); ++i) {
+    Chapter ch;
+    auto err = book.load_chapter(i, ch);
+    if (err != EpubError::Ok)
+      continue;
+
+    size_t para_count = ch.paragraphs.size();
+    size_t run_count = 0, text_bytes = 0;
+    for (auto& p : ch.paragraphs) {
+      if (p.type == ParagraphType::Text) {
+        run_count += p.text.runs.size();
+        for (auto& r : p.text.runs)
+          text_bytes += r.text.size();
+      }
+    }
+
+    if (text_bytes > max_text_bytes) {
+      max_paras = para_count;
+      max_runs = run_count;
+      max_text_bytes = text_bytes;
+      max_chapter_idx = i;
+    }
+
+    if (para_count > 20 || text_bytes > 5000) {
+      printf("  Ch %3zu: %3zu paras, %4zu runs, %6zu text bytes\n", i, para_count, run_count, text_bytes);
+    }
+  }
+
+  printf("\nLargest chapter by text: #%zu  (%zu paras, %zu runs, %zu bytes)\n", max_chapter_idx, max_paras, max_runs,
+         max_text_bytes);
+
+  // Show first 10 chapters (the ones we'd hit on open)
+  printf("\nFirst 10 chapters:\n");
+  for (size_t i = 0; i < std::min(book.chapter_count(), size_t(10)); ++i) {
+    Chapter ch;
+    auto err = book.load_chapter(i, ch);
+    if (err != EpubError::Ok) {
+      printf("  Ch %zu: LOAD ERROR %d\n", i, (int)err);
+      continue;
+    }
+    size_t para_count = ch.paragraphs.size();
+    size_t run_count = 0, text_bytes = 0, img_count = 0;
+    for (auto& p : ch.paragraphs) {
+      if (p.type == ParagraphType::Text) {
+        run_count += p.text.runs.size();
+        for (auto& r : p.text.runs)
+          text_bytes += r.text.size();
+      }
+      if (p.type == ParagraphType::Image)
+        ++img_count;
+    }
+    printf("  Ch %zu: %zu paras, %zu runs, %zu text bytes, %zu images\n", i, para_count, run_count, text_bytes,
+           img_count);
+  }
+
+  // Estimate memory for Book::open metadata
+  size_t zip_name_bytes = 0;
+  for (size_t i = 0; i < book.epub().zip().entry_count(); ++i)
+    zip_name_bytes += book.epub().zip().entry(i).name.size();
+  size_t toc_label_bytes = 0;
+  for (auto& e : book.toc().entries)
+    toc_label_bytes += e.label.size();
+
+  printf("\nBook metadata memory estimate:\n");
+  printf("  ZIP entries: %zu, name bytes: %zu, entry struct overhead: %zu\n", book.epub().zip().entry_count(),
+         zip_name_bytes, book.epub().zip().entry_count() * sizeof(ZipEntry));
+  printf("  Spine items: %zu (%zu bytes)\n", book.epub().spine().size(),
+         book.epub().spine().size() * sizeof(SpineItem));
+  printf("  TOC entries: %zu, label bytes: %zu\n", book.toc().entries.size(), toc_label_bytes);
+
+  // Check XHTML file sizes for first 10 chapters
+  printf("\nXHTML file sizes (first 10 spine items):\n");
+  for (size_t i = 0; i < std::min(book.epub().spine().size(), size_t(10)); ++i) {
+    auto& si = book.epub().spine()[i];
+    auto& ze = book.epub().zip().entry(si.file_idx);
+    printf("  Spine[%zu] -> zip[%u] %.*s: %u bytes (compressed: %u)\n", i, si.file_idx, (int)ze.name.size(),
+           ze.name.data(), ze.uncompressed_size, ze.compressed_size);
+  }
+
+  // Find largest XHTML chapter
+  size_t max_xhtml_size = 0;
+  size_t max_xhtml_idx = 0;
+  for (size_t i = 0; i < book.epub().spine().size(); ++i) {
+    auto& si = book.epub().spine()[i];
+    auto& ze = book.epub().zip().entry(si.file_idx);
+    if (ze.uncompressed_size > max_xhtml_size) {
+      max_xhtml_size = ze.uncompressed_size;
+      max_xhtml_idx = i;
+    }
+  }
+  printf("  Largest XHTML: spine[%zu] = %zu bytes\n", max_xhtml_idx, max_xhtml_size);
+
+  // Now simulate layout of the largest chapter (like ReaderScreen does)
+  {
+    Chapter ch;
+    book.load_chapter(max_chapter_idx, ch);
+
+    FixedFont font(16, 20);
+    PageOptions opts(480, 800, 20, 12, Alignment::Start);
+    PagePosition pos{0, 0};
+    int page_count = 0;
+    while (true) {
+      auto page = layout_page(font, opts, ch, pos);
+      ++page_count;
+      if (page.at_chapter_end)
+        break;
+      if (page.end == pos)
+        break;  // safety
+      pos = page.end;
+    }
+    printf("  Largest chapter pages: %d\n", page_count);
+  }
 }

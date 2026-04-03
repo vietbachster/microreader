@@ -115,11 +115,35 @@ static constexpr uint8_t kFont8x8[95][8] = {
 
 }  // namespace detail
 
+// Index of '?' in the font table (used as fallback for unknown glyphs).
+static constexpr int kFallbackGlyphIdx = '?' - 0x20;
+
+// Decode one UTF-8 codepoint from *p, advance p past it, and return
+// the kFont8x8 glyph index.  Returns kFallbackGlyphIdx ('?') for any
+// codepoint outside printable ASCII 0x20-0x7E.
+inline int next_glyph_index(const char*& p) {
+  uint8_t b = static_cast<uint8_t>(*p);
+  // Determine byte length of this UTF-8 sequence and skip it.
+  if (b < 0x80) {
+    ++p;
+  } else if (b < 0xE0) {
+    p += 2;
+  } else if (b < 0xF0) {
+    p += 3;
+  } else {
+    p += 4;
+  }
+  int idx = static_cast<int>(b) - 0x20;
+  if (idx < 0 || idx >= 95)
+    return kFallbackGlyphIdx;
+  return idx;
+}
+
 // Draw a single character at pixel position (x, y). White pixels on black background.
 inline void draw_char(DisplayFrame& frame, int x, int y, char c) {
-  const int idx = static_cast<unsigned char>(c) - 0x20;
+  int idx = static_cast<unsigned char>(c) - 0x20;
   if (idx < 0 || idx >= 95)
-    return;
+    idx = kFallbackGlyphIdx;
   const auto& glyph = detail::kFont8x8[idx];
   for (int row = 0; row < 8; ++row) {
     for (int col = 0; col < 8; ++col) {
@@ -129,13 +153,21 @@ inline void draw_char(DisplayFrame& frame, int x, int y, char c) {
   }
 }
 
-// Draw a null-terminated string at pixel position (x, y). Clips at frame width.
+// Draw a null-terminated UTF-8 string at pixel position (x, y).
+// One glyph per codepoint; unknown codepoints render as '?'.
 inline void draw_text(DisplayFrame& frame, int x, int y, const char* text) {
   int cx = x;
   while (text && *text) {
     if (cx + 8 > frame.width())
       break;
-    draw_char(frame, cx, y, *text++);
+    int idx = next_glyph_index(text);
+    const auto& glyph = detail::kFont8x8[idx];
+    for (int row = 0; row < 8; ++row) {
+      for (int col = 0; col < 8; ++col) {
+        const bool on = (glyph[row] & (0x80u >> col)) != 0;
+        frame.set_pixel(cx + col, y + row, on);
+      }
+    }
     cx += 8;
   }
 }

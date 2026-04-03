@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include "microreader/Font.h"
 #include "microreader/content/TextLayout.h"
 
 using namespace microreader;
@@ -305,6 +306,86 @@ TEST(TextLayout, UnicodeText) {
   ASSERT_EQ(lines.size(), 1);
   // "Grüße" = 5 codepoints × 8 = 40px
   EXPECT_EQ(lines[0].words[0].x, 0);
+}
+
+// ===== German text rendering pipeline test =====
+// Simulates exactly what ReaderScreen does: layout → DrawWord → glyph iteration
+
+TEST(TextLayout, GermanTextRenderingPipeline) {
+  // Use the same font parameters as ReaderScreen: glyph_width=16, line_height=20
+  FixedFont font16(16, 20);
+
+  // German sentence with umlauts, guillemets, em-dash
+  // "Rechtsgeschäft" = 14 codepoints (13 ASCII + 1 ä)
+  // "für" = 3 codepoints (f + ü + r)
+  // "»Prinz Eugen«" = 13 codepoints (» + P,r,i,n,z + space + E,u,g,e,n + «)
+  // "1944–1945" = 9 codepoints (4 digits + – + 4 digits)
+  TextParagraph para;
+  para.runs.push_back(microreader::Run(std::string("Rechtsgesch\xc3\xa4"
+                                                   "ft"                            // Rechtsgeschäft
+                                                   " f\xc3\xbcr"                   // für
+                                                   " \xc2\xbbPrinz Eugen\xc2\xab"  // »Prinz Eugen«
+                                                   " 1944\xe2\x80\x93"             // 1944–
+                                                   "1945"),                        // 1945
+                                       FontStyle::Regular, false));
+
+  LayoutOptions opts{480, Alignment::Start};
+  auto lines = layout_paragraph(font16, opts, para);
+
+  ASSERT_GE(lines.size(), 1u);
+
+  // Verify word widths match codepoint counts × 16
+  struct Expected {
+    const char* text;
+    size_t byte_len;
+    int codepoints;
+  };
+  Expected expected[] = {
+      {"Rechtsgesch\xc3\xa4"
+       "ft",     15, 14}, // 11 ASCII + 2 bytes ä + 2 ASCII = 15 bytes, 14 codepoints
+      {"f\xc3\xbcr",    4,  3 }, // f + ü(2b) + r = 4 bytes, 3 codepoints
+      {"\xc2\xbbPrinz", 7,  6 }, // »(2b) + Prinz = 7 bytes, 6 codepoints
+      {"Eugen\xc2\xab", 7,  6 }, // Eugen + «(2b) = 7 bytes, 6 codepoints
+      {"1944\xe2\x80\x93"
+       "1945",   11, 9 }, // 1944 + –(3b) + 1945 = 11 bytes, 9 codepoints
+  };
+
+  // Collect all words from all lines
+  std::vector<LayoutWord> all_words;
+  for (auto& line : lines)
+    for (auto& w : line.words)
+      all_words.push_back(w);
+
+  ASSERT_EQ(all_words.size(), 5u) << "Expected 5 words";
+
+  for (size_t i = 0; i < 5; ++i) {
+    const auto& w = all_words[i];
+    std::string word_text(w.text, w.len);
+    SCOPED_TRACE("word[" + std::to_string(i) + "] = '" + word_text + "'");
+
+    // Verify byte length
+    EXPECT_EQ(w.len, expected[i].byte_len);
+
+    // Verify word width = codepoints × glyph_width
+    uint16_t measured = font16.word_width(w.text, w.len, FontStyle::Regular);
+    EXPECT_EQ(measured, expected[i].codepoints * 16);
+
+    // Simulate ReaderScreen's rendering loop: count glyphs via next_glyph_index
+    const char* p = w.text;
+    const char* end = w.text + w.len;
+    int glyph_count = 0;
+    while (p < end && *p) {
+      next_glyph_index(p);
+      ++glyph_count;
+    }
+    EXPECT_EQ(glyph_count, expected[i].codepoints)
+        << "Glyph count from next_glyph_index doesn't match expected codepoints";
+
+    // Verify rendered width = glyph_count × 8 × scale (where scale=2, so 16)
+    // This matches the rendering: dw.x + ci * 8 * scale
+    int rendered_width = glyph_count * 16;
+    EXPECT_EQ(rendered_width, measured) << "Rendered width doesn't match layout-measured width";
+  }
 }
 
 // ===== Word preservation across wrap =====

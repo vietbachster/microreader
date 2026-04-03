@@ -76,8 +76,7 @@ TEST_F(ZipReaderTest, StoredEpubAllStored) {
   open_fixture("stored.epub");
   // All entries (except maybe mimetype which is always stored) should be stored
   for (size_t i = 0; i < reader.entry_count(); ++i) {
-    EXPECT_EQ(reader.entry(i).compression, 0)
-        << "Entry " << reader.entry(i).name << " should be stored";
+    EXPECT_EQ(reader.entry(i).compression, 0) << "Entry " << reader.entry(i).name << " should be stored";
   }
 }
 
@@ -241,10 +240,8 @@ TEST_F(ZipReaderTest, StreamingExtract) {
     return true;
   };
 
-  std::vector<uint8_t> work_buf(33 * 1024);  // 33KB
-  ASSERT_EQ(reader.extract_streaming(file, *entry, cb, &collected,
-                                     work_buf.data(), work_buf.size()),
-            ZipError::Ok);
+  std::vector<uint8_t> work_buf(45 * 1024);  // 45KB (decomp + dict + input)
+  ASSERT_EQ(reader.extract_streaming(file, *entry, cb, &collected, work_buf.data(), work_buf.size()), ZipError::Ok);
 
   // Compare with full extract
   std::vector<uint8_t> full;
@@ -264,10 +261,9 @@ TEST_F(ZipReaderTest, StreamingAbort) {
     return *count < 100;  // abort after 100 bytes
   };
 
-  std::vector<uint8_t> work_buf(33 * 1024);
+  std::vector<uint8_t> work_buf(45 * 1024);  // 45KB (decomp + dict + input)
   // Should not error — user abort is graceful
-  ASSERT_EQ(reader.extract_streaming(file, *entry, cb, &bytes_received,
-                                     work_buf.data(), work_buf.size()),
+  ASSERT_EQ(reader.extract_streaming(file, *entry, cb, &bytes_received, work_buf.data(), work_buf.size()),
             ZipError::Ok);
   EXPECT_GE(bytes_received, 100u);
 }
@@ -290,7 +286,8 @@ TEST_P(ZipReaderAllEpubsTest, ExtractAllEntries) {
     const auto& entry = reader.entry(i);
 
     // Skip directory entries
-    if (!entry.name.empty() && entry.name.back() == '/') continue;
+    if (!entry.name.empty() && entry.name.back() == '/')
+      continue;
 
     std::vector<uint8_t> data;
     ZipError err = reader.extract(file, entry, data);
@@ -299,16 +296,7 @@ TEST_P(ZipReaderAllEpubsTest, ExtractAllEntries) {
   }
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    AllEpubs, ZipReaderAllEpubsTest,
-    ::testing::Values(
-        "basic.epub",
-        "multi_chapter.epub",
-        "with_css.epub",
-        "with_images.epub",
-        "stored.epub",
-        "nested_dirs.epub",
-        "special_chars.epub",
-        "large_chapter.epub"
-    )
-);
+INSTANTIATE_TEST_SUITE_P(AllEpubs, ZipReaderAllEpubsTest,
+                         ::testing::Values("basic.epub", "multi_chapter.epub", "with_css.epub", "with_images.epub",
+                                           "stored.epub", "nested_dirs.epub", "special_chars.epub",
+                                           "large_chapter.epub"));

@@ -9,6 +9,10 @@
 
 namespace microreader {
 
+// Callback type for streaming chapter parsing.
+// Each paragraph is emitted as soon as it's parsed — no accumulation.
+using ParagraphSink = void (*)(void* ctx, Paragraph&& para);
+
 enum class EpubError {
   Ok = 0,
   ContainerMissing,
@@ -37,6 +41,9 @@ class Epub {
   // TOC, and stylesheets.
   EpubError open(IZipFile& file);
 
+  // Release all parsed data (ZIP entries, spine, stylesheet, TOC, metadata).
+  void close();
+
   // Number of chapters (spine items).
   size_t chapter_count() const {
     return spine_.size();
@@ -44,6 +51,10 @@ class Epub {
 
   // Parse a specific chapter by index.
   EpubError parse_chapter(IZipFile& file, size_t index, Chapter& out) const;
+
+  // Stream-parse a chapter: paragraphs are emitted one at a time via sink.
+  // Uses ~37KB working memory instead of extracting the full XHTML.
+  EpubError parse_chapter_streaming(IZipFile& file, size_t index, ParagraphSink sink, void* sink_ctx) const;
 
   // Access metadata.
   const EpubMetadata& metadata() const {

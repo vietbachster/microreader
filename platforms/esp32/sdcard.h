@@ -1,0 +1,58 @@
+#pragma once
+// SD-card support for mircoreader2 on ESP32-C3.
+// The SPI bus (SPI2_HOST) is already initialised by the e-ink display driver;
+// we only add the SD-SPI device and mount FAT.
+
+#include <cstdio>
+
+#include "driver/gpio.h"
+#include "driver/sdspi_host.h"
+#include "esp_log.h"
+#include "esp_vfs_fat.h"
+#include "sdmmc_cmd.h"
+
+#define SD_CS GPIO_NUM_12
+#define SD_MOUNT "/sdcard"
+
+static const char* kSdTag = "sd";
+static sdmmc_card_t* sd_card_ = nullptr;
+
+inline bool sd_init() {
+  // CS pin: default-high so the SD card stays deselected until we talk to it.
+  gpio_set_direction(SD_CS, GPIO_MODE_OUTPUT);
+  gpio_set_level(SD_CS, 1);
+
+  sdspi_device_config_t dev_cfg = SDSPI_DEVICE_CONFIG_DEFAULT();
+  dev_cfg.gpio_cs = SD_CS;
+  dev_cfg.host_id = SPI2_HOST;
+
+  sdspi_dev_handle_t handle{};
+  esp_err_t err = sdspi_host_init_device(&dev_cfg, &handle);
+  if (err != ESP_OK) {
+    ESP_LOGE(kSdTag, "sdspi_host_init_device: %s", esp_err_to_name(err));
+    return false;
+  }
+
+  sdmmc_host_t host = SDSPI_HOST_DEFAULT();
+  host.slot = handle;
+  host.max_freq_khz = 20000;  // 20 MHz — reliable for most SD cards
+
+  esp_vfs_fat_mount_config_t mnt{};
+  mnt.format_if_mount_failed = false;
+  mnt.max_files = 4;
+  mnt.allocation_unit_size = 16 * 1024;
+
+  err = esp_vfs_fat_sdspi_mount(SD_MOUNT, &host, &dev_cfg, &mnt, &sd_card_);
+  if (err != ESP_OK) {
+    ESP_LOGE(kSdTag, "mount failed: %s", esp_err_to_name(err));
+    return false;
+  }
+
+  float mb = (float)sd_card_->csd.capacity * sd_card_->csd.sector_size / (1024.0f * 1024.0f);
+  ESP_LOGI(kSdTag, "SD mounted at %s (%.0f MB)", SD_MOUNT, mb);
+  return true;
+}
+
+inline bool sd_mounted() {
+  return sd_card_ != nullptr;
+}

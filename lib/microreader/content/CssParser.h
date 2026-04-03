@@ -76,12 +76,15 @@ class CssStylesheet {
 
   // Look up cascaded style for an element.
   CssRule get(const char* element, const char* id, const char* cls) const;
+  // Overload accepting lengths (avoids null-termination requirement).
+  CssRule get(const char* element, size_t element_len, const char* id, size_t id_len, const char* cls,
+              size_t cls_len) const;
 
   size_t rule_count() const {
     return rules_.size();
   }
 
- private:
+  // Internal selector type (public for inline matching in .cpp)
   struct Selector {
     std::string element;
     std::string id;
@@ -89,10 +92,10 @@ class CssStylesheet {
 
     static bool try_parse(const char* s, size_t len, Selector& out);
     bool matches(const char* element, const char* id, const std::vector<std::string>& classes) const;
-    // Specificity as (ids, classes, elements)
     uint32_t specificity() const;
   };
 
+ private:
   CssConfig config_;
   std::vector<std::pair<Selector, CssRule>> rules_;
 

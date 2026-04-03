@@ -6,6 +6,7 @@
 #include "../Display.h"
 #include "../DisplayQueue.h"
 #include "../Input.h"
+#include "BookSelectScreen.h"
 #include "BouncingBallDemo.h"
 #include "IScreen.h"
 #include "PatternDemo.h"
@@ -18,9 +19,14 @@ namespace microreader {
 // Owns its demo screens and actions internally.
 class MenuDemo final : public IScreen {
  public:
-  static constexpr int kMaxItems = 8;
+  static constexpr int kMaxItems = 10;
 
   MenuDemo() = default;
+
+  // Set the directory to scan for books (call before start).
+  void set_books_dir(const char* dir) {
+    book_select_.set_books_dir(dir);
+  }
 
   const char* name() const override {
     return "Menu";
@@ -29,6 +35,11 @@ class MenuDemo final : public IScreen {
   // Returns the screen the user selected.
   IScreen* chosen() const {
     return chosen_;
+  }
+
+  // Access the book selection screen (for Application to handle sub-navigation).
+  BookSelectScreen* book_select() {
+    return &book_select_;
   }
 
   void start(Canvas& canvas, DisplayQueue& queue) override;
@@ -50,6 +61,7 @@ class MenuDemo final : public IScreen {
   BouncingBallDemo bouncing_ball_;
   TextShowcaseDemo text_showcase_;
   PatternDemo pattern_;
+  BookSelectScreen book_select_;
 
   // Full item list (screens + built-in actions), rebuilt in build_items_().
   struct Item {

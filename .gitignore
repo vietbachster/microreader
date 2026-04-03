@@ -29,3 +29,14 @@ __pycache__
 /3_1_1_backup.bin
 /test/books
 /test/build2
+
+# Desktop virtual SD card — keep structure, ignore book files
+/sd/books/*.epub
+
+# Temporary benchmark/capture logs
+*.log
+test/bench_results.json
+
+# Python virtual environment
+.venv/
+/sd/books

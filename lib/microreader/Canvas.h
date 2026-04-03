@@ -347,6 +347,20 @@ class CanvasText : public CanvasElement {
       len_ = len;
     std::memcpy(text_, text, len_);
     text_[len_] = '\0';
+    // Count Unicode codepoints for width calculations.
+    glyph_count_ = 0;
+    for (size_t i = 0; i < len_;) {
+      uint8_t b = static_cast<uint8_t>(text_[i]);
+      if (b < 0x80)
+        i += 1;
+      else if (b < 0xE0)
+        i += 2;
+      else if (b < 0xF0)
+        i += 3;
+      else
+        i += 4;
+      ++glyph_count_;
+    }
     mark_dirty();
   }
 
@@ -378,18 +392,18 @@ class CanvasText : public CanvasElement {
     return scale_;
   }
   int text_width() const {
-    return static_cast<int>(len_) * kGlyphW * scale_;
+    return static_cast<int>(glyph_count_) * kGlyphW * scale_;
   }
   int text_height() const {
-    return (len_ > 0) ? kGlyphH * scale_ : 0;
+    return (glyph_count_ > 0) ? kGlyphH * scale_ : 0;
   }
 
  protected:
   void draw_content(DisplayQueue& queue) const override {
-    if (len_ == 0)
+    if (glyph_count_ == 0)
       return;
     const int s = scale_;
-    const int tw = static_cast<int>(len_) * kGlyphW * s;
+    const int tw = static_cast<int>(glyph_count_) * kGlyphW * s;
     const int th = kGlyphH * s;
     const int px = x_, py = y_;
     const bool w = white_;
@@ -400,13 +414,14 @@ class CanvasText : public CanvasElement {
       // Fill background (opposite of text color).
       for (int row = 0; row < th; ++row)
         frame.fill_row(py + row, px, px + tw, w);
-      // Draw glyphs on top.
-      for (size_t i = 0; i < n; ++i) {
-        const int idx = static_cast<unsigned char>(buf[i]) - 0x20;
-        if (idx < 0 || idx >= 95)
-          continue;
+      // Draw glyphs on top (UTF-8 aware).
+      const char* p = buf;
+      const char* end = buf + n;
+      int gi = 0;
+      while (p < end && *p) {
+        const int idx = next_glyph_index(p);
         const auto& glyph = detail::kFont8x8[idx];
-        const int gx = px + static_cast<int>(i) * kGlyphW * s;
+        const int gx = px + gi * kGlyphW * s;
         for (int grow = 0; grow < kGlyphH; ++grow) {
           const uint8_t bits = glyph[grow];
           if (bits == 0)
@@ -424,6 +439,7 @@ class CanvasText : public CanvasElement {
               frame.fill_row(py + grow * s + sr, gx + start * s, gx + col * s, !w);
           }
         }
+        ++gi;
       }
     });
   }
@@ -431,8 +447,8 @@ class CanvasText : public CanvasElement {
   void current_bounds(int& x, int& y, int& w, int& h) const override {
     x = x_;
     y = y_;
-    w = static_cast<int>(len_) * kGlyphW * scale_;
-    h = (len_ > 0) ? kGlyphH * scale_ : 0;
+    w = static_cast<int>(glyph_count_) * kGlyphW * scale_;
+    h = (glyph_count_ > 0) ? kGlyphH * scale_ : 0;
   }
 
  private:
@@ -441,6 +457,7 @@ class CanvasText : public CanvasElement {
   bool white_ = false;
   int scale_ = 1;
   size_t len_ = 0;
+  size_t glyph_count_ = 0;
   char text_[kMaxLen + 1] = {};
 };
 

@@ -2,10 +2,23 @@
 
 #include <algorithm>
 #include <cctype>
-#include <map>
+#include <memory>
 
+#ifndef MICROREADER_NO_IMAGES
 #include "ImageDecoder.h"
+#endif
 #include "XmlReader.h"
+
+#ifdef ESP_PLATFORM
+#include "esp_heap_caps.h"
+#include "esp_log.h"
+#include "esp_system.h"
+#define HEAP_LOG(tag)                                                                       \
+  ESP_LOGI("mem", "%s: free=%lu largest=%lu", tag, (unsigned long)esp_get_free_heap_size(), \
+           (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT))
+#else
+#define HEAP_LOG(tag) ((void)0)
+#endif
 
 namespace microreader {
 
@@ -131,11 +144,13 @@ MediaType parse_media_type(const std::string& s) {
   return MediaType::Unknown;
 }
 
-struct ManifestItem {
-  MediaType media_type;
-  std::string href;
-  int file_idx;
-};
+// FNV-1a hash for compact manifest ID lookup (avoids storing ID strings).
+static uint32_t fnv1a(const char* data, size_t len) {
+  uint32_t h = 2166136261u;
+  for (size_t i = 0; i < len; ++i)
+    h = (h ^ static_cast<uint8_t>(data[i])) * 16777619u;
+  return h;
+}
 
 }  // namespace
 
@@ -145,15 +160,14 @@ struct ManifestItem {
 
 // Parse NCX table of contents
 static EpubError parse_ncx(IZipFile& file, const ZipReader& zip, const ZipEntry& entry, const std::string& root_dir,
-                           TableOfContents& toc) {
-  std::vector<uint8_t> data;
-  if (zip.extract(file, entry, data) != ZipError::Ok)
+                           TableOfContents& toc, uint8_t* work_buf, size_t work_buf_size, uint8_t* xml_buf,
+                           size_t xml_buf_size) {
+  ZipEntryInput zip_input;
+  if (zip_input.open(file, entry, work_buf, work_buf_size) != ZipError::Ok)
     return EpubError::ZipError;
 
-  MemoryXmlInput input(data.data(), data.size());
-  uint8_t buf[4096];
   XmlReader reader;
-  if (reader.open(input, buf, sizeof(buf)) != XmlError::Ok)
+  if (reader.open(zip_input, xml_buf, xml_buf_size) != XmlError::Ok)
     return EpubError::XmlError;
 
   // Simple NCX parsing: find navPoint → navLabel → text, content[@src]
@@ -213,22 +227,39 @@ EpubError Epub::parse_opf(IZipFile& file, const std::string& opf_path) {
   if (!entry)
     return EpubError::ContentOpfMissing;
 
-  std::vector<uint8_t> data;
-  auto err = extract_entry(file, zip_, *entry, data);
-  if (err != EpubError::Ok)
-    return err;
+  // Single heap allocation for work buffer + XML buffer (~48KB).
+  // Work buffer layout: [tinfl_decompressor(~11KB) | dict(32KB) | input(1KB)].
+  // Allocated in a unique_ptr so we can free it between phases.
+  static constexpr size_t kWorkBufSize = ZipEntryInput::kDecompSize + ZipEntryInput::kDictSize + 1024;
+  static constexpr size_t kXmlBufSize = 4096;
+  HEAP_LOG("parse_opf: before alloc work_buf");
+  auto mem = std::make_unique<uint8_t[]>(kWorkBufSize + kXmlBufSize);
+  uint8_t* work_buf = mem.get();
+  uint8_t* xml_buf = mem.get() + kWorkBufSize;
+  HEAP_LOG("parse_opf: after alloc work_buf (49KB)");
 
-  MemoryXmlInput input(data.data(), data.size());
-  // Use a buffer large enough to hold the entire OPF at once — avoids
-  // XmlReader streaming boundary issues on large OPFs (e.g. 77K+ bytes).
-  std::vector<uint8_t> buf(std::max(data.size() + 1, size_t(4096)));
+  // --- Phase 1: Stream-parse OPF metadata ---
+  ZipEntryInput zip_input;
+  if (zip_input.open(file, *entry, work_buf, kWorkBufSize) != ZipError::Ok)
+    return EpubError::ZipError;
+
   XmlReader reader;
-  if (reader.open(input, buf.data(), buf.size()) != XmlError::Ok)
+  if (reader.open(zip_input, xml_buf, kXmlBufSize) != XmlError::Ok)
     return EpubError::XmlError;
 
-  std::map<std::string, ManifestItem> manifest;
+  // Compact manifest: store only hash + file_idx (~6 bytes/entry instead of ~120).
+  // This keeps heap usage under control for EPUBs with 500+ manifest items.
+  // Pre-reserve to avoid reallocation fragmentation (critical for ESP32).
+  struct ManifestRef {
+    uint32_t id_hash;
+    int16_t file_idx;
+  };
+  std::vector<ManifestRef> manifest;
+  manifest.reserve(zip_.entry_count());
+  std::vector<int16_t> css_idxs;  // CSS file indices for stylesheet extraction
   int ncx_file_idx = -1;
   std::string toc_id_ref;
+  uint32_t ncx_id_hash = 0;  // hash of NCX item's manifest ID
 
   // Track which section we're in for context
   enum class Section { None, Metadata, Manifest, Spine } section = Section::None;
@@ -284,12 +315,12 @@ EpubError Epub::parse_opf(IZipFile& file, const std::string& opf_path) {
         }
       } else if (section == Section::Manifest) {
         if (sv_eq(ev.name, "item")) {
-          auto id = sv_to_string(ev.attrs.get("id"));
-          auto href = sv_to_string(ev.attrs.get("href"));
-          auto mt = sv_to_string(ev.attrs.get("media-type"));
+          auto id = ev.attrs.get("id");
+          auto href = ev.attrs.get("href");
+          auto mt_sv = ev.attrs.get("media-type");
 
           if (!id.empty() && !href.empty()) {
-            std::string full_path = root_dir_ + href;
+            std::string full_path = root_dir_ + std::string(href.data, href.length);
             int idx = -1;
             for (size_t i = 0; i < zip_.entry_count(); ++i) {
               if (zip_.entry(i).name == full_path) {
@@ -297,15 +328,32 @@ EpubError Epub::parse_opf(IZipFile& file, const std::string& opf_path) {
                 break;
               }
             }
-            manifest[id] = {parse_media_type(mt), href, idx};
+            uint32_t h = fnv1a(id.data, id.length);
+            manifest.push_back({h, static_cast<int16_t>(idx)});
+
+            auto mt = parse_media_type(std::string(mt_sv.data, mt_sv.length));
+            if (mt == MediaType::Css && idx >= 0)
+              css_idxs.push_back(static_cast<int16_t>(idx));
+            if (mt == MediaType::Ncx) {
+              ncx_file_idx = idx;
+              ncx_id_hash = h;
+            }
+            // Resolve cover inline (metadata is parsed before manifest)
+            if (metadata_.cover_id.has_value() && id.length == metadata_.cover_id->size() &&
+                std::string(id.data, id.length) == *metadata_.cover_id) {
+              cover_idx_ = idx;
+            }
           }
         }
       } else if (section == Section::Spine) {
         if (sv_eq(ev.name, "itemref")) {
-          auto idref = sv_to_string(ev.attrs.get("idref"));
-          auto it = manifest.find(idref);
-          if (it != manifest.end() && it->second.file_idx >= 0) {
-            spine_.push_back({static_cast<uint16_t>(it->second.file_idx)});
+          auto idref = ev.attrs.get("idref");
+          uint32_t h = fnv1a(idref.data, idref.length);
+          for (auto& ref : manifest) {
+            if (ref.id_hash == h && ref.file_idx >= 0) {
+              spine_.push_back({static_cast<uint16_t>(ref.file_idx)});
+              break;
+            }
           }
         }
       }
@@ -318,38 +366,42 @@ EpubError Epub::parse_opf(IZipFile& file, const std::string& opf_path) {
   }
 
   // Resolve toc NCX reference
-  if (!toc_id_ref.empty()) {
-    auto it = manifest.find(toc_id_ref);
-    if (it != manifest.end() && it->second.media_type == MediaType::Ncx) {
-      ncx_file_idx = it->second.file_idx;
+  if (!toc_id_ref.empty() && ncx_file_idx >= 0) {
+    uint32_t toc_hash = fnv1a(toc_id_ref.data(), toc_id_ref.size());
+    if (toc_hash == ncx_id_hash) {
+      // NCX item's ID matches the toc attribute — keep ncx_file_idx
+    } else {
+      ncx_file_idx = -1;  // mismatch, discard
     }
   }
 
-  // Find cover in manifest
-  if (metadata_.cover_id.has_value()) {
-    auto it = manifest.find(*metadata_.cover_id);
-    if (it != manifest.end()) {
-      cover_idx_ = it->second.file_idx;
+  // Manifest is no longer needed — free its heap allocation.
+  manifest.clear();
+  manifest.shrink_to_fit();
+
+  HEAP_LOG("parse_opf: after OPF parse, before CSS");
+
+  // --- Phase 2: Extract CSS ---
+  // Reuse work_buf for CSS extraction (already done with OPF streaming).
+  for (size_t ci = 0; ci < css_idxs.size(); ++ci) {
+    auto& css_entry = zip_.entry(css_idxs[ci]);
+    std::vector<uint8_t> css_data;
+    HEAP_LOG("parse_opf: before CSS extract");
+    if (zip_.extract(file, css_entry, css_data, work_buf, kWorkBufSize) == ZipError::Ok) {
+      stylesheet_.extend_from_sheet(reinterpret_cast<const char*>(css_data.data()), css_data.size());
     }
+    HEAP_LOG("parse_opf: after CSS extract+parse");
   }
 
-  // Parse stylesheets
-  for (auto& [id, item] : manifest) {
-    if (item.media_type == MediaType::Css && item.file_idx >= 0) {
-      auto& css_entry = zip_.entry(item.file_idx);
-      std::vector<uint8_t> css_data;
-      if (zip_.extract(file, css_entry, css_data) == ZipError::Ok) {
-        stylesheet_.extend_from_sheet(reinterpret_cast<const char*>(css_data.data()), css_data.size());
-      }
-    }
-  }
-
-  // Parse NCX
+  // --- Phase 3: Parse NCX (reuses same work buffer and xml buffer) ---
   if (ncx_file_idx >= 0) {
+    HEAP_LOG("parse_opf: before NCX");
     auto& ncx_entry = zip_.entry(ncx_file_idx);
-    parse_ncx(file, zip_, ncx_entry, root_dir_, toc_);
+    parse_ncx(file, zip_, ncx_entry, root_dir_, toc_, work_buf, kWorkBufSize, xml_buf, kXmlBufSize);
+    HEAP_LOG("parse_opf: after NCX parse");
   }
 
+  HEAP_LOG("parse_opf: done");
   return EpubError::Ok;
 }
 
@@ -357,14 +409,30 @@ EpubError Epub::parse_opf(IZipFile& file, const std::string& opf_path) {
 // Epub::open
 // ---------------------------------------------------------------------------
 
+void Epub::close() {
+  zip_ = ZipReader{};
+  root_dir_.clear();
+  root_dir_.shrink_to_fit();
+  metadata_ = EpubMetadata{};
+  spine_.clear();
+  spine_.shrink_to_fit();
+  toc_ = TableOfContents{};
+  stylesheet_ = CssStylesheet{stylesheet_.config()};  // keep config, drop rules
+  cover_idx_ = -1;
+}
+
 EpubError Epub::open(IZipFile& file) {
+  HEAP_LOG("epub.open: start");
+  close();  // release previous data
   if (zip_.open(file) != ZipError::Ok)
     return EpubError::ZipError;
+  HEAP_LOG("epub.open: after zip_.open");
 
   std::string rootfile_path;
   auto err = parse_container(file, rootfile_path);
   if (err != EpubError::Ok)
     return err;
+  HEAP_LOG("epub.open: after parse_container");
 
   // Determine root directory
   auto slash = rootfile_path.rfind('/');
@@ -450,16 +518,35 @@ static std::string decode_entities(const std::string& text) {
 }
 
 static bool is_block_element(XmlStringView sv) {
-  static const char* block_elements[] = {
-      "p",     "h1",    "h2",     "h3",     "h4",     "h5",      "h6",      "li",         "ul",         "ol",
-      "dl",    "dd",    "dt",     "tr",     "div",    "pre",     "nav",     "aside",      "table",      "tbody",
-      "thead", "tfoot", "figure", "header", "footer", "section", "article", "blockquote", "figcaption",
-  };
-  for (const char* tag : block_elements) {
-    if (sv == tag)
-      return true;
+  if (!sv.data)
+    return false;
+  switch (sv.length) {
+    case 1:
+      return sv.data[0] == 'p';
+    case 2:
+      if (sv.data[0] == 'h')
+        return sv.data[1] >= '1' && sv.data[1] <= '6';
+      return std::memcmp(sv.data, "li", 2) == 0 || std::memcmp(sv.data, "ul", 2) == 0 ||
+             std::memcmp(sv.data, "ol", 2) == 0 || std::memcmp(sv.data, "dl", 2) == 0 ||
+             std::memcmp(sv.data, "dd", 2) == 0 || std::memcmp(sv.data, "dt", 2) == 0 ||
+             std::memcmp(sv.data, "tr", 2) == 0;
+    case 3:
+      return std::memcmp(sv.data, "div", 3) == 0 || std::memcmp(sv.data, "pre", 3) == 0 ||
+             std::memcmp(sv.data, "nav", 3) == 0;
+    case 5:
+      return std::memcmp(sv.data, "aside", 5) == 0 || std::memcmp(sv.data, "table", 5) == 0 ||
+             std::memcmp(sv.data, "tbody", 5) == 0 || std::memcmp(sv.data, "thead", 5) == 0 ||
+             std::memcmp(sv.data, "tfoot", 5) == 0;
+    case 6:
+      return std::memcmp(sv.data, "figure", 6) == 0 || std::memcmp(sv.data, "header", 6) == 0 ||
+             std::memcmp(sv.data, "footer", 6) == 0;
+    case 7:
+      return std::memcmp(sv.data, "section", 7) == 0 || std::memcmp(sv.data, "article", 7) == 0;
+    case 10:
+      return std::memcmp(sv.data, "blockquote", 10) == 0 || std::memcmp(sv.data, "figcaption", 10) == 0;
+    default:
+      return false;
   }
-  return false;
 }
 
 static bool is_italic(XmlStringView name) {
@@ -487,16 +574,21 @@ static bool is_small_element(XmlStringView name) {
 
 class BodyParser {
  public:
+  using Sink = void (*)(void* ctx, Paragraph&& para);
+
+  void set_sink(Sink s, void* ctx) {
+    sink_ = s;
+    sink_ctx_ = ctx;
+  }
+
   void push_text(const char* text, size_t len) {
     if (pre_depth_.has_value()) {
       push_preformatted_text(text, len);
       return;
     }
 
-    std::string s(text, len);
-
-    const char* t = s.c_str();
-    size_t tlen = s.size();
+    const char* t = text;
+    size_t tlen = len;
 
     // If at start of paragraph, trim leading whitespace
     if (runs_.empty() && current_run_.empty()) {
@@ -516,44 +608,160 @@ class BodyParser {
       current_run_ += ' ';
     }
 
-    // Normalize whitespace: collapse runs of whitespace to single space
-    std::string decoded = decode_entities(std::string(t, tlen));
+    // Fused decode_entities + whitespace normalization in a single pass.
+    // Writes directly into normalized_ scratch buffer to avoid allocations.
+    normalized_.clear();
     bool in_space = false;
-    std::string normalized;
-    for (size_t i = 0; i < decoded.size(); ++i) {
-      unsigned char uc = static_cast<unsigned char>(decoded[i]);
-      // Treat UTF-8 non-breaking space (0xC2 0xA0) as whitespace
-      bool is_sp = std::isspace(uc);
-      if (!is_sp && uc == 0xC2 && i + 1 < decoded.size() && static_cast<unsigned char>(decoded[i + 1]) == 0xA0) {
-        is_sp = true;
-        ++i;  // skip the 0xA0 byte
+    size_t i = 0;
+    while (i < tlen) {
+      unsigned char uc = static_cast<unsigned char>(t[i]);
+
+      // Entity decoding
+      if (uc == '&') {
+        // Find semicolon within 12 chars
+        size_t semi = SIZE_MAX;
+        for (size_t j = i + 1; j < tlen && j < i + 12; ++j) {
+          if (t[j] == ';') {
+            semi = j;
+            break;
+          }
+        }
+        if (semi != SIZE_MAX) {
+          const char* ent = t + i + 1;
+          size_t ent_len = semi - i - 1;
+          char decoded_char = 0;
+          bool handled = false;
+
+          if (ent_len == 3 && ent[0] == 'a' && ent[1] == 'm' && ent[2] == 'p') {
+            decoded_char = '&';
+            handled = true;
+          } else if (ent_len == 2 && ent[0] == 'l' && ent[1] == 't') {
+            decoded_char = '<';
+            handled = true;
+          } else if (ent_len == 2 && ent[0] == 'g' && ent[1] == 't') {
+            decoded_char = '>';
+            handled = true;
+          } else if (ent_len == 4 && ent[0] == 'q' && ent[1] == 'u' && ent[2] == 'o' && ent[3] == 't') {
+            decoded_char = '"';
+            handled = true;
+          } else if (ent_len == 4 && ent[0] == 'a' && ent[1] == 'p' && ent[2] == 'o' && ent[3] == 's') {
+            decoded_char = '\'';
+            handled = true;
+          } else if (ent_len == 4 && ent[0] == 'n' && ent[1] == 'b' && ent[2] == 's' && ent[3] == 'p') {
+            // nbsp → treat as space for whitespace normalization
+            if (!in_space) {
+              normalized_ += ' ';
+              in_space = true;
+            }
+            i = semi + 1;
+            continue;
+          } else if (ent_len > 0 && ent[0] == '#') {
+            // Numeric entity
+            uint32_t code = 0;
+            if (ent_len > 1 && ent[1] == 'x') {
+              for (size_t j = 2; j < ent_len; ++j)
+                code = code * 16 + (std::isdigit((unsigned char)ent[j]) ? ent[j] - '0' : (ent[j] | 0x20) - 'a' + 10);
+            } else {
+              for (size_t j = 1; j < ent_len; ++j)
+                code = code * 10 + (ent[j] - '0');
+            }
+            // Check if the code point is whitespace
+            if (code == 0xA0 || code == ' ' || code == '\t' || code == '\n' || code == '\r') {
+              if (!in_space) {
+                normalized_ += ' ';
+                in_space = true;
+              }
+              i = semi + 1;
+              continue;
+            }
+            // UTF-8 encode
+            if (code < 0x80) {
+              normalized_ += static_cast<char>(code);
+            } else if (code < 0x800) {
+              normalized_ += static_cast<char>(0xC0 | (code >> 6));
+              normalized_ += static_cast<char>(0x80 | (code & 0x3F));
+            } else if (code < 0x10000) {
+              normalized_ += static_cast<char>(0xE0 | (code >> 12));
+              normalized_ += static_cast<char>(0x80 | ((code >> 6) & 0x3F));
+              normalized_ += static_cast<char>(0x80 | (code & 0x3F));
+            } else {
+              normalized_ += static_cast<char>(0xF0 | (code >> 18));
+              normalized_ += static_cast<char>(0x80 | ((code >> 12) & 0x3F));
+              normalized_ += static_cast<char>(0x80 | ((code >> 6) & 0x3F));
+              normalized_ += static_cast<char>(0x80 | (code & 0x3F));
+            }
+            in_space = false;
+            i = semi + 1;
+            continue;
+          }
+
+          if (handled) {
+            // Check if decoded char is whitespace
+            if (std::isspace((unsigned char)decoded_char)) {
+              if (!in_space) {
+                normalized_ += ' ';
+                in_space = true;
+              }
+            } else {
+              normalized_ += decoded_char;
+              in_space = false;
+            }
+            i = semi + 1;
+            continue;
+          }
+          // Unknown entity — keep as-is, fall through
+        }
+        // Not a valid entity — output the '&' character
+        normalized_ += '&';
+        in_space = false;
+        ++i;
+        continue;
       }
-      if (is_sp) {
+
+      // UTF-8 non-breaking space (0xC2 0xA0)
+      if (uc == 0xC2 && i + 1 < tlen && static_cast<unsigned char>(t[i + 1]) == 0xA0) {
         if (!in_space) {
-          normalized += ' ';
+          normalized_ += ' ';
           in_space = true;
         }
-      } else {
-        normalized += decoded[i];
-        in_space = false;
+        i += 2;
+        continue;
       }
+
+      // Normal whitespace
+      if (std::isspace(uc)) {
+        if (!in_space) {
+          normalized_ += ' ';
+          in_space = true;
+        }
+        ++i;
+        continue;
+      }
+
+      // Regular character
+      normalized_ += static_cast<char>(uc);
+      in_space = false;
+      ++i;
     }
 
-    // Trim leading/trailing whitespace from normalized
+    // Trim leading/trailing spaces from normalized_
     size_t start = 0;
-    while (start < normalized.size() && normalized[start] == ' ')
+    while (start < normalized_.size() && normalized_[start] == ' ')
       ++start;
-    size_t end = normalized.size();
-    while (end > start && normalized[end - 1] == ' ')
+    size_t end = normalized_.size();
+    while (end > start && normalized_[end - 1] == ' ')
       --end;
 
     if (start == end) {
-      // All-whitespace text node: just note that it ended with space
       has_trailing_space_ = ends_whitespace;
       return;
     }
 
-    current_run_ += apply_text_transform(normalized.substr(start, end - start));
+    if (text_transform_ != TextTransform::None) {
+      current_run_ += apply_text_transform(normalized_.substr(start, end - start));
+    } else {
+      current_run_.append(normalized_, start, end - start);
+    }
 
     has_trailing_space_ = ends_whitespace;
     if (has_trailing_space_) {
@@ -615,7 +823,7 @@ class BodyParser {
     // Only do this for actual <br/> tags (emit_if_empty=true), not <tr> etc.
     if (emit_if_empty && runs_.empty()) {
       auto para = Paragraph::make_text(TextParagraph{});
-      paragraphs_.push_back(std::move(para));
+      emit(std::move(para));
     }
     // After a line break, suppress leading whitespace (from source formatting)
     has_trailing_space_ = true;
@@ -647,20 +855,20 @@ class BodyParser {
         pending_margin_bottom_.reset();
       }
 
-      paragraphs_.push_back(std::move(para));
+      emit(std::move(para));
       runs_.clear();
       indent_.reset();
     } else if (pending_inline_image_.has_value()) {
       // No text to merge with — emit as standalone image paragraph
       auto img = *pending_inline_image_;
       pending_inline_image_.reset();
-      paragraphs_.push_back(Paragraph::make_image(img.key, img.width, img.height));
+      emit(Paragraph::make_image(img.key, img.width, img.height));
     }
   }
 
   void push_image(uint16_t key, uint16_t w = 0, uint16_t h = 0) {
     flush_run();
-    paragraphs_.push_back(Paragraph::make_image(key, w, h));
+    emit(Paragraph::make_image(key, w, h));
   }
 
   // Store a float image to be merged inline with the next text paragraph.
@@ -670,14 +878,14 @@ class BodyParser {
 
   void push_hr() {
     flush_run();
-    paragraphs_.push_back(Paragraph::make_hr());
+    emit(Paragraph::make_hr());
   }
 
   void push_page_break() {
     flush_run();
     // Only emit if there is already content (avoid leading blank page)
-    if (!paragraphs_.empty()) {
-      paragraphs_.push_back(Paragraph::make_page_break());
+    if (has_emitted_ || !paragraphs_.empty()) {
+      emit(Paragraph::make_page_break());
     }
   }
 
@@ -845,25 +1053,32 @@ class BodyParser {
   std::vector<Paragraph> paragraphs_;
   std::vector<Run> runs_;
   std::string current_run_;
+  std::string normalized_;  // reusable scratch buffer for push_text()
   bool bold_ = false;
   bool italic_ = false;
   FontSize font_size_ = FontSize::Normal;
   bool has_trailing_space_ = false;
+
+  Sink sink_ = nullptr;
+  void* sink_ctx_ = nullptr;
+  bool has_emitted_ = false;
+
+  void emit(Paragraph&& p) {
+    has_emitted_ = true;
+    if (sink_) {
+      sink_(sink_ctx_, std::move(p));
+    } else {
+      paragraphs_.push_back(std::move(p));
+    }
+  }
 };
 
 }  // anonymous namespace
 
-EpubError parse_xhtml_body(const uint8_t* data, size_t size, const CssStylesheet* inline_css,
-                           const CssStylesheet* extern_css, const std::string& base_dir, const ZipReader& zip,
-                           std::vector<Paragraph>& out) {
-  MemoryXmlInput input(data, size);
-  // Use a buffer large enough for the full XHTML to avoid streaming boundary issues.
-  std::vector<uint8_t> buf(std::max(size + 1, size_t(4096)));
-  XmlReader reader;
-  if (reader.open(input, buf.data(), buf.size()) != XmlError::Ok) {
-    return EpubError::XmlError;
-  }
-
+// Internal helper: parse XML events from an already-opened XmlReader.
+// Parses inline <style> elements, skips to <body>, then processes body events.
+static EpubError parse_xhtml_events(XmlReader& reader, const CssStylesheet* inline_css, const CssStylesheet* extern_css,
+                                    const std::string& base_dir, const ZipReader& zip, BodyParser& parser) {
   // Skip to <body>
   CssStylesheet parsed_inline_css(extern_css ? extern_css->config() : CssConfig{});
   XmlEvent ev;
@@ -884,8 +1099,6 @@ EpubError parse_xhtml_body(const uint8_t* data, size_t size, const CssStylesheet
   }
 
   const CssStylesheet* effective_inline = inline_css ? inline_css : &parsed_inline_css;
-
-  BodyParser parser;
 
   while (reader.next_event(ev) == XmlError::Ok) {
     if (ev.type == XmlEventType::EndOfFile)
@@ -945,21 +1158,20 @@ EpubError parse_xhtml_body(const uint8_t* data, size_t size, const CssStylesheet
       auto class_sv = ev.attrs.get("class");
       auto style_sv = ev.attrs.get("style");
 
-      std::string id_str = sv_to_string(id_sv);
-      std::string class_str = sv_to_string(class_sv);
-      std::string name_str = sv_to_string(ev.name);
-
       CssRule inline_rule;
       if (!style_sv.empty()) {
         inline_rule = CssRule::parse(style_sv.data, style_sv.length, extern_css ? extern_css->config() : CssConfig{});
       }
 
-      CssRule style = inline_rule +
-                      effective_inline->get(name_str.c_str(), id_str.empty() ? nullptr : id_str.c_str(),
-                                            class_str.empty() ? nullptr : class_str.c_str()) +
-                      (extern_css ? extern_css->get(name_str.c_str(), id_str.empty() ? nullptr : id_str.c_str(),
-                                                    class_str.empty() ? nullptr : class_str.c_str())
-                                  : CssRule{});
+      const char* el_p = ev.name.data ? ev.name.data : "";
+      size_t el_len = ev.name.length;
+      const char* id_p = id_sv.data ? id_sv.data : nullptr;
+      size_t id_len = id_sv.length;
+      const char* cls_p = class_sv.data ? class_sv.data : nullptr;
+      size_t cls_len = class_sv.length;
+
+      CssRule style = inline_rule + effective_inline->get(el_p, el_len, id_p, id_len, cls_p, cls_len) +
+                      (extern_css ? extern_css->get(el_p, el_len, id_p, id_len, cls_p, cls_len) : CssRule{});
 
       // Apply browser-default margins for elements that usually have them.
       // Only apply if no explicit margin-left was set by CSS.
@@ -1257,6 +1469,25 @@ EpubError parse_xhtml_body(const uint8_t* data, size_t size, const CssStylesheet
     }
   }
 
+  return EpubError::Ok;
+}
+
+EpubError parse_xhtml_body(const uint8_t* data, size_t size, const CssStylesheet* inline_css,
+                           const CssStylesheet* extern_css, const std::string& base_dir, const ZipReader& zip,
+                           std::vector<Paragraph>& out) {
+  MemoryXmlInput input(data, size);
+  // Use a buffer large enough for the full XHTML to avoid streaming boundary issues.
+  std::vector<uint8_t> buf(std::max(size + 1, size_t(4096)));
+  XmlReader reader;
+  if (reader.open(input, buf.data(), buf.size()) != XmlError::Ok) {
+    return EpubError::XmlError;
+  }
+
+  BodyParser parser;
+  EpubError err = parse_xhtml_events(reader, inline_css, extern_css, base_dir, zip, parser);
+  if (err != EpubError::Ok)
+    return err;
+
   out = parser.finish();
   return EpubError::Ok;
 }
@@ -1290,7 +1521,7 @@ EpubError Epub::parse_chapter(IZipFile& file, size_t index, Chapter& out) const 
   // Determine base directory
   std::string base_dir;
   auto slash = entry.name.rfind('/');
-  if (slash != std::string::npos) {
+  if (slash != std::string_view::npos) {
     base_dir = entry.name.substr(0, slash + 1);
   }
 
@@ -1298,6 +1529,7 @@ EpubError Epub::parse_chapter(IZipFile& file, size_t index, Chapter& out) const 
   if (err != EpubError::Ok)
     return err;
 
+#ifndef MICROREADER_NO_IMAGES
   // Resolve image dimensions: many EPUBs omit width/height attributes on <img>.
   // Read actual dimensions from the image file header so layout can size them.
   for (auto& para : out.paragraphs) {
@@ -1320,6 +1552,7 @@ EpubError Epub::parse_chapter(IZipFile& file, size_t index, Chapter& out) const 
       }
     }
   }
+#endif
 
   // Promote large inline float images to standalone Image paragraphs.
   // Large images (wider than 1/3 content width or taller than 4 line heights)
@@ -1339,6 +1572,49 @@ EpubError Epub::parse_chapter(IZipFile& file, size_t index, Chapter& out) const 
     }
   }
 
+  return EpubError::Ok;
+}
+
+// ---------------------------------------------------------------------------
+// Epub::parse_chapter_streaming
+// ---------------------------------------------------------------------------
+
+EpubError Epub::parse_chapter_streaming(IZipFile& file, size_t index, ParagraphSink sink, void* sink_ctx) const {
+  if (index >= spine_.size())
+    return EpubError::InvalidData;
+
+  auto& spine_item = spine_[index];
+  auto& entry = zip_.entry(spine_item.file_idx);
+
+  // Determine base directory
+  std::string base_dir;
+  auto slash = entry.name.rfind('/');
+  if (slash != std::string_view::npos) {
+    base_dir = entry.name.substr(0, slash + 1);
+  }
+
+  // Single heap allocation for work buffer + XML buffer (~48KB).
+  // Work buffer layout: [tinfl_decompressor(~11KB) | dict(32KB) | input(1KB)].
+  static constexpr size_t kWorkBufSize = ZipEntryInput::kDecompSize + ZipEntryInput::kDictSize + 1024;
+  static constexpr size_t kXmlBufSize = 4096;
+  auto mem = std::make_unique<uint8_t[]>(kWorkBufSize + kXmlBufSize);
+
+  ZipEntryInput zip_input;
+  if (zip_input.open(file, entry, mem.get(), kWorkBufSize) != ZipError::Ok)
+    return EpubError::ZipError;
+
+  XmlReader reader;
+  if (reader.open(zip_input, mem.get() + kWorkBufSize, kXmlBufSize) != XmlError::Ok)
+    return EpubError::XmlError;
+
+  BodyParser parser;
+  parser.set_sink(sink, sink_ctx);
+
+  EpubError err = parse_xhtml_events(reader, nullptr, &stylesheet_, base_dir, zip_, parser);
+  if (err != EpubError::Ok)
+    return err;
+
+  parser.finish();  // flush remaining content via sink
   return EpubError::Ok;
 }
 

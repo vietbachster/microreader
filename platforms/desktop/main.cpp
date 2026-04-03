@@ -1,3 +1,4 @@
+#include <filesystem>
 #include <iostream>
 
 #include "display.h"
@@ -18,6 +19,12 @@ int main() {
     microreader::DisplayQueue queue(display);
     runtime.set_transition_toggle(&display.show_transitions);
     display.set_phases_source(&queue.phases);
+
+    // Mount sd/books as the virtual SD card books directory.
+    static std::string books_path = std::filesystem::absolute("sd/books").string();
+    std::filesystem::create_directories(books_path);
+    app.set_books_dir(books_path.c_str());
+
     app.start(logger, queue);
     microreader::run_loop(app, queue, input, runtime, logger);
   } catch (const std::exception& e) {

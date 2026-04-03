@@ -12,6 +12,11 @@ namespace microreader {
 
 void MenuDemo::build_items_(DisplayQueue& queue) {
   count_ = 0;
+  // Book selection (shown first if a books directory has been set).
+  if (book_select_.has_books_dir()) {
+    if (count_ < kMaxItems)
+      items_[count_++] = {"Select Book", &book_select_, nullptr};
+  }
   // Demo screens.
   IScreen* screens[] = {&bouncing_ball_, &text_showcase_, &pattern_};
   for (auto* s : screens) {

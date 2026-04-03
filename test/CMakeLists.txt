@@ -38,6 +38,17 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(miniz)
 
+# Google Benchmark
+FetchContent_Declare(
+    googlebenchmark
+    GIT_REPOSITORY https://github.com/google/benchmark.git
+    GIT_TAG        v1.9.1
+    GIT_SHALLOW    TRUE
+)
+set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+set(BENCHMARK_ENABLE_GTEST_TESTS OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(googlebenchmark)
+
 # ---------------------------------------------------------------------------
 # Core content library (the code under test)
 # ---------------------------------------------------------------------------
@@ -52,6 +63,9 @@ add_library(microreader_content STATIC
     ${LIB_DIR}/content/Book.cpp
     ${LIB_DIR}/content/TextLayout.cpp
     ${LIB_DIR}/content/HtmlExporter.cpp
+    ${LIB_DIR}/content/MrbWriter.cpp
+    ${LIB_DIR}/content/MrbReader.cpp
+    ${LIB_DIR}/content/MrbConverter.cpp
 )
 target_include_directories(microreader_content PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/../lib
@@ -68,6 +82,9 @@ add_executable(unit_tests
     unit/EpubParserTest.cpp
     unit/ImageDecoderTest.cpp
     unit/TextLayoutTest.cpp
+    unit/MrbFormatTest.cpp
+    unit/MrbLayoutComparisonTest.cpp
+    unit/OhlerDiag.cpp
 )
 target_link_libraries(unit_tests PRIVATE
     microreader_content
@@ -92,6 +109,8 @@ add_executable(microreader_tests
     unit/BulkBookTest.cpp
     unit/TextLayoutTest.cpp
     unit/HtmlExportTest.cpp
+    unit/MrbFormatTest.cpp
+    unit/MrbLayoutComparisonTest.cpp
 )
 target_link_libraries(microreader_tests PRIVATE
     microreader_content
@@ -107,3 +126,17 @@ target_compile_definitions(microreader_tests PRIVATE
 # Register with CTest
 enable_testing()
 add_test(NAME microreader_tests COMMAND microreader_tests)
+
+# ---------------------------------------------------------------------------
+# Benchmarks (Google Benchmark)
+# ---------------------------------------------------------------------------
+add_executable(conversion_bench
+    bench/ConversionBench.cpp
+)
+target_link_libraries(conversion_bench PRIVATE
+    microreader_content
+    benchmark::benchmark
+)
+target_compile_definitions(conversion_bench PRIVATE
+    TEST_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+)

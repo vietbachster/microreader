@@ -8,6 +8,7 @@
 #include "microreader/DisplayQueue.h"
 #include "microreader/Loop.h"
 #include "runtime.h"
+#include "sdcard.h"
 #include "serial_lut.h"
 
 static void verify_ota() {
@@ -22,7 +23,7 @@ static void verify_ota() {
 
 // Toggled by the menu; controls whether the serial LUT editor
 // overrides the fast (active) LUT or the settle LUT.
-bool g_lut_target_settle = false;
+bool g_lut_target_settle = false;  // kept for MenuDemo extern
 
 extern "C" void app_main(void) {
   verify_ota();
@@ -35,12 +36,27 @@ extern "C" void app_main(void) {
   static microreader::DisplayQueue queue(epd);
 
   // Wait for the serial monitor to connect before logging anything.
-  // vTaskDelay(pdMS_TO_TICKS(2000));
+  vTaskDelay(pdMS_TO_TICKS(3000));
 
   logger.log(microreader::LogLevel::Info, "Booting up...");
 
   epd.begin();
-  serial_lut_start();
+
+  // Mount SD card (shares SPI bus with display).
+  if (sd_init()) {
+    logger.log(microreader::LogLevel::Info, "SD card ready");
+    ESP_LOGI("mem", "Free heap after SD init: %lu", (unsigned long)esp_get_free_heap_size());
+
+    // Ensure books directory exists.
+    mkdir("/sdcard/books", 0775);
+
+    // Register the books directory for the selection screen.
+    app.set_books_dir("/sdcard/books");
+  } else {
+    logger.log(microreader::LogLevel::Warning, "SD card not available");
+  }
+
+  serial_start();
 
   static uint8_t lut_buf[kLutSize];
 

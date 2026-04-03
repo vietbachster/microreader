@@ -31,6 +31,11 @@ void Application::start(ILogger& logger, DisplayQueue& queue) {
   queue.full_refresh();
 }
 
+void Application::auto_open_book(const char* epub_path, DisplayQueue& queue) {
+  auto_reader_.set_path(epub_path);
+  screen_mgr_.push(&auto_reader_, canvas_, queue);
+}
+
 void Application::update(const ButtonState& buttons, uint32_t dt_ms, DisplayQueue& queue, ILogger& logger,
                          IRuntime& runtime) {
   if (!started_)
@@ -76,8 +81,19 @@ void Application::update(const ButtonState& buttons, uint32_t dt_ms, DisplayQueu
         if (chosen)
           screen_mgr_.push(chosen, canvas_, queue);
       } else {
-        // Pop back to the previous screen.
-        screen_mgr_.pop(canvas_, queue);
+        // Check if the exiting screen selected a sub-screen to push.
+        IScreen* next = nullptr;
+        auto* book_sel = menu_.book_select();
+        if (top == book_sel)
+          next = book_sel->chosen();
+
+        if (next) {
+          // Push the sub-screen (e.g. BookSelect → Reader).
+          screen_mgr_.push(next, canvas_, queue);
+        } else {
+          // Pop back to the previous screen.
+          screen_mgr_.pop(canvas_, queue);
+        }
       }
     }
   }

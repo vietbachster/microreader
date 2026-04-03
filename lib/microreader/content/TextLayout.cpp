@@ -49,12 +49,42 @@ static char32_t utf8_decode(const char* s, size_t len, size_t& pos) {
 // Word splitting helpers
 // ---------------------------------------------------------------------------
 
-// Check if character is whitespace
+// Check if byte is ASCII whitespace
 static bool is_ws(char c) {
   return c == ' ' || c == '\t' || c == '\n' || c == '\r';
 }
 
-// Split text into (start, len) word spans, preserving byte offsets
+// Check for Unicode whitespace at position `i` in text of length `len`.
+// Returns the byte length of the whitespace sequence (0 if not whitespace).
+// Handles ASCII whitespace and multi-byte Unicode space characters:
+//   U+00A0 NBSP (C2 A0), U+2000–U+200A various spaces (E2 80 80–8A),
+//   U+2028 LINE SEP (E2 80 A8), U+2029 PARA SEP (E2 80 A9),
+//   U+202F NARROW NBSP (E2 80 AF), U+205F MATH SPACE (E2 81 9F),
+//   U+3000 IDEOGRAPHIC SPACE (E3 80 80).
+static size_t ws_len(const char* text, size_t len, size_t i) {
+  uint8_t b = static_cast<uint8_t>(text[i]);
+  if (b <= 0x7F)
+    return is_ws(text[i]) ? 1 : 0;
+  if (b == 0xC2 && i + 1 < len && static_cast<uint8_t>(text[i + 1]) == 0xA0)
+    return 2;  // U+00A0 NBSP
+  if (b == 0xE2 && i + 2 < len) {
+    uint8_t b1 = static_cast<uint8_t>(text[i + 1]);
+    uint8_t b2 = static_cast<uint8_t>(text[i + 2]);
+    if (b1 == 0x80 && b2 >= 0x80 && b2 <= 0x8A)
+      return 3;  // U+2000–U+200A
+    if (b1 == 0x80 && (b2 == 0xA8 || b2 == 0xA9 || b2 == 0xAF))
+      return 3;  // U+2028, U+2029, U+202F
+    if (b1 == 0x81 && b2 == 0x9F)
+      return 3;  // U+205F
+  }
+  if (b == 0xE3 && i + 2 < len && static_cast<uint8_t>(text[i + 1]) == 0x80 &&
+      static_cast<uint8_t>(text[i + 2]) == 0x80)
+    return 3;  // U+3000
+  return 0;
+}
+
+// Split text into (start, len) word spans, preserving byte offsets.
+// Recognizes both ASCII and Unicode whitespace as word boundaries.
 struct WordSpan {
   size_t start;
   size_t len;
@@ -64,14 +94,15 @@ static std::vector<WordSpan> split_words(const char* text, size_t text_len) {
   std::vector<WordSpan> spans;
   size_t i = 0;
   while (i < text_len) {
-    // Skip whitespace
-    while (i < text_len && is_ws(text[i]))
-      ++i;
+    // Skip whitespace (ASCII or Unicode)
+    size_t wl;
+    while (i < text_len && (wl = ws_len(text, text_len, i)) > 0)
+      i += wl;
     if (i >= text_len)
       break;
     size_t start = i;
     // Advance through non-whitespace
-    while (i < text_len && !is_ws(text[i]))
+    while (i < text_len && ws_len(text, text_len, i) == 0)
       ++i;
     spans.push_back({start, i - start});
   }
@@ -174,9 +205,10 @@ std::vector<LayoutLine> layout_paragraph(const IFont& font, const LayoutOptions&
     // Handle leading whitespace on empty lines (matching TrustyReader)
     if (current.words.empty()) {
       size_t i = 0;
-      while (i < text_len && is_ws(text[i])) {
+      size_t wl;
+      while (i < text_len && (wl = ws_len(text, text_len, i)) > 0) {
         x += font.char_width(' ', run.style, run.size);
-        ++i;
+        i += wl;
       }
     }
 
@@ -190,7 +222,7 @@ std::vector<LayoutLine> layout_paragraph(const IFont& font, const LayoutOptions&
       // and this run's text doesn't start with space, place first word
       // immediately adjacent (no inter-word space).
       bool needs_space = !current.words.empty();
-      if (first_word_of_run && !prev_run_ended_space && text_len > 0 && !is_ws(text[0])) {
+      if (first_word_of_run && !prev_run_ended_space && text_len > 0 && ws_len(text, text_len, 0) == 0) {
         needs_space = false;
       }
 
@@ -221,8 +253,18 @@ std::vector<LayoutLine> layout_paragraph(const IFont& font, const LayoutOptions&
       first_word_of_run = false;
     }
 
-    // Track whether this run ended with whitespace
-    prev_run_ended_space = (text_len > 0 && is_ws(text[text_len - 1])) || text_len == 0;
+    // Track whether this run ended with whitespace.
+    // For multi-byte Unicode whitespace, check last few bytes.
+    prev_run_ended_space = text_len == 0;
+    if (text_len > 0) {
+      if (is_ws(text[text_len - 1])) {
+        prev_run_ended_space = true;
+      } else if (text_len >= 2 && ws_len(text, text_len, text_len - 2) == 2) {
+        prev_run_ended_space = true;
+      } else if (text_len >= 3 && ws_len(text, text_len, text_len - 3) == 3) {
+        prev_run_ended_space = true;
+      }
+    }
 
     // Handle explicit line break
     if (run.breaking) {
@@ -251,7 +293,7 @@ std::vector<LayoutLine> layout_paragraph(const IFont& font, const LayoutOptions&
 // layout_page() — fill a page with paragraphs from a chapter
 // ---------------------------------------------------------------------------
 
-PageContent layout_page(const IFont& font, const PageOptions& opts, const Chapter& chapter, PagePosition start) {
+PageContent layout_page(const IFont& font, const PageOptions& opts, IParagraphSource& source, PagePosition start) {
   PageContent page;
   page.start = start;
 
@@ -274,8 +316,10 @@ PageContent layout_page(const IFont& font, const PageOptions& opts, const Chapte
     }
   };
 
-  for (size_t pi = start.paragraph; pi < chapter.paragraphs.size(); ++pi) {
-    const auto& para = chapter.paragraphs[pi];
+  const size_t para_count = source.paragraph_count();
+
+  for (size_t pi = start.paragraph; pi < para_count; ++pi) {
+    const auto& para = source.paragraph(pi);
 
     // Paragraph spacing (except before the very first content)
     if (has_content) {
@@ -478,8 +522,8 @@ PageContent layout_page(const IFont& font, const PageOptions& opts, const Chapte
         // is remaining content after the break (avoid trailing empty pages).
         if (has_text_or_image) {
           bool has_remaining = false;
-          for (size_t ri = pi + 1; ri < chapter.paragraphs.size(); ++ri) {
-            if (chapter.paragraphs[ri].type != ParagraphType::PageBreak) {
+          for (size_t ri = pi + 1; ri < para_count; ++ri) {
+            if (source.paragraph(ri).type != ParagraphType::PageBreak) {
               has_remaining = true;
               break;
             }

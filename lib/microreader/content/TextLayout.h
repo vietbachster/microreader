@@ -94,6 +94,32 @@ struct FixedFont : IFont {
 };
 
 // ---------------------------------------------------------------------------
+// Paragraph source — abstract interface for accessing paragraphs.
+// Lets layout_page() work with Chapter (in-memory) or MrbReader (on-disk).
+// ---------------------------------------------------------------------------
+
+struct IParagraphSource {
+  virtual ~IParagraphSource() = default;
+  virtual size_t paragraph_count() const = 0;
+  virtual const Paragraph& paragraph(size_t index) const = 0;
+};
+
+// Chapter adapter — wraps Chapter::paragraphs for IParagraphSource.
+class ChapterParagraphSource : public IParagraphSource {
+ public:
+  explicit ChapterParagraphSource(const Chapter& ch) : ch_(ch) {}
+  size_t paragraph_count() const override {
+    return ch_.paragraphs.size();
+  }
+  const Paragraph& paragraph(size_t index) const override {
+    return ch_.paragraphs[index];
+  }
+
+ private:
+  const Chapter& ch_;
+};
+
+// ---------------------------------------------------------------------------
 // Layout output types
 // ---------------------------------------------------------------------------
 
@@ -194,7 +220,13 @@ struct PageOptions {
 };
 
 // Layout one page worth of content starting at `start`.
-// The chapter's paragraphs must already be parsed.
-PageContent layout_page(const IFont& font, const PageOptions& opts, const Chapter& chapter, PagePosition start);
+// The paragraph source provides paragraphs on demand.
+PageContent layout_page(const IFont& font, const PageOptions& opts, IParagraphSource& source, PagePosition start);
+
+// Convenience overload: pass a Chapter directly (wraps in ChapterParagraphSource).
+inline PageContent layout_page(const IFont& font, const PageOptions& opts, const Chapter& chapter, PagePosition start) {
+  ChapterParagraphSource src(chapter);
+  return layout_page(font, opts, src, start);
+}
 
 }  // namespace microreader
