@@ -1,0 +1,109 @@
+cmake_minimum_required(VERSION 3.16)
+project(microreader_tests CXX C)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# Fix MSVC parallel PDB writes
+if(MSVC)
+  add_compile_options(/FS)
+endif()
+
+# Allow older subprojects (miniz) to configure without error on CMake 4.x
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
+
+# ---------------------------------------------------------------------------
+# Third-party dependencies (fetched at configure time)
+# ---------------------------------------------------------------------------
+include(FetchContent)
+
+# Google Test
+FetchContent_Declare(
+    googletest
+    GIT_REPOSITORY https://github.com/google/googletest.git
+    GIT_TAG        v1.15.2
+    GIT_SHALLOW    TRUE
+)
+set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
+set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(googletest)
+
+# miniz (for DEFLATE decompression)
+FetchContent_Declare(
+    miniz
+    GIT_REPOSITORY https://github.com/richgel999/miniz.git
+    GIT_TAG        3.0.2
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(miniz)
+
+# ---------------------------------------------------------------------------
+# Core content library (the code under test)
+# ---------------------------------------------------------------------------
+set(LIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../lib/microreader)
+
+add_library(microreader_content STATIC
+    ${LIB_DIR}/content/ZipReader.cpp
+    ${LIB_DIR}/content/XmlReader.cpp
+    ${LIB_DIR}/content/CssParser.cpp
+    ${LIB_DIR}/content/EpubParser.cpp
+    ${LIB_DIR}/content/ImageDecoder.cpp
+    ${LIB_DIR}/content/Book.cpp
+    ${LIB_DIR}/content/TextLayout.cpp
+    ${LIB_DIR}/content/HtmlExporter.cpp
+)
+target_include_directories(microreader_content PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/../lib
+)
+target_link_libraries(microreader_content PUBLIC miniz)
+
+# ---------------------------------------------------------------------------
+# Fast unit tests (no real EPUB files, runs in milliseconds)
+# ---------------------------------------------------------------------------
+add_executable(unit_tests
+    unit/ZipReaderTest.cpp
+    unit/XmlReaderTest.cpp
+    unit/CssParserTest.cpp
+    unit/EpubParserTest.cpp
+    unit/ImageDecoderTest.cpp
+    unit/TextLayoutTest.cpp
+)
+target_link_libraries(unit_tests PRIVATE
+    microreader_content
+    gtest
+    gtest_main
+)
+target_compile_definitions(unit_tests PRIVATE
+    TEST_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+)
+
+# ---------------------------------------------------------------------------
+# Full test executable (includes slow book integration tests)
+# ---------------------------------------------------------------------------
+add_executable(microreader_tests
+    unit/ZipReaderTest.cpp
+    unit/XmlReaderTest.cpp
+    unit/CssParserTest.cpp
+    unit/EpubParserTest.cpp
+    unit/ImageDecoderTest.cpp
+    unit/RealBookTest.cpp
+    unit/DebugOhlerTest.cpp
+    unit/BulkBookTest.cpp
+    unit/TextLayoutTest.cpp
+    unit/HtmlExportTest.cpp
+)
+target_link_libraries(microreader_tests PRIVATE
+    microreader_content
+    gtest
+    gtest_main
+)
+
+# Make test fixture path available as a compile definition
+target_compile_definitions(microreader_tests PRIVATE
+    TEST_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+)
+
+# Register with CTest
+enable_testing()
+add_test(NAME microreader_tests COMMAND microreader_tests)
