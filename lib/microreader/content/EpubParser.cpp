@@ -13,6 +13,7 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #define HEAP_LOG(tag)                                                                       \
   ESP_LOGI("mem", "%s: free=%lu largest=%lu", tag, (unsigned long)esp_get_free_heap_size(), \
            (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT))
@@ -651,7 +652,8 @@ class BodyParser {
     }
 
     // If at start of paragraph, trim leading whitespace
-    if (runs_.empty() && current_run_.empty()) {
+    bool no_runs = runs_.empty();
+    if (no_runs && current_run_.empty()) {
       while (tlen > 0 && std::isspace(static_cast<unsigned char>(*t))) {
         ++t;
         --tlen;
@@ -661,11 +663,33 @@ class BodyParser {
     if (tlen == 0)
       return;
 
-    // Fused decode_entities + whitespace normalization in a single pass.
-    // Writes directly into normalized_ scratch buffer to avoid allocations.
-    normalized_.clear();
+    // Minimize reallocations — output can't exceed input length.
+    current_run_.reserve(current_run_.size() + tlen);
+
+    // Fused decode_entities + whitespace normalization, writing directly
+    // into current_run_ (no intermediate buffer).
+    //
+    // - in_space:      pending collapsed whitespace not yet emitted
+    // - wrote_content: at least one non-ws char was emitted in this call
+    // - at_para_start: suppress leading whitespace entirely
+    bool at_para_start = no_runs && current_run_.empty();
     bool in_space = false;
+    bool wrote_content = false;
     size_t i = 0;
+
+// Emit pending whitespace before non-ws content.
+#define PUSH_TEXT_EMIT_SPACE_()                               \
+  do {                                                        \
+    if (!wrote_content) {                                     \
+      if (in_space && !has_trailing_space_ && !at_para_start) \
+        current_run_ += ' ';                                  \
+      wrote_content = true;                                   \
+    } else if (in_space) {                                    \
+      current_run_ += ' ';                                    \
+    }                                                         \
+    in_space = false;                                         \
+  } while (0)
+
     while (i < tlen) {
       unsigned char uc = static_cast<unsigned char>(t[i]);
 
@@ -701,11 +725,7 @@ class BodyParser {
             decoded_char = '\'';
             handled = true;
           } else if (ent_len == 4 && ent[0] == 'n' && ent[1] == 'b' && ent[2] == 's' && ent[3] == 'p') {
-            // nbsp → treat as space for whitespace normalization
-            if (!in_space) {
-              normalized_ += ' ';
-              in_space = true;
-            }
+            in_space = true;
             i = semi + 1;
             continue;
           } else if (ent_len > 0 && ent[0] == '#') {
@@ -718,46 +738,38 @@ class BodyParser {
               for (size_t j = 1; j < ent_len; ++j)
                 code = code * 10 + (ent[j] - '0');
             }
-            // Check if the code point is whitespace
             if (code == 0xA0 || code == ' ' || code == '\t' || code == '\n' || code == '\r') {
-              if (!in_space) {
-                normalized_ += ' ';
-                in_space = true;
-              }
+              in_space = true;
               i = semi + 1;
               continue;
             }
+            PUSH_TEXT_EMIT_SPACE_();
             // UTF-8 encode
             if (code < 0x80) {
-              normalized_ += static_cast<char>(code);
+              current_run_ += static_cast<char>(code);
             } else if (code < 0x800) {
-              normalized_ += static_cast<char>(0xC0 | (code >> 6));
-              normalized_ += static_cast<char>(0x80 | (code & 0x3F));
+              current_run_ += static_cast<char>(0xC0 | (code >> 6));
+              current_run_ += static_cast<char>(0x80 | (code & 0x3F));
             } else if (code < 0x10000) {
-              normalized_ += static_cast<char>(0xE0 | (code >> 12));
-              normalized_ += static_cast<char>(0x80 | ((code >> 6) & 0x3F));
-              normalized_ += static_cast<char>(0x80 | (code & 0x3F));
+              current_run_ += static_cast<char>(0xE0 | (code >> 12));
+              current_run_ += static_cast<char>(0x80 | ((code >> 6) & 0x3F));
+              current_run_ += static_cast<char>(0x80 | (code & 0x3F));
             } else {
-              normalized_ += static_cast<char>(0xF0 | (code >> 18));
-              normalized_ += static_cast<char>(0x80 | ((code >> 12) & 0x3F));
-              normalized_ += static_cast<char>(0x80 | ((code >> 6) & 0x3F));
-              normalized_ += static_cast<char>(0x80 | (code & 0x3F));
+              current_run_ += static_cast<char>(0xF0 | (code >> 18));
+              current_run_ += static_cast<char>(0x80 | ((code >> 12) & 0x3F));
+              current_run_ += static_cast<char>(0x80 | ((code >> 6) & 0x3F));
+              current_run_ += static_cast<char>(0x80 | (code & 0x3F));
             }
-            in_space = false;
             i = semi + 1;
             continue;
           }
 
           if (handled) {
-            // Check if decoded char is whitespace
             if (std::isspace((unsigned char)decoded_char)) {
-              if (!in_space) {
-                normalized_ += ' ';
-                in_space = true;
-              }
+              in_space = true;
             } else {
-              normalized_ += decoded_char;
-              in_space = false;
+              PUSH_TEXT_EMIT_SPACE_();
+              current_run_ += decoded_char;
             }
             i = semi + 1;
             continue;
@@ -765,56 +777,52 @@ class BodyParser {
           // Unknown entity — keep as-is, fall through
         }
         // Not a valid entity — output the '&' character
-        normalized_ += '&';
-        in_space = false;
+        PUSH_TEXT_EMIT_SPACE_();
+        current_run_ += '&';
         ++i;
         continue;
       }
 
       // UTF-8 non-breaking space (0xC2 0xA0)
       if (uc == 0xC2 && i + 1 < tlen && static_cast<unsigned char>(t[i + 1]) == 0xA0) {
-        if (!in_space) {
-          normalized_ += ' ';
-          in_space = true;
-        }
+        in_space = true;
         i += 2;
         continue;
       }
 
       // Normal whitespace
       if (std::isspace(uc)) {
-        if (!in_space) {
-          normalized_ += ' ';
-          in_space = true;
-        }
+        in_space = true;
         ++i;
         continue;
       }
 
-      // Regular character
-      normalized_ += static_cast<char>(uc);
-      in_space = false;
-      ++i;
+      // Regular character — batch consecutive plain bytes.
+      PUSH_TEXT_EMIT_SPACE_();
+      {
+        size_t span_start = i;
+        ++i;
+        while (i < tlen) {
+          unsigned char nc = static_cast<unsigned char>(t[i]);
+          if (nc == '&' || std::isspace(nc) ||
+              (nc == 0xC2 && i + 1 < tlen && static_cast<unsigned char>(t[i + 1]) == 0xA0))
+            break;
+          ++i;
+        }
+        if (text_transform_ == TextTransform::None) {
+          current_run_.append(t + span_start, i - span_start);
+        } else {
+          size_t mark = current_run_.size();
+          current_run_.append(t + span_start, i - span_start);
+          apply_text_transform_inplace(current_run_, mark);
+        }
+      }
     }
 
-    // Determine whitespace boundaries from NORMALIZED text (not raw text),
-    // because entities like &nbsp; decode to spaces during normalization.
-    // Raw-text checks would miss entity-encoded whitespace split across
-    // text event boundaries by the streaming XML buffer.
-    bool starts_ws = !normalized_.empty() && normalized_[0] == ' ';
-    bool ends_ws = !normalized_.empty() && normalized_.back() == ' ';
-    bool at_para_start = runs_.empty() && current_run_.empty();
+#undef PUSH_TEXT_EMIT_SPACE_
 
-    // Trim leading/trailing spaces from normalized_
-    size_t start = 0;
-    while (start < normalized_.size() && normalized_[start] == ' ')
-      ++start;
-    size_t end = normalized_.size();
-    while (end > start && normalized_[end - 1] == ' ')
-      --end;
-
-    if (start == end) {
-      // All whitespace — propagate trailing-space state (but not at paragraph start)
+    if (!wrote_content) {
+      // All whitespace — propagate trailing-space state
       if (!has_trailing_space_ && !at_para_start) {
         current_run_ += ' ';
         has_trailing_space_ = true;
@@ -822,17 +830,7 @@ class BodyParser {
       return;
     }
 
-    if (!has_trailing_space_ && starts_ws && !at_para_start) {
-      current_run_ += ' ';
-    }
-
-    if (text_transform_ != TextTransform::None) {
-      current_run_ += apply_text_transform(normalized_.substr(start, end - start));
-    } else {
-      current_run_.append(normalized_, start, end - start);
-    }
-
-    has_trailing_space_ = ends_ws;
+    has_trailing_space_ = in_space;
     if (has_trailing_space_) {
       current_run_ += ' ';
     }
@@ -1086,6 +1084,26 @@ class BodyParser {
     }
   }
 
+  void apply_text_transform_inplace(std::string& s, size_t from) const {
+    if (text_transform_ == TextTransform::Uppercase) {
+      for (size_t k = from; k < s.size(); ++k)
+        s[k] = static_cast<char>(std::toupper(static_cast<unsigned char>(s[k])));
+    } else if (text_transform_ == TextTransform::Lowercase) {
+      for (size_t k = from; k < s.size(); ++k)
+        s[k] = static_cast<char>(std::tolower(static_cast<unsigned char>(s[k])));
+    } else if (text_transform_ == TextTransform::Capitalize) {
+      bool after_space = (from == 0) || (from > 0 && std::isspace(static_cast<unsigned char>(s[from - 1])));
+      for (size_t k = from; k < s.size(); ++k) {
+        if (std::isspace(static_cast<unsigned char>(s[k]))) {
+          after_space = true;
+        } else if (after_space) {
+          s[k] = static_cast<char>(std::toupper(static_cast<unsigned char>(s[k])));
+          after_space = false;
+        }
+      }
+    }
+  }
+
   std::string apply_text_transform(std::string s) const {
     if (text_transform_ == TextTransform::None)
       return s;
@@ -1133,7 +1151,7 @@ class BodyParser {
   std::vector<Paragraph> paragraphs_;
   std::vector<Run> runs_;
   std::string current_run_;
-  std::string normalized_;    // reusable scratch buffer for push_text()
+  // normalized_ removed — push_text() writes directly into current_run_
   std::string pending_utf8_;  // incomplete UTF-8 lead byte(s) from end of previous text event
   bool bold_ = false;
   bool italic_ = false;
@@ -1144,10 +1162,24 @@ class BodyParser {
   void* sink_ctx_ = nullptr;
   bool has_emitted_ = false;
 
+#ifdef ESP_PLATFORM
+  int64_t* emit_us_ = nullptr;  // accumulator for time spent in sink callbacks
+#endif
+
   void emit(Paragraph&& p) {
     has_emitted_ = true;
     if (sink_) {
+#ifdef ESP_PLATFORM
+      if (emit_us_) {
+        int64_t t0 = esp_timer_get_time();
+        sink_(sink_ctx_, std::move(p));
+        *emit_us_ += esp_timer_get_time() - t0;
+      } else {
+        sink_(sink_ctx_, std::move(p));
+      }
+#else
       sink_(sink_ctx_, std::move(p));
+#endif
     } else {
       paragraphs_.push_back(std::move(p));
     }
@@ -1163,6 +1195,20 @@ static EpubError parse_xhtml_events(XmlReader& reader, const CssStylesheet* inli
   // Skip to <body>
   CssStylesheet parsed_inline_css(extern_css ? extern_css->config() : CssConfig{});
   XmlEvent ev;
+
+#ifdef ESP_PLATFORM
+  int64_t xml_us = 0;   // time in next_event (decompress + tokenize)
+  int64_t css_us = 0;   // time in CSS get()
+  int64_t text_us = 0;  // time in push_text (entity decode + whitespace normalize)
+  int64_t elem_us = 0;  // time in StartElement dispatch (tag matching, style stacks)
+  int64_t end_us = 0;   // time in EndElement dispatch
+  int64_t emit_us = 0;  // time in sink callback (Paragraph → write_paragraph)
+  int64_t head_us = 0;  // time seeking to <body> (includes decompressing head)
+  size_t text_bytes = 0;
+  size_t event_count = 0;
+  parser.emit_us_ = &emit_us;
+  int64_t head_t0 = esp_timer_get_time();
+#endif
   for (;;) {
     XmlError xerr = reader.next_event(ev);
     if (xerr == XmlError::BufferTooSmall) {
@@ -1198,6 +1244,10 @@ static EpubError parse_xhtml_events(XmlReader& reader, const CssStylesheet* inli
 
   const CssStylesheet* effective_inline = inline_css ? inline_css : &parsed_inline_css;
 
+#ifdef ESP_PLATFORM
+  head_us = esp_timer_get_time() - head_t0;
+#endif
+
 #ifdef MICROREADER_DIAG_STREAMING
   size_t event_count = 0;
   size_t start_count = 0;
@@ -1207,8 +1257,30 @@ static EpubError parse_xhtml_events(XmlReader& reader, const CssStylesheet* inli
   const char* exit_reason = "unknown";
 #endif
 
+#ifdef ESP_PLATFORM
+  XmlEventType prev_type = XmlEventType::EndOfFile;
+  int64_t dispatch_t0 = 0;
+#endif
+
   for (;;) {
+#ifdef ESP_PLATFORM
+    // Attribute previous iteration's dispatch time
+    if (dispatch_t0 != 0) {
+      int64_t elapsed = esp_timer_get_time() - dispatch_t0;
+      if (prev_type == XmlEventType::StartElement)
+        elem_us += elapsed;
+      else if (prev_type == XmlEventType::EndElement)
+        end_us += elapsed;
+      else if (prev_type == XmlEventType::Text)
+        text_us += elapsed;
+    }
+    int64_t t0 = esp_timer_get_time();
+#endif
     XmlError xerr = reader.next_event(ev);
+#ifdef ESP_PLATFORM
+    xml_us += esp_timer_get_time() - t0;
+    event_count++;
+#endif
     if (xerr == XmlError::BufferTooSmall) {
       reader.skip_element();
       continue;
@@ -1242,6 +1314,11 @@ static EpubError parse_xhtml_events(XmlReader& reader, const CssStylesheet* inli
       end_count++;
     else if (ev.type == XmlEventType::Text)
       text_count++;
+#endif
+
+#ifdef ESP_PLATFORM
+    prev_type = ev.type;
+    dispatch_t0 = esp_timer_get_time();
 #endif
 
     if (ev.type == XmlEventType::StartElement) {
@@ -1308,8 +1385,14 @@ static EpubError parse_xhtml_events(XmlReader& reader, const CssStylesheet* inli
       const char* cls_p = class_sv.data ? class_sv.data : nullptr;
       size_t cls_len = class_sv.length;
 
+#ifdef ESP_PLATFORM
+      int64_t css_t0 = esp_timer_get_time();
+#endif
       CssRule style = inline_rule + effective_inline->get(el_p, el_len, id_p, id_len, cls_p, cls_len) +
                       (extern_css ? extern_css->get(el_p, el_len, id_p, id_len, cls_p, cls_len) : CssRule{});
+#ifdef ESP_PLATFORM
+      css_us += esp_timer_get_time() - css_t0;
+#endif
 
       // Apply browser-default margins for elements that usually have them.
       // Only apply if no explicit margin-left was set by CSS.
@@ -1604,8 +1687,19 @@ static EpubError parse_xhtml_events(XmlReader& reader, const CssStylesheet* inli
         }
       }
       parser.push_text(ev.content.data, ev.content.length);
+#ifdef ESP_PLATFORM
+      text_bytes += ev.content.length;
+#endif
     }
   }
+
+#ifdef ESP_PLATFORM
+  parser.emit_us_ = nullptr;
+  ESP_LOGI("perf", "  head=%ldms xml=%ldms css=%ldms elem=%ldms end=%ldms text=%ldms emit=%ldms  events=%u txtB=%u",
+           (long)(head_us / 1000), (long)(xml_us / 1000), (long)(css_us / 1000), (long)(elem_us / 1000),
+           (long)(end_us / 1000), (long)(text_us / 1000), (long)(emit_us / 1000), (unsigned)event_count,
+           (unsigned)text_bytes);
+#endif
 
 #ifdef MICROREADER_DIAG_STREAMING
   fprintf(stderr, "DIAG: events=%zu start=%zu end=%zu text=%zu exit=%s err=%d\n", event_count, start_count, end_count,
@@ -1759,12 +1853,18 @@ EpubError Epub::parse_chapter_streaming(IZipFile& file, size_t index, ParagraphS
   }
 
   ZipEntryInput zip_input;
+#ifdef ESP_PLATFORM
+  int64_t io_t0 = esp_timer_get_time();
+#endif
   if (zip_input.open(file, entry, work_ptr, kWorkBufSize) != ZipError::Ok)
     return EpubError::ZipError;
 
   XmlReader reader;
   if (reader.open(zip_input, xml_ptr, kXmlBufSize) != XmlError::Ok)
     return EpubError::XmlError;
+#ifdef ESP_PLATFORM
+  int64_t io_us = esp_timer_get_time() - io_t0;
+#endif
 
   // On ESP32 (MICROREADER_NO_IMAGES), images have no resolved dimensions so
   // buffering for image resolution/promotion is unnecessary.  Stream paragraphs
@@ -1778,7 +1878,14 @@ EpubError Epub::parse_chapter_streaming(IZipFile& file, size_t index, ParagraphS
   if (err != EpubError::Ok)
     return err;
 
+#ifdef ESP_PLATFORM
+  int64_t fin_t0 = esp_timer_get_time();
+#endif
   parser.finish();
+#ifdef ESP_PLATFORM
+  int64_t fin_us = esp_timer_get_time() - fin_t0;
+  ESP_LOGI("perf", "  io=%ldms finish=%ldms", (long)(io_us / 1000), (long)(fin_us / 1000));
+#endif
 
   return EpubError::Ok;
 #else

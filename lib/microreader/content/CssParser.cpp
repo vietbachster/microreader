@@ -612,55 +612,6 @@ static bool selector_matches_raw(const CssStylesheet::Selector& sel, const char*
   return true;
 }
 
-CssRule CssStylesheet::get(const char* element, const char* id, const char* cls) const {
-  if (rules_.empty())
-    return {};
-
-  // Collect matching rules, sort by specificity then source order
-  struct Match {
-    uint32_t specificity;
-    size_t index;
-    const CssRule* rule;
-  };
-  // Use a small inline buffer to avoid heap allocation for typical cases.
-  Match inline_buf[8];
-  size_t match_count = 0;
-  bool used_heap = false;
-  std::vector<Match> heap_matches;
-
-  for (size_t i = 0; i < rules_.size(); ++i) {
-    if (selector_matches_raw(rules_[i].first, element, id, cls)) {
-      Match m{rules_[i].first.specificity(), i, &rules_[i].second};
-      if (!used_heap && match_count < 8) {
-        inline_buf[match_count++] = m;
-      } else {
-        if (!used_heap) {
-          heap_matches.assign(inline_buf, inline_buf + match_count);
-          used_heap = true;
-        }
-        heap_matches.push_back(m);
-        match_count = heap_matches.size();
-      }
-    }
-  }
-
-  if (match_count == 0)
-    return {};
-
-  Match* matches = used_heap ? heap_matches.data() : inline_buf;
-  std::sort(matches, matches + match_count, [](const Match& a, const Match& b) {
-    if (a.specificity != b.specificity)
-      return a.specificity < b.specificity;
-    return a.index < b.index;
-  });
-
-  CssRule result;
-  for (size_t i = 0; i < match_count; ++i) {
-    result = result + *matches[i].rule;
-  }
-  return result;
-}
-
 // Length-based class list check: does whitespace-separated cls contain target?
 static bool class_list_contains_n(const char* cls, size_t cls_len, const std::string& target) {
   if (!cls || cls_len == 0 || target.empty())
@@ -698,11 +649,24 @@ static bool selector_matches_n(const CssStylesheet::Selector& sel, const char* e
   return true;
 }
 
+// ---------------------------------------------------------------------------
+// get() overloads: scan all rules, match selectors, sort, merge.
+// ---------------------------------------------------------------------------
+
+CssRule CssStylesheet::get(const char* element, const char* id, const char* cls) const {
+  if (rules_.empty())
+    return {};
+
+  size_t el_len = element ? std::strlen(element) : 0;
+  size_t id_len = id ? std::strlen(id) : 0;
+  size_t cls_len = cls ? std::strlen(cls) : 0;
+  return get(element ? element : "", el_len, id, id_len, cls, cls_len);
+}
+
 CssRule CssStylesheet::get(const char* element, size_t element_len, const char* id, size_t id_len, const char* cls,
                            size_t cls_len) const {
   if (rules_.empty())
     return {};
-
   struct Match {
     uint32_t specificity;
     size_t index;

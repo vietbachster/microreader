@@ -127,44 +127,46 @@ ZipError ZipReader::open(IZipFile& file) {
 
   entries_.reserve(eocd.total_entries);
 
-  // First pass: compute total name bytes so we can pre-allocate the blob.
-  // We read the central directory twice to avoid per-entry heap allocations.
+  // Bulk-read the entire central directory into memory (one I/O operation)
+  // then parse from the buffer.  This replaces the previous two-pass approach
+  // that did ~2×N individual reads/seeks — catastrophically slow over SPI/SD.
+  const uint32_t cd_size = eocd.central_dir_size;
   const int64_t cd_start = eocd.central_dir_offset;
   file.seek(cd_start, SEEK_SET);
 
+  std::vector<uint8_t> cd_buf(cd_size);
+  if (file.read(cd_buf.data(), cd_size) != cd_size)
+    return ZipError::ReadError;
+
+  // First pass over in-memory buffer: count total name bytes.
   size_t total_name_bytes = 0;
-  for (uint16_t i = 0; i < eocd.total_entries; ++i) {
-    CentralDirEntry cde{};
-    if (!read_exact(file, &cde, sizeof(cde)))
-      return ZipError::ReadError;
-    if (cde.signature != kCentralDirEntrySig)
-      return ZipError::InvalidSignature;
-    total_name_bytes += cde.filename_len;
-    file.seek(cde.filename_len + cde.extra_len + cde.comment_len, SEEK_CUR);
+  {
+    size_t pos = 0;
+    for (uint16_t i = 0; i < eocd.total_entries; ++i) {
+      if (pos + sizeof(CentralDirEntry) > cd_size)
+        return ZipError::InvalidData;
+      CentralDirEntry cde;
+      memcpy(&cde, cd_buf.data() + pos, sizeof(cde));
+      if (cde.signature != kCentralDirEntrySig)
+        return ZipError::InvalidSignature;
+      total_name_bytes += cde.filename_len;
+      pos += sizeof(cde) + cde.filename_len + cde.extra_len + cde.comment_len;
+    }
   }
 
   name_blob_.resize(total_name_bytes);
 
-  // Second pass: read names into blob and build entries.
-  file.seek(cd_start, SEEK_SET);
+  // Second pass: build entries, copy names into contiguous blob.
+  size_t pos = 0;
   size_t blob_offset = 0;
-
   for (uint16_t i = 0; i < eocd.total_entries; ++i) {
-    CentralDirEntry cde{};
-    if (!read_exact(file, &cde, sizeof(cde)))
-      return ZipError::ReadError;
-    if (cde.signature != kCentralDirEntrySig)
-      return ZipError::InvalidSignature;
+    CentralDirEntry cde;
+    memcpy(&cde, cd_buf.data() + pos, sizeof(cde));
+    pos += sizeof(cde);
 
-    // Read filename directly into the blob.
-    if (!read_exact(file, name_blob_.data() + blob_offset, cde.filename_len))
-      return ZipError::ReadError;
-
-    // Skip extra field and comment
-    if (cde.extra_len > 0)
-      file.seek(cde.extra_len, SEEK_CUR);
-    if (cde.comment_len > 0)
-      file.seek(cde.comment_len, SEEK_CUR);
+    // Copy filename into blob.
+    memcpy(name_blob_.data() + blob_offset, cd_buf.data() + pos, cde.filename_len);
+    pos += cde.filename_len + cde.extra_len + cde.comment_len;
 
     ZipEntry entry;
     entry.name = std::string_view(name_blob_.data() + blob_offset, cde.filename_len);

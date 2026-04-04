@@ -4,14 +4,79 @@
 
 namespace microreader {
 
-bool MrbWriter::open(const char* path) {
+// ---------------------------------------------------------------------------
+// BufferedFileWriter
+// ---------------------------------------------------------------------------
+
+bool BufferedFileWriter::open(const char* path) {
   close();
   f_ = fopen(path, "wb");
   if (!f_)
     return false;
+  // Keep a modest stdio buffer for the underlying fwrite calls.
+  setvbuf(f_, nullptr, _IOFBF, 4096);
+  pos_ = 0;
+  used_ = 0;
+  return true;
+}
 
-  // Use larger I/O buffer for better write performance.
-  setvbuf(f_, nullptr, _IOFBF, 8192);
+void BufferedFileWriter::close() {
+  if (f_) {
+    flush();
+    fclose(f_);
+    f_ = nullptr;
+  }
+  pos_ = 0;
+  used_ = 0;
+}
+
+bool BufferedFileWriter::flush() {
+  if (used_ > 0) {
+    if (fwrite(buf_, 1, used_, f_) != used_)
+      return false;
+    used_ = 0;
+  }
+  return true;
+}
+
+bool BufferedFileWriter::write(const void* data, size_t size) {
+  const uint8_t* src = static_cast<const uint8_t*>(data);
+  pos_ += static_cast<uint32_t>(size);
+  // Fast path: fits in remaining buffer space.
+  if (used_ + size <= kBufSize) {
+    std::memcpy(buf_ + used_, src, size);
+    used_ += size;
+    return true;
+  }
+  // Flush current buffer.
+  if (!flush())
+    return false;
+  // Large write: bypass buffer entirely.
+  if (size >= kBufSize)
+    return fwrite(src, 1, size, f_) == size;
+  // Small write after flush: start fresh buffer.
+  std::memcpy(buf_, src, size);
+  used_ = size;
+  return true;
+}
+
+bool BufferedFileWriter::seek(uint32_t offset) {
+  if (!flush())
+    return false;
+  if (fseek(f_, static_cast<long>(offset), SEEK_SET) != 0)
+    return false;
+  pos_ = offset;
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// MrbWriter
+// ---------------------------------------------------------------------------
+
+bool MrbWriter::open(const char* path) {
+  close();
+  if (!bw_.open(path))
+    return false;
 
   // Write placeholder header (will be fixed up in finish()).
   MrbHeader hdr{};
@@ -25,15 +90,15 @@ bool MrbWriter::open(const char* path) {
 }
 
 void MrbWriter::close() {
-  if (f_) {
-    fclose(f_);
-    f_ = nullptr;
-  }
+  bw_.close();
   paragraph_count_ = 0;
   chapters_.clear();
   images_.clear();
+  pending_para_.clear();
+  serialize_buf_.clear();
   in_chapter_ = false;
   prev_para_offset_ = 0;
+  pending_para_offset_ = 0;
   chapter_first_offset_ = 0;
   chapter_para_count_ = 0;
 }
@@ -42,12 +107,19 @@ void MrbWriter::begin_chapter() {
   prev_para_offset_ = 0;
   chapter_first_offset_ = 0;
   chapter_para_count_ = 0;
+  pending_para_.clear();
+  pending_para_offset_ = 0;
   in_chapter_ = true;
 }
 
 void MrbWriter::end_chapter() {
   if (!in_chapter_)
     return;
+
+  // Flush the last buffered paragraph with next_offset = 0 (end of chain).
+  if (!pending_para_.empty())
+    flush_pending(0);
+
   MrbChapterEntry entry{};
   entry.first_para_offset = chapter_first_offset_;
   entry.last_para_offset = prev_para_offset_;  // last written paragraph
@@ -56,82 +128,94 @@ void MrbWriter::end_chapter() {
   in_chapter_ = false;
 }
 
-bool MrbWriter::write_paragraph(const Paragraph& para) {
-  if (!f_)
+bool MrbWriter::flush_pending(uint32_t next_offset) {
+  if (pending_para_.empty())
+    return true;
+  // Patch next_offset at bytes [4..7] in the buffered paragraph.
+  mrb_write_u32(pending_para_.data() + 4, next_offset);
+  if (!write_bytes(pending_para_.data(), pending_para_.size()))
+    return false;
+  pending_para_.clear();
+  return true;
+}
+
+bool MrbWriter::stage_paragraph(const Paragraph& para) {
+  if (!bw_.is_open())
     return false;
 
-  uint32_t this_offset = static_cast<uint32_t>(ftell(f_));
+  // The file offset where this paragraph will land.
+  // bw_.tell() gives the current disk position; add the pending paragraph size
+  // because it hasn't been flushed yet.
+  uint32_t this_offset = bw_.tell() + static_cast<uint32_t>(pending_para_.size());
+
+  // If there is a previously staged paragraph, flush it now that we know
+  // next_offset (= this_offset).
+  if (!pending_para_.empty()) {
+    if (!flush_pending(this_offset))
+      return false;
+  }
 
   // Track first paragraph in chapter.
   if (chapter_para_count_ == 0)
     chapter_first_offset_ = this_offset;
 
-  // Write linked-list header: [prev_offset(4)] [next_offset(4)]
-  // next_offset is 0 for now — patched when the next paragraph is written.
+  // Build the complete paragraph bytes into pending_para_.
+  pending_para_.clear();
+
+  // Link header: [prev_offset(4)] [next_offset(4)]  — next patched later.
   uint8_t link[8];
   mrb_write_u32(link, prev_para_offset_);
-  mrb_write_u32(link + 4, 0);  // next = 0 (unknown yet)
-  if (!write_bytes(link, 8))
-    return false;
+  mrb_write_u32(link + 4, 0);  // next = 0 placeholder
+  pending_para_.insert(pending_para_.end(), link, link + 8);
 
-  // Patch the previous paragraph's next_offset to point to this one.
-  if (prev_para_offset_ != 0) {
-    long save_pos = ftell(f_);
-    fseek(f_, static_cast<long>(prev_para_offset_ + 4), SEEK_SET);
-    uint8_t next_buf[4];
-    mrb_write_u32(next_buf, this_offset);
-    if (!write_bytes(next_buf, 4))
-      return false;
-    fseek(f_, save_pos, SEEK_SET);
-  }
-
-  prev_para_offset_ = this_offset;
-  ++chapter_para_count_;
-  ++paragraph_count_;
-
+  // Paragraph body.
   switch (para.type) {
     case ParagraphType::Text: {
       uint16_t spacing = para.spacing_before.value_or(kMrbSpacingDefault);
-      auto body = serialize_text(para.text, spacing);
+      serialize_text(para.text, spacing);
       uint8_t hdr[5];
       hdr[0] = kMrbParaText;
-      mrb_write_u32(hdr + 1, static_cast<uint32_t>(body.size()));
-      if (!write_bytes(hdr, 5))
-        return false;
-      if (!body.empty() && !write_bytes(body.data(), body.size()))
-        return false;
+      mrb_write_u32(hdr + 1, static_cast<uint32_t>(serialize_buf_.size()));
+      pending_para_.insert(pending_para_.end(), hdr, hdr + 5);
+      if (!serialize_buf_.empty())
+        pending_para_.insert(pending_para_.end(), serialize_buf_.begin(), serialize_buf_.end());
       break;
     }
     case ParagraphType::Image: {
       uint8_t buf[9];
       buf[0] = kMrbParaImage;
-      mrb_write_u32(buf + 1, 4);  // data_size = 4 bytes
+      mrb_write_u32(buf + 1, 4);
       mrb_write_u16(buf + 5, para.image.key);
       mrb_write_u16(buf + 7, para.spacing_before.value_or(kMrbSpacingDefault));
-      if (!write_bytes(buf, sizeof(buf)))
-        return false;
+      pending_para_.insert(pending_para_.end(), buf, buf + 9);
       break;
     }
     case ParagraphType::Hr: {
       uint8_t buf[7];
       buf[0] = kMrbParaHr;
-      mrb_write_u32(buf + 1, 2);  // data_size = 2 bytes
+      mrb_write_u32(buf + 1, 2);
       mrb_write_u16(buf + 5, para.spacing_before.value_or(kMrbSpacingDefault));
-      if (!write_bytes(buf, sizeof(buf)))
-        return false;
+      pending_para_.insert(pending_para_.end(), buf, buf + 7);
       break;
     }
     case ParagraphType::PageBreak: {
       uint8_t buf[5];
       buf[0] = kMrbParaPageBreak;
-      mrb_write_u32(buf + 1, 0);  // data_size = 0
-      if (!write_bytes(buf, sizeof(buf)))
-        return false;
+      mrb_write_u32(buf + 1, 0);
+      pending_para_.insert(pending_para_.end(), buf, buf + 5);
       break;
     }
   }
 
+  pending_para_offset_ = this_offset;
+  prev_para_offset_ = this_offset;
+  ++chapter_para_count_;
+  ++paragraph_count_;
   return true;
+}
+
+bool MrbWriter::write_paragraph(const Paragraph& para) {
+  return stage_paragraph(para);
 }
 
 uint16_t MrbWriter::add_image_ref(uint16_t zip_entry_index, uint16_t width, uint16_t height) {
@@ -145,7 +229,7 @@ uint16_t MrbWriter::add_image_ref(uint16_t zip_entry_index, uint16_t width, uint
 }
 
 bool MrbWriter::finish(const EpubMetadata& meta, const TableOfContents& toc) {
-  if (!f_)
+  if (!bw_.is_open())
     return false;
 
   // Close any open chapter.
@@ -153,7 +237,7 @@ bool MrbWriter::finish(const EpubMetadata& meta, const TableOfContents& toc) {
     end_chapter();
 
   // --- Write chapter table (16 bytes each) ---
-  uint32_t chapter_offset = static_cast<uint32_t>(ftell(f_));
+  uint32_t chapter_offset = bw_.tell();
   for (const auto& ch : chapters_) {
     uint8_t buf[16];
     mrb_write_u32(buf, ch.first_para_offset);
@@ -166,7 +250,7 @@ bool MrbWriter::finish(const EpubMetadata& meta, const TableOfContents& toc) {
   }
 
   // --- Write image ref table ---
-  uint32_t image_offset = static_cast<uint32_t>(ftell(f_));
+  uint32_t image_offset = bw_.tell();
   for (const auto& img : images_) {
     uint8_t buf[8];
     mrb_write_u16(buf, img.zip_entry_index);
@@ -178,7 +262,7 @@ bool MrbWriter::finish(const EpubMetadata& meta, const TableOfContents& toc) {
   }
 
   // --- Write metadata blob ---
-  uint32_t meta_offset = static_cast<uint32_t>(ftell(f_));
+  uint32_t meta_offset = bw_.tell();
   write_string(meta.title);
   write_string(meta.author.value_or(""));
   write_string(meta.language.value_or(""));
@@ -208,10 +292,10 @@ bool MrbWriter::finish(const EpubMetadata& meta, const TableOfContents& toc) {
   hdr.image_offset = image_offset;
   hdr.meta_offset = meta_offset;
 
-  fseek(f_, 0, SEEK_SET);
+  bw_.seek(0);
   if (!write_bytes(&hdr, sizeof(hdr)))
     return false;
-  fseek(f_, 0, SEEK_END);
+  bw_.close();
 
   return true;
 }
@@ -220,7 +304,7 @@ bool MrbWriter::finish(const EpubMetadata& meta, const TableOfContents& toc) {
 // Paragraph serialization
 // ---------------------------------------------------------------------------
 
-std::vector<uint8_t> MrbWriter::serialize_text(const TextParagraph& text, uint16_t spacing) {
+void MrbWriter::serialize_text(const TextParagraph& text, uint16_t spacing) {
   // Layout:
   //   alignment(1) + indent(2) + margin_left(2) + margin_right(2) +
   //   spacing_before(2) + line_height_pct(1) + inline_image_idx(2) +
@@ -236,8 +320,8 @@ std::vector<uint8_t> MrbWriter::serialize_text(const TextParagraph& text, uint16
   for (const auto& run : text.runs)
     total += kRunHeaderSize + run.text.size();
 
-  std::vector<uint8_t> buf(total);
-  uint8_t* p = buf.data();
+  serialize_buf_.resize(total);
+  uint8_t* p = serialize_buf_.data();
 
   // Header
   *p++ = text.alignment.has_value() ? static_cast<uint8_t>(*text.alignment) : kMrbAlignDefault;
@@ -288,8 +372,6 @@ std::vector<uint8_t> MrbWriter::serialize_text(const TextParagraph& text, uint16
     std::memcpy(p, run.text.data(), text_len);
     p += text_len;
   }
-
-  return buf;
 }
 
 // ---------------------------------------------------------------------------
@@ -297,7 +379,7 @@ std::vector<uint8_t> MrbWriter::serialize_text(const TextParagraph& text, uint16
 // ---------------------------------------------------------------------------
 
 bool MrbWriter::write_bytes(const void* data, size_t size) {
-  return fwrite(data, 1, size, f_) == size;
+  return bw_.write(data, size);
 }
 
 bool MrbWriter::write_string(const std::string& s) {

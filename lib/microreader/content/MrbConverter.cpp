@@ -87,11 +87,18 @@ bool convert_epub_to_mrb_streaming(Book& book, const char* output_path, uint8_t*
     MrbWriter* writer;
     std::vector<ImageMapping>* image_map;
     bool error;
+#ifdef ESP_PLATFORM
+    int64_t write_us;  // time in write_paragraph (MRB I/O)
+    size_t para_count;
+#endif
   };
   SinkCtx ctx{&writer, &image_map, false};
+#ifdef ESP_PLATFORM
+  ctx.write_us = 0;
+  ctx.para_count = 0;
+#endif
 
-  // Paragraph sink: remap image keys and write to MRB.
-  // Image resolution and promotion are handled by parse_chapter_streaming.
+  // Non-text paragraph sink: remap image keys and write to MRB.
   auto sink = [](void* raw_ctx, Paragraph&& para) {
     auto& c = *static_cast<SinkCtx*>(raw_ctx);
     if (c.error)
@@ -99,8 +106,15 @@ bool convert_epub_to_mrb_streaming(Book& book, const char* output_path, uint8_t*
 
     remap_paragraph_images(para, *c.writer, *c.image_map);
 
+#ifdef ESP_PLATFORM
+    int64_t t0 = esp_timer_get_time();
+#endif
     if (!c.writer->write_paragraph(para))
       c.error = true;
+#ifdef ESP_PLATFORM
+    c.write_us += esp_timer_get_time() - t0;
+    c.para_count++;
+#endif
   };
 
   for (size_t ci = 0; ci < book.chapter_count(); ++ci) {
@@ -118,8 +132,11 @@ bool convert_epub_to_mrb_streaming(Book& book, const char* output_path, uint8_t*
 
 #ifdef ESP_PLATFORM
     long ch_ms = (long)((esp_timer_get_time() - ch_start) / 1000);
-    ESP_LOGI("mrb", "ch %u/%u  %ldms  free=%lu largest=%lu", (unsigned)ci, (unsigned)book.chapter_count(), ch_ms,
-             (unsigned long)esp_get_free_heap_size(), (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+    long wr_ms = (long)(ctx.write_us / 1000);
+    ESP_LOGI("mrb", "ch %u/%u  %ldms  wr=%ldms  paras=%u  free=%lu", (unsigned)ci, (unsigned)book.chapter_count(),
+             ch_ms, wr_ms, (unsigned)ctx.para_count, (unsigned long)esp_get_free_heap_size());
+    ctx.write_us = 0;
+    ctx.para_count = 0;
 #endif
   }
 

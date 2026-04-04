@@ -55,6 +55,8 @@ EPUB file (ZIP on SD card)
 | `CssParser.h/.cpp` | Minimal CSS parser for EPUB stylesheets. `CssStylesheet` cascades by specificity. |
 | `ImageDecoder.h/.cpp` | JPEG/PNG detection and dimension reading. Skipped on ESP32 (`MICROREADER_NO_IMAGES`). |
 | `Book.h/.cpp` | High-level wrapper: owns `StdioZipFile` + `Epub`. Methods: `open(path)`, `load_chapter(index, Chapter&)`, `decode_image()`. |
+| `MrbWriter.h/.cpp` | Writes `.mrb` binary files. `BufferedFileWriter` batches into 4KB buffer. Paragraphs are doubly-linked (prev/next offsets). Uses **deferred paragraph writing**: each paragraph is serialized into `pending_para_` buffer, then flushed when the *next* paragraph arrives (so `next_offset` can be filled in without seeking). This eliminates all backward seeks in `end_chapter()`. |
+| `MrbConverter.cpp` | Orchestrates EPUB→MRB conversion: iterates spine chapters, streams paragraphs via `ParagraphSink` callback from `EpubParser` → `MrbWriter`. |
 
 ### Memory constraints (critical for ESP32-C3)
 
@@ -174,6 +176,7 @@ Test fixtures in `test/fixtures/` (synthetic EPUBs). Real books in `microreader/
 - **COM4 port busy**: Kill any running monitor terminal before uploading firmware.
 - **ohler.epub OOM**: 487 spine items, XHTML files up to 218KB, causes heap exhaustion on ESP32 during `parse_chapter()`. See "Memory constraints" section. (Note: `Book::open()` itself no longer OOMs thanks to ZipReader name_blob_ optimization.)
 - **Heap fragmentation on ESP32**: After `Book::open()`, the largest contiguous block can be much smaller than total free heap (e.g. 59KB largest with 133KB total free). Large single allocations (>50KB) should be split into smaller ones. The `parse_chapter_streaming()` work+XML buffer was split for this reason.
+- **SD card seek performance**: Random seeks on SPI SD card cost ~2ms each. Writing a doubly-linked paragraph list (prev/next offsets) *then* seeking back to patch `next_offset` fields caused 42% of total conversion time to be spent on seeks alone (e.g. 267 paragraphs × 2 seeks × ~2ms = ~1s per chapter). Fix: defer each paragraph write until the next one arrives, so `next_offset` is known before writing. This eliminated all backward seeks and cut conversion time 31–67% across all test books.
 
 ## Device testing
 

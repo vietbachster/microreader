@@ -9,6 +9,37 @@
 
 namespace microreader {
 
+// Batches small writes into a memory buffer (4 KB), flushing to the
+// underlying FILE* only when full or on seek.  tell() is O(1).
+class BufferedFileWriter {
+ public:
+  BufferedFileWriter() = default;
+  ~BufferedFileWriter() {
+    close();
+  }
+  BufferedFileWriter(const BufferedFileWriter&) = delete;
+  BufferedFileWriter& operator=(const BufferedFileWriter&) = delete;
+
+  bool open(const char* path);
+  void close();
+  bool write(const void* data, size_t size);
+  bool seek(uint32_t offset);
+  bool flush();
+  uint32_t tell() const {
+    return pos_;
+  }
+  bool is_open() const {
+    return f_ != nullptr;
+  }
+
+ private:
+  static constexpr size_t kBufSize = 4096;
+  FILE* f_ = nullptr;
+  uint32_t pos_ = 0;
+  size_t used_ = 0;
+  uint8_t buf_[kBufSize];
+};
+
 // Writes an MRB file sequentially.  Usage:
 //
 //   MrbWriter w;
@@ -48,7 +79,7 @@ class MrbWriter {
   bool finish(const EpubMetadata& meta, const TableOfContents& toc);
 
  private:
-  FILE* f_ = nullptr;
+  BufferedFileWriter bw_;
   uint32_t paragraph_count_ = 0;
   std::vector<MrbChapterEntry> chapters_;
   std::vector<MrbImageRef> images_;
@@ -59,11 +90,29 @@ class MrbWriter {
   uint32_t chapter_first_offset_ = 0;  // offset of first paragraph in current chapter
   uint16_t chapter_para_count_ = 0;    // paragraph count in current chapter
 
-  // Serialize a text paragraph's body (everything after the 3-byte type+size header).
-  std::vector<uint8_t> serialize_text(const TextParagraph& text, uint16_t spacing_before);
+  // Deferred paragraph write: we buffer the serialized bytes of the most
+  // recent paragraph so that when the *next* paragraph arrives we can patch
+  // its next_offset (at byte 4) before flushing to disk.  This eliminates
+  // all backward seeks that the old end_chapter() link-patching required.
+  std::vector<uint8_t> pending_para_;
+  uint32_t pending_para_offset_ = 0;  // file offset where pending_para_ will be written
+
+  // Reusable serialization buffer (avoids per-paragraph heap allocation).
+  std::vector<uint8_t> serialize_buf_;
+
+  // Serialize a text paragraph's body into serialize_buf_.
+  void serialize_text(const TextParagraph& text, uint16_t spacing_before);
 
   // Write raw bytes.
   bool write_bytes(const void* data, size_t size);
+
+  // Flush the pending paragraph buffer to disk.  If next_offset is non-zero,
+  // it is patched into bytes [4..7] before writing.
+  bool flush_pending(uint32_t next_offset);
+
+  // Serialize a paragraph into pending_para_ (link header + type + data).
+  // Does NOT write to disk — the bytes stay buffered until flush_pending().
+  bool stage_paragraph(const Paragraph& para);
 
   // Write a length-prefixed UTF-8 string (uint16 length + bytes).
   bool write_string(const std::string& s);
