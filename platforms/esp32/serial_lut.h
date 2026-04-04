@@ -26,6 +26,7 @@
 // Call serial_start() once from app_main.
 // Poll serial_lut_take(buf) each loop for LUT data.
 
+#include <dirent.h>
 #include <sys/stat.h>
 
 #include <cerrno>
@@ -44,12 +45,20 @@ static constexpr const char* kLutRxTag = "lut_rx";
 static constexpr const char* kUpTag = "upload";
 static constexpr uint8_t kLutMagic[4] = {0xDE, 0xAD, 0xBE, 0xEF};
 static constexpr uint8_t kEpubMagic[4] = {'E', 'P', 'U', 'B'};
+static constexpr uint8_t kCmdMagic[4] = {'C', 'M', 'N', 'D'};
 static constexpr uint32_t kMaxPayload = 256;
 static constexpr uint32_t kLutSize = 112;
 
 // Shared between the receiver task and the main loop.
 static uint8_t g_lut_buf[kLutSize];
 static volatile bool g_lut_pending = false;
+
+// Serial command: button injection (OR'd into next poll_buttons).
+volatile uint8_t g_serial_buttons = 0;
+
+// Serial command: open a book by path (set by serial task, consumed by main loop).
+static char g_serial_open_path[256] = {};
+static volatile bool g_serial_open_pending = false;
 
 // Call from the main loop. Returns true (and copies into `out`) when a fresh
 // LUT has been received since the last call.
@@ -59,6 +68,14 @@ inline bool serial_lut_take(uint8_t* out) {
   memcpy(out, g_lut_buf, kLutSize);
   g_lut_pending = false;
   return true;
+}
+
+// Call from the main loop. Returns the path if a serial "open book" was requested.
+inline const char* serial_open_take() {
+  if (!g_serial_open_pending)
+    return nullptr;
+  g_serial_open_pending = false;
+  return g_serial_open_path;
 }
 
 // Read exactly `n` bytes with a timeout. Returns true on success.
@@ -214,13 +231,124 @@ static void handle_epub_upload() {
 }
 
 // ---------------------------------------------------------------------------
+// Handle a serial command (after "CMND" magic has been matched).
+//
+// Sub-commands (1 byte after magic):
+//   'B' + 1 byte button_mask  → inject button press(es)
+//   'O' + 2 byte path_len LE + path  → open book by path
+//   'S'                       → status query (responds with heap + screen info)
+//   'L'                       → list books in /sdcard/books/
+// ---------------------------------------------------------------------------
+static constexpr const char* kCmdTag = "cmd";
+
+static void handle_serial_cmd() {
+  uint8_t sub;
+  if (!serial_read_exact(&sub, 1, 1000)) {
+    ESP_LOGW(kCmdTag, "timeout reading sub-command");
+    return;
+  }
+
+  switch (sub) {
+    case 'B': {
+      uint8_t mask;
+      if (!serial_read_exact(&mask, 1, 500)) {
+        serial_write("ERR:btn_read\n");
+        return;
+      }
+      g_serial_buttons |= mask;
+      ESP_LOGI(kCmdTag, "button inject: 0x%02x", mask);
+      serial_write("OK\n");
+      break;
+    }
+    case 'O': {
+      uint8_t len_buf[2];
+      if (!serial_read_exact(len_buf, 2, 1000)) {
+        serial_write("ERR:open_len\n");
+        return;
+      }
+      uint16_t path_len = len_buf[0] | (len_buf[1] << 8);
+      if (path_len == 0 || path_len >= sizeof(g_serial_open_path)) {
+        serial_write("ERR:open_path_len\n");
+        return;
+      }
+      if (!serial_read_exact((uint8_t*)g_serial_open_path, path_len, 2000)) {
+        serial_write("ERR:open_path_read\n");
+        return;
+      }
+      g_serial_open_path[path_len] = '\0';
+      g_serial_open_pending = true;
+      ESP_LOGI(kCmdTag, "open book: %s", g_serial_open_path);
+      serial_write("OK\n");
+      break;
+    }
+    case 'S': {
+      char buf[256];
+      snprintf(buf, sizeof(buf), "STATUS:free=%lu,largest=%lu\n", (unsigned long)esp_get_free_heap_size(),
+               (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+      serial_write(buf);
+      break;
+    }
+    case 'L': {
+      DIR* dir = opendir("/sdcard/books");
+      if (!dir) {
+        serial_write("ERR:no_books_dir\n");
+        return;
+      }
+      serial_write("BOOKS:\n");
+      struct dirent* ent;
+      while ((ent = readdir(dir)) != nullptr) {
+        size_t len = strlen(ent->d_name);
+        if (len > 5 && (strcmp(ent->d_name + len - 5, ".epub") == 0 || strcmp(ent->d_name + len - 4, ".mrb") == 0)) {
+          char line[280];
+          snprintf(line, sizeof(line), "  %s\n", ent->d_name);
+          serial_write(line);
+        }
+      }
+      closedir(dir);
+      serial_write("END\n");
+      break;
+    }
+    case 'C': {
+      // Clear all .mrb files from /sdcard/books/
+      DIR* dir = opendir("/sdcard/books");
+      if (!dir) {
+        serial_write("ERR:no_books_dir\n");
+        return;
+      }
+      int count = 0;
+      struct dirent* ent;
+      char path[300];
+      while ((ent = readdir(dir)) != nullptr) {
+        size_t len = strlen(ent->d_name);
+        if (len > 4 && strcmp(ent->d_name + len - 4, ".mrb") == 0) {
+          snprintf(path, sizeof(path), "/sdcard/books/%s", ent->d_name);
+          if (remove(path) == 0)
+            ++count;
+        }
+      }
+      closedir(dir);
+      char buf[64];
+      snprintf(buf, sizeof(buf), "CLEARED:%d\n", count);
+      serial_write(buf);
+      ESP_LOGI(kCmdTag, "cleared %d .mrb files", count);
+      break;
+    }
+    default:
+      ESP_LOGW(kCmdTag, "unknown sub-command: 0x%02x", sub);
+      serial_write("ERR:unknown_cmd\n");
+      break;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Unified receiver task — scans for both magic sequences byte by byte.
 // ---------------------------------------------------------------------------
 static void serial_receiver_task(void* /*arg*/) {
   uint8_t lut_pos = 0;   // progress matching kLutMagic
   uint8_t epub_pos = 0;  // progress matching kEpubMagic
+  uint8_t cmd_pos = 0;   // progress matching kCmdMagic
 
-  ESP_LOGI(kLutRxTag, "receiver ready (LUT + EPUB upload)");
+  ESP_LOGI(kLutRxTag, "receiver ready (LUT + EPUB + CMD)");
 
   while (true) {
     uint8_t byte;
@@ -232,6 +360,7 @@ static void serial_receiver_task(void* /*arg*/) {
       if (++lut_pos == 4) {
         lut_pos = 0;
         epub_pos = 0;
+        cmd_pos = 0;
         handle_lut_frame();
         continue;
       }
@@ -244,11 +373,25 @@ static void serial_receiver_task(void* /*arg*/) {
       if (++epub_pos == 4) {
         lut_pos = 0;
         epub_pos = 0;
+        cmd_pos = 0;
         handle_epub_upload();
         continue;
       }
     } else {
       epub_pos = (byte == kEpubMagic[0]) ? 1 : 0;
+    }
+
+    // Match CMND magic.
+    if (byte == kCmdMagic[cmd_pos]) {
+      if (++cmd_pos == 4) {
+        lut_pos = 0;
+        epub_pos = 0;
+        cmd_pos = 0;
+        handle_serial_cmd();
+        continue;
+      }
+    } else {
+      cmd_pos = (byte == kCmdMagic[0]) ? 1 : 0;
     }
   }
 }
@@ -262,5 +405,5 @@ inline void serial_start() {
   usb_serial_jtag_driver_install(&cfg);
   esp_vfs_dev_usb_serial_jtag_register();
 
-  xTaskCreate(serial_receiver_task, "serial_rx", 8192, nullptr, 3, nullptr);
+  xTaskCreate(serial_receiver_task, "serial_rx", 4096, nullptr, 3, nullptr);
 }

@@ -54,7 +54,8 @@ class Epub {
 
   // Stream-parse a chapter: paragraphs are emitted one at a time via sink.
   // Uses ~37KB working memory instead of extracting the full XHTML.
-  EpubError parse_chapter_streaming(IZipFile& file, size_t index, ParagraphSink sink, void* sink_ctx) const;
+  EpubError parse_chapter_streaming(IZipFile& file, size_t index, ParagraphSink sink, void* sink_ctx,
+                                    uint8_t* work_buf = nullptr, uint8_t* xml_buf = nullptr) const;
 
   // Access metadata.
   const EpubMetadata& metadata() const {

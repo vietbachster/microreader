@@ -836,6 +836,15 @@ class BodyParser {
     if (has_trailing_space_) {
       current_run_ += ' ';
     }
+
+    // Prevent current_run_ from growing too large.  On ESP32-C3 with ~60KB
+    // available after the decompression + XML buffers, a std::string growing
+    // from N to 2N needs 3N bytes temporarily (old + new).  Capping at 2KB
+    // keeps the worst-case reallocation at ~6KB.  Splitting a run at a word
+    // boundary (after a space) produces identical layout output regardless of
+    // XML buffer size, because the layout engine splits words on whitespace.
+    if (current_run_.size() >= 2048 && !current_run_.empty() && current_run_.back() == ' ')
+      flush_text(false);
   }
 
   void set_bold(bool b) {
@@ -1108,6 +1117,8 @@ class BodyParser {
       size_t nl = decoded.find('\n', pos);
       if (nl == std::string::npos) {
         current_run_ += apply_text_transform(decoded.substr(pos));
+        if (current_run_.size() >= 2048 && !current_run_.empty() && current_run_.back() == ' ')
+          flush_text(false);
         break;
       }
       if (nl > pos) {
@@ -1711,7 +1722,8 @@ EpubError Epub::parse_chapter(IZipFile& file, size_t index, Chapter& out) const 
 // Epub::parse_chapter_streaming
 // ---------------------------------------------------------------------------
 
-EpubError Epub::parse_chapter_streaming(IZipFile& file, size_t index, ParagraphSink sink, void* sink_ctx) const {
+EpubError Epub::parse_chapter_streaming(IZipFile& file, size_t index, ParagraphSink sink, void* sink_ctx,
+                                        uint8_t* work_buf, uint8_t* xml_buf) const {
   if (index >= spine_.size())
     return EpubError::InvalidData;
 
@@ -1725,26 +1737,54 @@ EpubError Epub::parse_chapter_streaming(IZipFile& file, size_t index, ParagraphS
     base_dir = entry.name.substr(0, slash + 1);
   }
 
-  // Single heap allocation for work buffer + XML buffer.
+  // Single allocation for both work + XML buffers to avoid heap fragmentation.
   // Work buffer layout: [tinfl_decompressor(~11KB) | dict(32KB) | input(1KB)].
   // XML buffer must be large enough to hold any single element + attributes;
   // 16KB handles virtually all real-world EPUB XHTML elements.
+  // Combined: one allocator header instead of two, so fits in a 61KB block.
   static constexpr size_t kWorkBufSize = ZipEntryInput::kDecompSize + ZipEntryInput::kDictSize + 1024;
   static constexpr size_t kXmlBufSize = 16384;
-  auto mem = std::make_unique<uint8_t[]>(kWorkBufSize + kXmlBufSize);
+
+  // Use caller-provided buffers (e.g. borrowed from DisplayQueue) or allocate.
+  std::unique_ptr<uint8_t[]> combined_mem;
+  uint8_t* work_ptr;
+  uint8_t* xml_ptr;
+  if (work_buf && xml_buf) {
+    work_ptr = work_buf;
+    xml_ptr = xml_buf;
+  } else {
+    combined_mem = std::make_unique<uint8_t[]>(kWorkBufSize + kXmlBufSize);
+    work_ptr = combined_mem.get();
+    xml_ptr = combined_mem.get() + kWorkBufSize;
+  }
 
   ZipEntryInput zip_input;
-  if (zip_input.open(file, entry, mem.get(), kWorkBufSize) != ZipError::Ok)
+  if (zip_input.open(file, entry, work_ptr, kWorkBufSize) != ZipError::Ok)
     return EpubError::ZipError;
 
   XmlReader reader;
-  if (reader.open(zip_input, mem.get() + kWorkBufSize, kXmlBufSize) != XmlError::Ok)
+  if (reader.open(zip_input, xml_ptr, kXmlBufSize) != XmlError::Ok)
     return EpubError::XmlError;
 
+  // On ESP32 (MICROREADER_NO_IMAGES), images have no resolved dimensions so
+  // buffering for image resolution/promotion is unnecessary.  Stream paragraphs
+  // directly to the caller's sink to avoid accumulating the entire chapter's
+  // text in memory (~70-80KB for large chapters, more than we can spare).
+#ifdef MICROREADER_NO_IMAGES
+  BodyParser parser;
+  parser.set_sink(sink, sink_ctx);
+
+  EpubError err = parse_xhtml_events(reader, nullptr, &stylesheet_, base_dir, zip_, parser);
+  if (err != EpubError::Ok)
+    return err;
+
+  parser.finish();
+
+  return EpubError::Ok;
+#else
   // Buffer paragraphs locally so we can do image resolution + promotion
   // after the ZipEntryInput releases the file handle (can't seek during
-  // streaming decompression). On ESP32 the image resolution is a no-op
-  // (MICROREADER_NO_IMAGES) so the buffer overhead is the only cost.
+  // streaming decompression).
   std::vector<Paragraph> paragraphs;
   auto buffer_sink = [](void* ctx, Paragraph&& para) {
     static_cast<std::vector<Paragraph>*>(ctx)->push_back(std::move(para));
@@ -1761,7 +1801,6 @@ EpubError Epub::parse_chapter_streaming(IZipFile& file, size_t index, ParagraphS
 
   // ZipEntryInput is done — file handle is now free for seeking.
 
-#ifndef MICROREADER_NO_IMAGES
   // Resolve image dimensions (same as parse_chapter).
   for (auto& para : paragraphs) {
     if (para.type == ParagraphType::Image && para.image.width == 0 && para.image.height == 0) {
@@ -1782,7 +1821,6 @@ EpubError Epub::parse_chapter_streaming(IZipFile& file, size_t index, ParagraphS
       }
     }
   }
-#endif
 
   // Promote large inline images to standalone paragraphs (same as parse_chapter).
   const uint16_t content_w = stylesheet_.config().content_width;
@@ -1805,6 +1843,7 @@ EpubError Epub::parse_chapter_streaming(IZipFile& file, size_t index, ParagraphS
   }
 
   return EpubError::Ok;
+#endif
 }
 
 }  // namespace microreader

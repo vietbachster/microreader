@@ -173,16 +173,38 @@ Test fixtures in `test/fixtures/` (synthetic EPUBs). Real books in `microreader/
 - **Desktop CMake policy warning**: Use `-DCMAKE_POLICY_VERSION_MINIMUM:STRING=3.5` to silence.
 - **COM4 port busy**: Kill any running monitor terminal before uploading firmware.
 - **ohler.epub OOM**: 487 spine items, XHTML files up to 218KB, causes heap exhaustion on ESP32 during `parse_chapter()`. See "Memory constraints" section. (Note: `Book::open()` itself no longer OOMs thanks to ZipReader name_blob_ optimization.)
-- **Free heap monitoring**: `ESP_LOGI("mem", "Free heap: %lu", (unsigned long)esp_get_free_heap_size());`
+- **Heap fragmentation on ESP32**: After `Book::open()`, the largest contiguous block can be much smaller than total free heap (e.g. 59KB largest with 133KB total free). Large single allocations (>50KB) should be split into smaller ones. The `parse_chapter_streaming()` work+XML buffer was split for this reason.
 
 ## Device testing
 
 To verify changes on real hardware:
 1. Upload test books via `python tools/upload_epub.py --port COM4 <path>.epub`
-2. Add temporary test code to `platforms/esp32/main.cpp` (e.g. a `test_book_open()` function that logs heap before/after operations via `ESP_LOGI`)
-3. Build + flash: `& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run -t upload`
-4. Monitor serial: `& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" device monitor --baud 115200`
-5. **Always revert test code and reflash clean firmware afterward.**
+2. Build + flash: `& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run -t upload`
+3. Monitor serial: `& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" device monitor --baud 115200`
+4. Use `python tools/serial_cmd.py --port COM4` for interactive control (see below).
+
+### Serial command protocol (`tools/serial_cmd.py`)
+
+The device accepts binary commands over USB serial using the `CMND` magic prefix. Available commands:
+
+| Command | Binary format | Description |
+|---------|--------------|-------------|
+| Button press | `CMND` + `B` + 1-byte mask | Inject button press (mask = `1 << button_index`) |
+| Open book | `CMND` + `O` + 2-byte LE path_len + path | Push ReaderScreen for the given book path |
+| Status | `CMND` + `S` | Query heap info (responds `STATUS:free=N,largest=N`) |
+| List books | `CMND` + `L` | List `.epub`/`.mrb` files (responds `BOOKS:\n...\nEND\n`) |
+
+Interactive commands in `serial_cmd.py`:
+```
+> status        # heap info
+> books         # list SD card books
+> btn 1         # press button 1 (select)
+> select        # alias for btn 1
+> back          # alias for btn 0
+> down          # alias for btn 2
+> up            # alias for btn 3
+> open alice.epub  # open book (auto-prepends /sdcard/books/)
+```
 
 Useful heap logging pattern:
 ```cpp

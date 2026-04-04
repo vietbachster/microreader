@@ -25,6 +25,9 @@ class BookSelectScreen final : public IScreen {
   bool has_books_dir() const {
     return books_dir_ != nullptr;
   }
+  const char* books_dir() const {
+    return books_dir_;
+  }
 
   const char* name() const override {
     return "Select Book";

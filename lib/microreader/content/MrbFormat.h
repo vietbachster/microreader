@@ -1,15 +1,15 @@
 #pragma once
 
 // MRB (MicroReader Book) — pre-processed binary format for fast on-device
-// EPUB reading.  Stores paragraphs with styling and text inline, plus index
-// tables for O(1) random access.
+// EPUB reading.  Stores paragraphs with styling and text inline.  Paragraphs
+// form a doubly-linked list per chapter (prev/next file offsets), so no
+// separate paragraph index is needed.
 //
 // File layout (all values little-endian):
 //
 //   [Header 32 bytes]
-//   [Paragraph data — variable, written sequentially]
-//   [Paragraph index — paragraph_count × 8 bytes]
-//   [Chapter table  — chapter_count  × 8 bytes]
+//   [Paragraph data — variable, written sequentially, each with prev/next links]
+//   [Chapter table  — chapter_count  × 16 bytes]
 //   [Image ref table— image_count    × 8 bytes]
 //   [Metadata blob  — variable]
 //   [TOC blob       — variable]
@@ -24,7 +24,7 @@ namespace microreader {
 // ---------------------------------------------------------------------------
 
 static constexpr uint8_t kMrbMagic[4] = {'M', 'R', 'B', '1'};
-static constexpr uint16_t kMrbVersion = 1;
+static constexpr uint16_t kMrbVersion = 2;
 
 // ---------------------------------------------------------------------------
 // Header (32 bytes, fixed)
@@ -32,12 +32,12 @@ static constexpr uint16_t kMrbVersion = 1;
 
 struct MrbHeader {
   uint8_t magic[4];  // "MRB1"
-  uint16_t version;  // 1
+  uint16_t version;  // 2
   uint16_t flags;    // reserved (0)
   uint32_t paragraph_count;
   uint16_t chapter_count;
   uint16_t image_count;
-  uint32_t index_offset;    // file offset of paragraph index
+  uint32_t reserved;        // was index_offset in v1
   uint32_t chapter_offset;  // file offset of chapter table
   uint32_t image_offset;    // file offset of image ref table
   uint32_t meta_offset;     // file offset of metadata blob
@@ -45,27 +45,17 @@ struct MrbHeader {
 static_assert(sizeof(MrbHeader) == 32, "MrbHeader must be 32 bytes");
 
 // ---------------------------------------------------------------------------
-// Paragraph index entry (8 bytes each)
-// ---------------------------------------------------------------------------
-
-struct MrbParagraphIndex {
-  uint32_t file_offset;    // offset into file where paragraph data begins
-  uint16_t chapter_index;  // which chapter this paragraph belongs to
-  uint8_t type;            // ParagraphType (0=Text, 1=Image, 2=Hr, 3=PageBreak)
-  uint8_t reserved;
-};
-static_assert(sizeof(MrbParagraphIndex) == 8, "MrbParagraphIndex must be 8 bytes");
-
-// ---------------------------------------------------------------------------
-// Chapter table entry (8 bytes each)
+// Chapter table entry (16 bytes each)
 // ---------------------------------------------------------------------------
 
 struct MrbChapterEntry {
-  uint32_t first_paragraph;  // index into paragraph index
+  uint32_t first_para_offset;  // file offset of first paragraph in chapter
+  uint32_t last_para_offset;   // file offset of last paragraph in chapter
   uint16_t paragraph_count;
-  uint16_t reserved;
+  uint16_t reserved1;
+  uint32_t reserved2;
 };
-static_assert(sizeof(MrbChapterEntry) == 8, "MrbChapterEntry must be 8 bytes");
+static_assert(sizeof(MrbChapterEntry) == 16, "MrbChapterEntry must be 16 bytes");
 
 // ---------------------------------------------------------------------------
 // Image reference entry (8 bytes each)

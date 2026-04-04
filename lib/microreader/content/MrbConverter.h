@@ -12,6 +12,9 @@ bool convert_epub_to_mrb(Book& book, const char* output_path);
 
 // Streaming variant: uses ~37KB working memory per chapter instead of
 // extracting the full XHTML. Safe for ESP32's limited RAM.
-bool convert_epub_to_mrb_streaming(Book& book, const char* output_path);
+// Optional work_buf/xml_buf avoid heap allocation for the decompression
+// buffers (pass nullptr to allocate from heap as before).
+bool convert_epub_to_mrb_streaming(Book& book, const char* output_path, uint8_t* work_buf = nullptr,
+                                   uint8_t* xml_buf = nullptr);
 
 }  // namespace microreader

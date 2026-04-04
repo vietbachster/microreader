@@ -228,10 +228,22 @@ struct PageOptions {
 // The paragraph source provides paragraphs on demand.
 PageContent layout_page(const IFont& font, const PageOptions& opts, IParagraphSource& source, PagePosition start);
 
+// Layout one page worth of content ending at `end` (exclusive).
+// Fills the page bottom-to-top. Used for backward navigation.
+// `end` is one-past-end: {paragraph_count, 0} means chapter end.
+PageContent layout_page_backward(const IFont& font, const PageOptions& opts, IParagraphSource& source,
+                                 PagePosition end);
+
 // Convenience overload: pass a Chapter directly (wraps in ChapterParagraphSource).
 inline PageContent layout_page(const IFont& font, const PageOptions& opts, const Chapter& chapter, PagePosition start) {
   ChapterParagraphSource src(chapter);
   return layout_page(font, opts, src, start);
+}
+
+inline PageContent layout_page_backward(const IFont& font, const PageOptions& opts, const Chapter& chapter,
+                                        PagePosition end) {
+  ChapterParagraphSource src(chapter);
+  return layout_page_backward(font, opts, src, end);
 }
 
 }  // namespace microreader

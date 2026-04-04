@@ -1,11 +1,16 @@
 #include "MenuDemo.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 
 #ifdef ESP_PLATFORM
+#include <dirent.h>
+
 #include "esp_ota_ops.h"
 #include "esp_system.h"
+#else
+#include <filesystem>
 #endif
 
 namespace microreader {
@@ -34,6 +39,8 @@ void MenuDemo::build_items_(DisplayQueue& queue) {
     update_settle_label_(queue.settle_enabled);
     items_[count_++] = {settle_label_, nullptr, settle_action_};
   }
+  if (count_ < kMaxItems && book_select_.has_books_dir())
+    items_[count_++] = {"Clear Converted", nullptr, clear_converted_action_};
 #ifdef ESP_PLATFORM
   if (count_ < kMaxItems) {
     update_lut_target_label_();
@@ -82,6 +89,35 @@ void MenuDemo::phases_action_(MenuDemo& self, DisplayQueue& queue) {
 void MenuDemo::settle_action_(MenuDemo& self, DisplayQueue& queue) {
   queue.settle_enabled = !queue.settle_enabled;
   self.update_settle_label_(queue.settle_enabled);
+}
+
+void MenuDemo::clear_converted_action_(MenuDemo& self, DisplayQueue& /*queue*/) {
+  const char* dir = self.book_select_.books_dir();
+  if (!dir)
+    return;
+#ifdef ESP_PLATFORM
+  DIR* d = opendir(dir);
+  if (!d)
+    return;
+  struct dirent* ent;
+  char path[300];
+  while ((ent = readdir(d)) != nullptr) {
+    size_t len = std::strlen(ent->d_name);
+    if (len > 4 && std::strcmp(ent->d_name + len - 4, ".mrb") == 0) {
+      std::snprintf(path, sizeof(path), "%s/%s", dir, ent->d_name);
+      std::remove(path);
+    }
+  }
+  closedir(d);
+#else
+  namespace fs = std::filesystem;
+  try {
+    for (const auto& entry : fs::directory_iterator(dir)) {
+      if (entry.is_regular_file() && entry.path().extension() == ".mrb")
+        fs::remove(entry.path());
+    }
+  } catch (...) {}
+#endif
 }
 
 }  // namespace microreader

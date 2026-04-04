@@ -30,6 +30,7 @@ void ReaderScreen::start(Canvas& /*canvas*/, DisplayQueue& queue) {
 
   // Try to open existing MRB first.
   bool mrb_ok = mrb_.open(mrb_path_.c_str());
+  bool did_convert = false;
 
   if (!mrb_ok) {
     // Convert EPUB → MRB.
@@ -52,7 +53,11 @@ void ReaderScreen::start(Canvas& /*canvas*/, DisplayQueue& queue) {
 #ifdef ESP_PLATFORM
     int64_t conv_start = esp_timer_get_time();
 #endif
-    if (!convert_epub_to_mrb_streaming(book_, mrb_path_.c_str())) {
+    // Reuse display framebuffers as scratch memory during conversion.
+    // They are idle until the first render after conversion completes.
+    uint8_t* work_buf = queue.scratch_buf1();
+    uint8_t* xml_buf = queue.scratch_buf2();
+    if (!convert_epub_to_mrb_streaming(book_, mrb_path_.c_str(), work_buf, xml_buf)) {
       open_ok_ = false;
       goto show_error;
     }
@@ -66,6 +71,10 @@ void ReaderScreen::start(Canvas& /*canvas*/, DisplayQueue& queue) {
     // Release EPUB resources — we only need the MRB from now on.
     book_ = Book{};
 
+    // Reinitialize display buffers after scratch use (no hardware refresh yet).
+    queue.reset_buffers();
+    did_convert = true;
+
     mrb_ok = mrb_.open(mrb_path_.c_str());
     if (!mrb_ok) {
       open_ok_ = false;
@@ -77,10 +86,20 @@ void ReaderScreen::start(Canvas& /*canvas*/, DisplayQueue& queue) {
   chapter_idx_ = 0;
   page_pos_ = PagePosition{0, 0};
   load_chapter_(0);
+#ifdef ESP_PLATFORM
+  ESP_LOGI("reader", "BOOK_OK: %s", path_);
+#endif
   render_page_(queue);
+  // After conversion used the display buffers as scratch, do a single
+  // half refresh to push the first page to the screen.
+  if (did_convert)
+    queue.full_refresh(RefreshMode::Half);
   return;
 
 show_error:
+#ifdef ESP_PLATFORM
+  ESP_LOGE("reader", "BOOK_FAIL: %s", path_);
+#endif
   error_label_.set_text("Failed to open book");
   error_label_.set_position(kPadding, kPadding);
   // We'll draw the error in render_page_ path.
@@ -129,7 +148,7 @@ void ReaderScreen::stop() {
   open_ok_ = false;
 }
 
-bool ReaderScreen::update(const ButtonState& buttons, Canvas& /*canvas*/, DisplayQueue& queue, IRuntime& /*runtime*/) {
+bool ReaderScreen::update(const ButtonState& buttons, Canvas& canvas, DisplayQueue& queue, IRuntime& /*runtime*/) {
   if (buttons.is_pressed(Button::Button0))
     return false;
 
@@ -146,7 +165,8 @@ bool ReaderScreen::update(const ButtonState& buttons, Canvas& /*canvas*/, Displa
 
   if (changed) {
     render_page_(queue);
-    queue.partial_refresh();
+    canvas.commit(queue);
+    // queue.partial_refresh();
   }
 
   return true;
@@ -286,49 +306,30 @@ bool ReaderScreen::next_page_() {
 }
 
 bool ReaderScreen::prev_page_() {
-  // If at start of chapter, go to previous chapter.
+  // If at start of chapter, go to previous chapter's last page.
   if (page_pos_ == PagePosition{0, 0}) {
     if (chapter_idx_ > 0) {
       load_chapter_(chapter_idx_ - 1);
-      // Go to last page: layout pages forward until we hit chapter end.
+      // Layout backward from chapter end to get the last page.
       FixedFont font(kGlyphW * kScale, kGlyphH * kScale + 4);
       PageOptions opts(static_cast<uint16_t>(screen_w_), static_cast<uint16_t>(screen_h_), kPadding, kParaSpacing,
                        Alignment::Start);
       opts.padding_top = kPaddingTop;
-      PagePosition pos{0, 0};
-      PagePosition prev_pos = pos;
-      while (true) {
-        auto pc = layout_page(font, opts, *chapter_src_, pos);
-        if (pc.at_chapter_end) {
-          page_pos_ = pos;
-          return true;
-        }
-        prev_pos = pos;
-        pos = pc.end;
-      }
+      auto para_count = static_cast<uint16_t>(chapter_src_->paragraph_count());
+      auto pc = layout_page_backward(font, opts, *chapter_src_, PagePosition{para_count, 0});
+      page_pos_ = pc.start;
+      return true;
     }
     return false;
   }
 
-  // Walk forward from chapter start to find the page before current.
+  // Layout backward from current page start to get the previous page.
   FixedFont font(kGlyphW * kScale, kGlyphH * kScale + 4);
   PageOptions opts(static_cast<uint16_t>(screen_w_), static_cast<uint16_t>(screen_h_), kPadding, kParaSpacing,
                    Alignment::Start);
   opts.padding_top = kPaddingTop;
-  PagePosition pos{0, 0};
-  PagePosition prev_pos = pos;
-  while (pos < page_pos_) {
-    auto pc = layout_page(font, opts, *chapter_src_, pos);
-    if (pc.end == page_pos_ || pc.at_chapter_end) {
-      page_pos_ = pos;
-      return true;
-    }
-    prev_pos = pos;
-    pos = pc.end;
-    if (pos == prev_pos)
-      break;  // Safety: avoid infinite loop.
-  }
-  page_pos_ = prev_pos;
+  auto pc = layout_page_backward(font, opts, *chapter_src_, page_pos_);
+  page_pos_ = pc.start;
   return true;
 }
 

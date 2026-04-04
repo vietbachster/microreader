@@ -112,20 +112,41 @@ void collect_sink(void* raw, Paragraph&& para) {
 }
 
 // Compare two paragraphs for equality (ignoring image key remapping).
+// Adjacent non-breaking runs with the same style may be split at different
+// points due to the 2KB current_run_ flush interacting with different XML
+// buffer sizes (full-file for non-streaming vs 16KB for streaming).  Merge
+// them before comparing so the test is insensitive to flush boundaries.
+static std::vector<Run> merge_runs(const std::vector<Run>& runs) {
+  std::vector<Run> merged;
+  for (const auto& r : runs) {
+    if (!merged.empty() && !merged.back().breaking && merged.back().style == r.style && merged.back().size == r.size &&
+        merged.back().vertical_align == r.vertical_align && merged.back().margin_left == r.margin_left &&
+        merged.back().margin_right == r.margin_right) {
+      merged.back().text += r.text;
+      merged.back().breaking = r.breaking;
+    } else {
+      merged.push_back(r);
+    }
+  }
+  return merged;
+}
+
 void assert_paragraph_equal(const Paragraph& a, const Paragraph& b, const std::string& ctx) {
   ASSERT_EQ(a.type, b.type) << ctx << " type";
 
   if (a.type == ParagraphType::Text) {
-    ASSERT_EQ(a.text.runs.size(), b.text.runs.size()) << ctx << " run count";
-    for (size_t ri = 0; ri < a.text.runs.size(); ++ri) {
+    auto ar = merge_runs(a.text.runs);
+    auto br = merge_runs(b.text.runs);
+    ASSERT_EQ(ar.size(), br.size()) << ctx << " run count (after merge)";
+    for (size_t ri = 0; ri < ar.size(); ++ri) {
       std::string rctx = ctx + " run[" + std::to_string(ri) + "]";
-      EXPECT_EQ(a.text.runs[ri].text, b.text.runs[ri].text) << rctx << " text";
-      EXPECT_EQ(a.text.runs[ri].style, b.text.runs[ri].style) << rctx << " style";
-      EXPECT_EQ(a.text.runs[ri].size, b.text.runs[ri].size) << rctx << " size";
-      EXPECT_EQ(a.text.runs[ri].vertical_align, b.text.runs[ri].vertical_align) << rctx << " valign";
-      EXPECT_EQ(a.text.runs[ri].breaking, b.text.runs[ri].breaking) << rctx << " breaking";
-      EXPECT_EQ(a.text.runs[ri].margin_left, b.text.runs[ri].margin_left) << rctx << " margin_left";
-      EXPECT_EQ(a.text.runs[ri].margin_right, b.text.runs[ri].margin_right) << rctx << " margin_right";
+      EXPECT_EQ(ar[ri].text, br[ri].text) << rctx << " text";
+      EXPECT_EQ(ar[ri].style, br[ri].style) << rctx << " style";
+      EXPECT_EQ(ar[ri].size, br[ri].size) << rctx << " size";
+      EXPECT_EQ(ar[ri].vertical_align, br[ri].vertical_align) << rctx << " valign";
+      EXPECT_EQ(ar[ri].breaking, br[ri].breaking) << rctx << " breaking";
+      EXPECT_EQ(ar[ri].margin_left, br[ri].margin_left) << rctx << " margin_left";
+      EXPECT_EQ(ar[ri].margin_right, br[ri].margin_right) << rctx << " margin_right";
     }
     EXPECT_EQ(a.text.alignment.has_value(), b.text.alignment.has_value()) << ctx << " alignment presence";
     if (a.text.alignment.has_value() && b.text.alignment.has_value())

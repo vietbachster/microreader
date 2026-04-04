@@ -49,14 +49,15 @@ class MrbWriter {
 
  private:
   FILE* f_ = nullptr;
-  FILE* idx_f_ = nullptr;         // temp file for paragraph index entries
-  std::string idx_path_;          // path to temp index file
-  uint32_t paragraph_count_ = 0;  // replaces index_.size()
+  uint32_t paragraph_count_ = 0;
   std::vector<MrbChapterEntry> chapters_;
   std::vector<MrbImageRef> images_;
-  uint16_t current_chapter_ = 0;
-  uint32_t chapter_para_start_ = 0;
   bool in_chapter_ = false;
+
+  // Linked-list tracking: file offsets of prev/next paragraph within a chapter.
+  uint32_t prev_para_offset_ = 0;      // offset of the previous paragraph (0 = none)
+  uint32_t chapter_first_offset_ = 0;  // offset of first paragraph in current chapter
+  uint16_t chapter_para_count_ = 0;    // paragraph count in current chapter
 
   // Serialize a text paragraph's body (everything after the 3-byte type+size header).
   std::vector<uint8_t> serialize_text(const TextParagraph& text, uint16_t spacing_before);

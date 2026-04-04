@@ -9,6 +9,9 @@
 #include "freertos/FreeRTOS.h"
 #include "microreader/Input.h"
 
+// Defined in serial_lut.h — serial command button injection.
+extern volatile uint8_t g_serial_buttons;
+
 // ---- Button hardware configuration ----
 //
 // ADC1 channel 1 (GPIO1): 4 buttons via resistor ladder
@@ -64,6 +67,12 @@ class Esp32InputSource final : public microreader::IInputSource {
     portENTER_CRITICAL(&lock_);
     result.current = debounced_;
     result.pressed_latch = pressed_latch_;
+    // Merge any button presses injected via serial commands.
+    uint8_t serial = g_serial_buttons;
+    if (serial) {
+      result.pressed_latch |= serial;
+      g_serial_buttons = 0;
+    }
     pressed_latch_ = 0;
     portEXIT_CRITICAL(&lock_);
     return result;

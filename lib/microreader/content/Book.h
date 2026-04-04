@@ -47,7 +47,8 @@ class Book {
   EpubError load_chapter(size_t index, Chapter& out);
 
   // Stream-parse a chapter: paragraphs emitted via callback, ~37KB working memory.
-  EpubError load_chapter_streaming(size_t index, ParagraphSink sink, void* sink_ctx);
+  EpubError load_chapter_streaming(size_t index, ParagraphSink sink, void* sink_ctx, uint8_t* work_buf = nullptr,
+                                   uint8_t* xml_buf = nullptr);
 
 #ifndef MICROREADER_NO_IMAGES
   // Extract and decode an image from the EPUB (by zip entry index).

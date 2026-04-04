@@ -13,15 +13,6 @@ bool MrbWriter::open(const char* path) {
   // Use larger I/O buffer for better write performance.
   setvbuf(f_, nullptr, _IOFBF, 8192);
 
-  // Open temp file for paragraph index entries (avoids unbounded RAM growth).
-  idx_path_ = std::string(path) + ".idx";
-  idx_f_ = fopen(idx_path_.c_str(), "w+b");
-  if (!idx_f_) {
-    close();
-    return false;
-  }
-  setvbuf(idx_f_, nullptr, _IOFBF, 4096);
-
   // Write placeholder header (will be fixed up in finish()).
   MrbHeader hdr{};
   std::memcpy(hdr.magic, kMrbMagic, 4);
@@ -38,36 +29,30 @@ void MrbWriter::close() {
     fclose(f_);
     f_ = nullptr;
   }
-  if (idx_f_) {
-    fclose(idx_f_);
-    idx_f_ = nullptr;
-  }
-  if (!idx_path_.empty()) {
-    remove(idx_path_.c_str());
-    idx_path_.clear();
-  }
   paragraph_count_ = 0;
   chapters_.clear();
   images_.clear();
-  current_chapter_ = 0;
-  chapter_para_start_ = 0;
   in_chapter_ = false;
+  prev_para_offset_ = 0;
+  chapter_first_offset_ = 0;
+  chapter_para_count_ = 0;
 }
 
 void MrbWriter::begin_chapter() {
-  chapter_para_start_ = paragraph_count_;
+  prev_para_offset_ = 0;
+  chapter_first_offset_ = 0;
+  chapter_para_count_ = 0;
   in_chapter_ = true;
 }
 
 void MrbWriter::end_chapter() {
   if (!in_chapter_)
     return;
-  uint32_t count = paragraph_count_ - chapter_para_start_;
   MrbChapterEntry entry{};
-  entry.first_paragraph = chapter_para_start_;
-  entry.paragraph_count = static_cast<uint16_t>(count);
+  entry.first_para_offset = chapter_first_offset_;
+  entry.last_para_offset = prev_para_offset_;  // last written paragraph
+  entry.paragraph_count = chapter_para_count_;
   chapters_.push_back(entry);
-  ++current_chapter_;
   in_chapter_ = false;
 }
 
@@ -75,16 +60,33 @@ bool MrbWriter::write_paragraph(const Paragraph& para) {
   if (!f_)
     return false;
 
-  uint32_t offset = static_cast<uint32_t>(ftell(f_));
+  uint32_t this_offset = static_cast<uint32_t>(ftell(f_));
 
-  // Write index entry to temp file (avoids unbounded RAM growth).
-  uint8_t idx_buf[8];
-  mrb_write_u32(idx_buf, offset);
-  mrb_write_u16(idx_buf + 4, in_chapter_ ? static_cast<uint16_t>(chapters_.size()) : 0);
-  idx_buf[6] = static_cast<uint8_t>(para.type);
-  idx_buf[7] = 0;
-  if (fwrite(idx_buf, 1, 8, idx_f_) != 8)
+  // Track first paragraph in chapter.
+  if (chapter_para_count_ == 0)
+    chapter_first_offset_ = this_offset;
+
+  // Write linked-list header: [prev_offset(4)] [next_offset(4)]
+  // next_offset is 0 for now — patched when the next paragraph is written.
+  uint8_t link[8];
+  mrb_write_u32(link, prev_para_offset_);
+  mrb_write_u32(link + 4, 0);  // next = 0 (unknown yet)
+  if (!write_bytes(link, 8))
     return false;
+
+  // Patch the previous paragraph's next_offset to point to this one.
+  if (prev_para_offset_ != 0) {
+    long save_pos = ftell(f_);
+    fseek(f_, static_cast<long>(prev_para_offset_ + 4), SEEK_SET);
+    uint8_t next_buf[4];
+    mrb_write_u32(next_buf, this_offset);
+    if (!write_bytes(next_buf, 4))
+      return false;
+    fseek(f_, save_pos, SEEK_SET);
+  }
+
+  prev_para_offset_ = this_offset;
+  ++chapter_para_count_;
   ++paragraph_count_;
 
   switch (para.type) {
@@ -150,32 +152,16 @@ bool MrbWriter::finish(const EpubMetadata& meta, const TableOfContents& toc) {
   if (in_chapter_)
     end_chapter();
 
-  // --- Write paragraph index (copy from temp file) ---
-  uint32_t index_offset = static_cast<uint32_t>(ftell(f_));
-  if (idx_f_) {
-    fflush(idx_f_);
-    fseek(idx_f_, 0, SEEK_SET);
-    uint8_t buf[8];
-    for (uint32_t i = 0; i < paragraph_count_; ++i) {
-      if (fread(buf, 1, 8, idx_f_) != 8)
-        return false;
-      if (!write_bytes(buf, 8))
-        return false;
-    }
-    fclose(idx_f_);
-    idx_f_ = nullptr;
-    remove(idx_path_.c_str());
-    idx_path_.clear();
-  }
-
-  // --- Write chapter table ---
+  // --- Write chapter table (16 bytes each) ---
   uint32_t chapter_offset = static_cast<uint32_t>(ftell(f_));
   for (const auto& ch : chapters_) {
-    uint8_t buf[8];
-    mrb_write_u32(buf, ch.first_paragraph);
-    mrb_write_u16(buf + 4, ch.paragraph_count);
-    mrb_write_u16(buf + 6, 0);
-    if (!write_bytes(buf, 8))
+    uint8_t buf[16];
+    mrb_write_u32(buf, ch.first_para_offset);
+    mrb_write_u32(buf + 4, ch.last_para_offset);
+    mrb_write_u16(buf + 8, ch.paragraph_count);
+    mrb_write_u16(buf + 10, 0);
+    mrb_write_u32(buf + 12, 0);
+    if (!write_bytes(buf, 16))
       return false;
   }
 
@@ -217,7 +203,7 @@ bool MrbWriter::finish(const EpubMetadata& meta, const TableOfContents& toc) {
   hdr.paragraph_count = paragraph_count_;
   hdr.chapter_count = static_cast<uint16_t>(chapters_.size());
   hdr.image_count = static_cast<uint16_t>(images_.size());
-  hdr.index_offset = index_offset;
+  hdr.reserved = 0;
   hdr.chapter_offset = chapter_offset;
   hdr.image_offset = image_offset;
   hdr.meta_offset = meta_offset;

@@ -39,7 +39,7 @@ inline bool sd_init() {
 
   esp_vfs_fat_mount_config_t mnt{};
   mnt.format_if_mount_failed = false;
-  mnt.max_files = 4;
+  mnt.max_files = 3;  // epub zip + mrb output + 1 spare for VFS overhead
   mnt.allocation_unit_size = 16 * 1024;
 
   err = esp_vfs_fat_sdspi_mount(SD_MOUNT, &host, &dev_cfg, &mnt, &sd_card_);

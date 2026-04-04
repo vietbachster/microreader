@@ -94,6 +94,7 @@ class MenuDemo final : public IScreen {
   static void rotate_action_(MenuDemo& self, DisplayQueue& queue);
   static void phases_action_(MenuDemo& self, DisplayQueue& queue);
   static void settle_action_(MenuDemo& self, DisplayQueue& queue);
+  static void clear_converted_action_(MenuDemo& self, DisplayQueue& queue);
 #ifdef ESP_PLATFORM
   static void ota_action_(MenuDemo& self, DisplayQueue& queue);
   static void lut_target_action_(MenuDemo& self, DisplayQueue& queue);

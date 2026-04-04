@@ -265,6 +265,29 @@ class DisplayQueue {
     display_.deep_sleep();
   }
 
+  // Reset both framebuffers to white without triggering a hardware refresh.
+  // Use after loaning buffers as scratch memory, before painting new content.
+  void reset_buffers(bool white = true) {
+    commands_.clear();
+    needs_settle_ = false;
+    memset(ground_truth_, white ? 0xFF : 0x00, DisplayFrame::kPixelBytes);
+    memset(target_, white ? 0xFF : 0x00, DisplayFrame::kPixelBytes);
+    ground_truth_dirty_ = false;
+    target_dirty_ = false;
+  }
+
+  // Loan the two framebuffers as scratch memory (e.g. for EPUB→MRB
+  // conversion).  Caller must call reset_buffers() afterwards, then
+  // paint new content and do a full_refresh(Half) to display it.
+  // buf1 = 48000 bytes (ground_truth_), buf2 = 48000 bytes (target_).
+  uint8_t* scratch_buf1() {
+    return ground_truth_;
+  }
+  uint8_t* scratch_buf2() {
+    return target_;
+  }
+  static constexpr size_t kScratchBufSize = DisplayFrame::kPixelBytes;  // 48000
+
   void set_rotation(Rotation r) {
     flush();
     rotation_ = r;

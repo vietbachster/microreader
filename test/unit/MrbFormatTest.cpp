@@ -68,6 +68,22 @@ class MrbFormatTest : public ::testing::Test {
       EXPECT_EQ(a.image.key, b.image.key) << ctx;
     }
   }
+
+  // Load the nth paragraph of a chapter by traversing the linked list.
+  static bool load_chapter_para(MrbReader& reader, uint16_t chapter_idx, uint32_t para_idx, Paragraph& out) {
+    uint32_t offset = reader.chapter_first_offset(chapter_idx);
+    for (uint32_t i = 0; i < para_idx && offset != 0; ++i) {
+      Paragraph tmp;
+      auto lr = reader.load_paragraph(offset, tmp);
+      if (!lr.ok)
+        return false;
+      offset = lr.next_offset;
+    }
+    if (offset == 0)
+      return false;
+    auto lr = reader.load_paragraph(offset, out);
+    return lr.ok;
+  }
 };
 
 // ---------------------------------------------------------------------------
@@ -103,7 +119,7 @@ TEST_F(MrbFormatTest, RoundTrip_TextParagraph) {
   EXPECT_EQ(reader.chapter_count(), 1);
 
   Paragraph out;
-  ASSERT_TRUE(reader.load_paragraph(0, out));
+  ASSERT_TRUE(load_chapter_para(reader, 0, 0, out));
   expect_paragraph_eq(para, out, "text paragraph");
 }
 
@@ -127,7 +143,7 @@ TEST_F(MrbFormatTest, RoundTrip_ImageParagraph) {
   ASSERT_TRUE(reader.open(tmp_path_.c_str()));
 
   Paragraph out;
-  ASSERT_TRUE(reader.load_paragraph(0, out));
+  ASSERT_TRUE(load_chapter_para(reader, 0, 0, out));
   EXPECT_EQ(out.type, ParagraphType::Image);
   // Image key in the written paragraph was 42 (raw key, not remapped here).
   // The reader looks up dimensions from the image ref table by key index.
@@ -156,8 +172,8 @@ TEST_F(MrbFormatTest, RoundTrip_HrAndPageBreak) {
   EXPECT_EQ(reader.paragraph_count(), 2u);
 
   Paragraph out_hr, out_pb;
-  ASSERT_TRUE(reader.load_paragraph(0, out_hr));
-  ASSERT_TRUE(reader.load_paragraph(1, out_pb));
+  ASSERT_TRUE(load_chapter_para(reader, 0, 0, out_hr));
+  ASSERT_TRUE(load_chapter_para(reader, 0, 1, out_pb));
 
   EXPECT_EQ(out_hr.type, ParagraphType::Hr);
   EXPECT_EQ(out_hr.spacing_before, hr.spacing_before);
@@ -190,15 +206,15 @@ TEST_F(MrbFormatTest, RoundTrip_MultipleChapters) {
   EXPECT_EQ(reader.chapter_count(), 3);
   EXPECT_EQ(reader.paragraph_count(), 6u);
 
-  EXPECT_EQ(reader.chapter_first_paragraph(0), 0u);
+  EXPECT_NE(reader.chapter_first_offset(0), 0u);
   EXPECT_EQ(reader.chapter_paragraph_count(0), 2);
-  EXPECT_EQ(reader.chapter_first_paragraph(1), 2u);
+  EXPECT_NE(reader.chapter_first_offset(1), 0u);
   EXPECT_EQ(reader.chapter_paragraph_count(1), 1);
-  EXPECT_EQ(reader.chapter_first_paragraph(2), 3u);
+  EXPECT_NE(reader.chapter_first_offset(2), 0u);
   EXPECT_EQ(reader.chapter_paragraph_count(2), 3);
 
   Paragraph out;
-  ASSERT_TRUE(reader.load_paragraph(2, out));
+  ASSERT_TRUE(load_chapter_para(reader, 1, 0, out));
   EXPECT_EQ(out.type, ParagraphType::Text);
   ASSERT_EQ(out.text.runs.size(), 1u);
   EXPECT_EQ(out.text.runs[0].text, "Chapter 2 para 1");
@@ -232,7 +248,7 @@ TEST_F(MrbFormatTest, RoundTrip_AllRunStyles) {
   ASSERT_TRUE(reader.open(tmp_path_.c_str()));
 
   Paragraph out;
-  ASSERT_TRUE(reader.load_paragraph(0, out));
+  ASSERT_TRUE(load_chapter_para(reader, 0, 0, out));
   expect_paragraph_eq(para, out, "all styles");
 }
 
@@ -253,7 +269,7 @@ TEST_F(MrbFormatTest, RoundTrip_InlineImage) {
   ASSERT_TRUE(reader.open(tmp_path_.c_str()));
 
   Paragraph out;
-  ASSERT_TRUE(reader.load_paragraph(0, out));
+  ASSERT_TRUE(load_chapter_para(reader, 0, 0, out));
   ASSERT_TRUE(out.text.inline_image.has_value());
   EXPECT_EQ(out.text.inline_image->key, 5);
   EXPECT_EQ(out.text.inline_image->width, 100);
@@ -322,7 +338,7 @@ TEST_F(MrbFormatTest, RoundTrip_UnicodeText) {
   MrbReader reader;
   ASSERT_TRUE(reader.open(tmp_path_.c_str()));
   Paragraph out;
-  ASSERT_TRUE(reader.load_paragraph(0, out));
+  ASSERT_TRUE(load_chapter_para(reader, 0, 0, out));
   EXPECT_EQ(out.text.runs[0].text, "Ünïcödë Hëllö Wörld — 日本語テスト");
 }
 
@@ -375,10 +391,15 @@ TEST_F(MrbFormatTest, ConvertBasicEpub) {
   EXPECT_GT(reader.paragraph_count(), 0u);
   EXPECT_GT(reader.chapter_count(), 0);
 
-  // Verify we can load every paragraph.
-  for (uint32_t i = 0; i < reader.paragraph_count(); ++i) {
-    Paragraph p;
-    ASSERT_TRUE(reader.load_paragraph(i, p)) << "Failed to load paragraph " << i;
+  // Verify we can load every paragraph by traversing chapter linked lists.
+  for (uint16_t ci = 0; ci < reader.chapter_count(); ++ci) {
+    uint32_t offset = reader.chapter_first_offset(ci);
+    for (uint16_t pi = 0; pi < reader.chapter_paragraph_count(ci); ++pi) {
+      Paragraph p;
+      auto lr = reader.load_paragraph(offset, p);
+      ASSERT_TRUE(lr.ok) << "Failed to load ch " << ci << " para " << pi;
+      offset = lr.next_offset;
+    }
   }
 }
 
@@ -454,7 +475,8 @@ TEST_F(MrbFormatTest, ReopenBookReleasesResources) {
 
     // Verify we can actually read paragraphs from book B.
     Paragraph p;
-    ASSERT_TRUE(reader.load_paragraph(0, p));
+    auto lr = reader.load_paragraph(reader.chapter_first_offset(0), p);
+    ASSERT_TRUE(lr.ok);
     EXPECT_EQ(p.type, ParagraphType::Text);
   }
 

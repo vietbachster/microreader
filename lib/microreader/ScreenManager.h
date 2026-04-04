@@ -29,11 +29,11 @@ class ScreenManager {
     stack_[depth_++] = screen;
     std::printf("[SM]   starting '%s'\n", screen->name());
     screen->start(canvas, queue);
-    if (depth_ > 1) {
-      std::printf("[SM]   partial_refresh for transition\n");
-      queue.partial_refresh();
-      queue.cancel_settle();
-    }
+    // if (depth_ > 1) {
+    //   std::printf("[SM]   partial_refresh for transition\n");
+    //   queue.partial_refresh();
+    //   queue.cancel_settle();
+    // }
     std::printf("[SM] push done\n");
   }
 
@@ -49,9 +49,9 @@ class ScreenManager {
     if (depth_ > 0) {
       std::printf("[SM]   starting '%s'\n", stack_[depth_ - 1]->name());
       stack_[depth_ - 1]->start(canvas, queue);
-      std::printf("[SM]   partial_refresh for transition\n");
-      queue.partial_refresh();
-      queue.cancel_settle();
+      // std::printf("[SM]   partial_refresh for transition\n");
+      // queue.partial_refresh();
+      // queue.cancel_settle();
     }
     std::printf("[SM] pop done\n");
   }

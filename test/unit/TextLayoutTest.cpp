@@ -1375,3 +1375,218 @@ TEST(PageLayout, InlineImageNoOverlapWithText) {
     }
   }
 }
+
+// ===================================================================
+// layout_page_backward() tests
+// ===================================================================
+
+TEST(PageLayoutBackward, EmptyChapter) {
+  Chapter ch;
+  PageOptions opts{200, 200, 10, 8};
+  auto page = layout_page_backward(font8, opts, ch, PagePosition(0, 0));
+  EXPECT_EQ(page.start, PagePosition(0, 0));
+  EXPECT_EQ(page.end, PagePosition(0, 0));
+  EXPECT_TRUE(page.text_items.empty());
+}
+
+TEST(PageLayoutBackward, SingleParagraphFromEnd) {
+  Chapter ch;
+  TextParagraph tp;
+  tp.runs.push_back(microreader::Run("Hello world", FontStyle::Regular, false));
+  ch.paragraphs.push_back(Paragraph::make_text(std::move(tp)));
+
+  PageOptions opts{200, 200, 0, 8};
+  // End = {1, 0} means "end of chapter" (1 paragraph, past the last)
+  auto page = layout_page_backward(font8, opts, ch, PagePosition(1, 0));
+
+  EXPECT_EQ(page.start, PagePosition(0, 0));
+  EXPECT_EQ(page.end, PagePosition(1, 0));
+  ASSERT_EQ(page.text_items.size(), 1);
+  EXPECT_EQ(line_text(page.text_items[0].line), "Hello world");
+}
+
+TEST(PageLayoutBackward, MultiParagraphAllFit) {
+  Chapter ch;
+  for (const char* text : {"First paragraph", "Second paragraph", "Third paragraph"}) {
+    TextParagraph tp;
+    tp.runs.push_back(microreader::Run(text, FontStyle::Regular, false));
+    ch.paragraphs.push_back(Paragraph::make_text(std::move(tp)));
+  }
+
+  PageOptions opts{200, 200, 0, 8};
+  auto page = layout_page_backward(font8, opts, ch, PagePosition(3, 0));
+
+  EXPECT_EQ(page.start, PagePosition(0, 0));
+  ASSERT_EQ(page.text_items.size(), 3);
+  EXPECT_EQ(line_text(page.text_items[0].line), "First paragraph");
+  EXPECT_EQ(line_text(page.text_items[1].line), "Second paragraph");
+  EXPECT_EQ(line_text(page.text_items[2].line), "Third paragraph");
+}
+
+TEST(PageLayoutBackward, PageFullCutsFromTop) {
+  // 3 paragraphs on a page that can only fit 2. Backward from end should
+  // give the last 2.
+  Chapter ch;
+  for (const char* text : {"First", "Second", "Third"}) {
+    TextParagraph tp;
+    tp.runs.push_back(microreader::Run(text, FontStyle::Regular, false));
+    ch.paragraphs.push_back(Paragraph::make_text(std::move(tp)));
+  }
+
+  // Page height = 16 (line) + 8 (spacing) + 16 (line) = 40. Third para won't fit.
+  PageOptions opts{200, 40, 0, 8};
+  auto page = layout_page_backward(font8, opts, ch, PagePosition(3, 0));
+
+  EXPECT_EQ(page.start, PagePosition(1, 0));
+  EXPECT_EQ(page.end, PagePosition(3, 0));
+  ASSERT_EQ(page.text_items.size(), 2);
+  EXPECT_EQ(line_text(page.text_items[0].line), "Second");
+  EXPECT_EQ(line_text(page.text_items[1].line), "Third");
+}
+
+TEST(PageLayoutBackward, MultiLineParagraphSplit) {
+  // A paragraph with multiple lines. Backward should pick trailing lines.
+  Chapter ch;
+  TextParagraph tp;
+  // 10 words × 8px = 80px per word. Width 100px → ~1 word per line.
+  tp.runs.push_back(microreader::Run("aaa bbb ccc ddd eee", FontStyle::Regular, false));
+  ch.paragraphs.push_back(Paragraph::make_text(std::move(tp)));
+
+  // Width 32px: each 3-letter word = 24px, fits one per line. 5 lines × 16px = 80px.
+  // Page height 32 → fits 2 lines.
+  PageOptions opts{32, 32, 0, 0};
+  auto page = layout_page_backward(font8, opts, ch, PagePosition(1, 0));
+
+  ASSERT_EQ(page.text_items.size(), 2);
+  // Should get the last 2 lines (ddd, eee)
+  EXPECT_EQ(page.start.paragraph, 0);
+  EXPECT_EQ(page.start.line, 3);  // lines 3 and 4
+  EXPECT_EQ(line_text(page.text_items[0].line), "ddd");
+  EXPECT_EQ(line_text(page.text_items[1].line), "eee");
+}
+
+TEST(PageLayoutBackward, PartialEndPosition) {
+  // End position mid-paragraph: {0, 3} means include lines 0, 1, 2 of paragraph 0.
+  Chapter ch;
+  TextParagraph tp;
+  tp.runs.push_back(microreader::Run("aaa bbb ccc ddd eee", FontStyle::Regular, false));
+  ch.paragraphs.push_back(Paragraph::make_text(std::move(tp)));
+
+  // Page is tall enough for all lines
+  PageOptions opts{32, 200, 0, 0};
+  auto page = layout_page_backward(font8, opts, ch, PagePosition(0, 3));
+
+  // Should include lines 0, 1, 2 (aaa, bbb, ccc)
+  ASSERT_EQ(page.text_items.size(), 3);
+  EXPECT_EQ(page.start, PagePosition(0, 0));
+  EXPECT_EQ(page.end, PagePosition(0, 3));
+  EXPECT_EQ(line_text(page.text_items[0].line), "aaa");
+  EXPECT_EQ(line_text(page.text_items[1].line), "bbb");
+  EXPECT_EQ(line_text(page.text_items[2].line), "ccc");
+}
+
+TEST(PageLayoutBackward, ImageParagraph) {
+  Chapter ch;
+  ch.paragraphs.push_back(Paragraph::make_image(1, 100, 50));
+
+  PageOptions opts{200, 200, 10, 8};
+  auto page = layout_page_backward(font8, opts, ch, PagePosition(1, 0));
+
+  EXPECT_EQ(page.start, PagePosition(0, 0));
+  ASSERT_EQ(page.image_items.size(), 1);
+  EXPECT_EQ(page.image_items[0].key, 1);
+}
+
+TEST(PageLayoutBackward, HrParagraph) {
+  Chapter ch;
+  ch.paragraphs.push_back(Paragraph::make_hr());
+
+  PageOptions opts{200, 200, 10, 8};
+  auto page = layout_page_backward(font8, opts, ch, PagePosition(1, 0));
+
+  EXPECT_EQ(page.start, PagePosition(0, 0));
+  ASSERT_EQ(page.hr_items.size(), 1);
+}
+
+TEST(PageLayoutBackward, PageBreakStopsBackward) {
+  // Content before a page break should not be included
+  Chapter ch;
+  TextParagraph tp1;
+  tp1.runs.push_back(microreader::Run("Before break", FontStyle::Regular, false));
+  ch.paragraphs.push_back(Paragraph::make_text(std::move(tp1)));
+  ch.paragraphs.push_back(Paragraph::make_page_break());
+  TextParagraph tp2;
+  tp2.runs.push_back(microreader::Run("After break", FontStyle::Regular, false));
+  ch.paragraphs.push_back(Paragraph::make_text(std::move(tp2)));
+
+  PageOptions opts{200, 200, 0, 8};
+  auto page = layout_page_backward(font8, opts, ch, PagePosition(3, 0));
+
+  // Should only get "After break" — page break stops backward scan
+  ASSERT_EQ(page.text_items.size(), 1);
+  EXPECT_EQ(line_text(page.text_items[0].line), "After break");
+}
+
+TEST(PageLayoutBackward, ForwardBackwardRoundTrip) {
+  // For a multi-page chapter, forward then backward from the end position
+  // should yield the same page content.
+  Chapter ch;
+  for (int i = 0; i < 5; ++i) {
+    TextParagraph tp;
+    std::string text;
+    for (int j = 0; j < 10; ++j) {
+      if (j > 0)
+        text += " ";
+      text += "word" + std::to_string(i * 10 + j);
+    }
+    tp.runs.push_back(microreader::Run(text, FontStyle::Regular, false));
+    ch.paragraphs.push_back(Paragraph::make_text(std::move(tp)));
+  }
+
+  PageOptions opts{200, 80, 0, 8};
+
+  // Layout forward to get page boundaries
+  auto page1 = layout_page(font8, opts, ch, PagePosition(0, 0));
+  ASSERT_FALSE(page1.at_chapter_end);
+
+  auto page2 = layout_page(font8, opts, ch, page1.end);
+
+  // Layout backward from page2's end should produce the same start/end
+  auto back2 = layout_page_backward(font8, opts, ch, page2.end);
+  EXPECT_EQ(back2.start, page2.start);
+  EXPECT_EQ(back2.end, page2.end);
+  EXPECT_EQ(back2.text_items.size(), page2.text_items.size());
+}
+
+TEST(PageLayoutBackward, ChapterEndFlagSet) {
+  // When backward from end covers the whole chapter, at_chapter_end should be set
+  Chapter ch;
+  TextParagraph tp;
+  tp.runs.push_back(microreader::Run("Short", FontStyle::Regular, false));
+  ch.paragraphs.push_back(Paragraph::make_text(std::move(tp)));
+
+  PageOptions opts{200, 200, 0, 8};
+  auto page = layout_page_backward(font8, opts, ch, PagePosition(1, 0));
+
+  EXPECT_TRUE(page.at_chapter_end);
+  EXPECT_EQ(page.start, PagePosition(0, 0));
+}
+
+TEST(PageLayoutBackward, ParagraphSpacingMatches) {
+  // Verify that backward layout produces the same y-offsets as forward
+  Chapter ch;
+  for (const char* text : {"Alpha", "Beta"}) {
+    TextParagraph tp;
+    tp.runs.push_back(microreader::Run(text, FontStyle::Regular, false));
+    ch.paragraphs.push_back(Paragraph::make_text(std::move(tp)));
+  }
+
+  PageOptions opts{200, 200, 0, 12};  // 12px para spacing
+  auto fwd = layout_page(font8, opts, ch, PagePosition(0, 0));
+  auto bwd = layout_page_backward(font8, opts, ch, PagePosition(2, 0));
+
+  ASSERT_EQ(fwd.text_items.size(), bwd.text_items.size());
+  for (size_t i = 0; i < fwd.text_items.size(); ++i) {
+    EXPECT_EQ(fwd.text_items[i].y_offset, bwd.text_items[i].y_offset) << "y_offset mismatch at item " << i;
+  }
+}

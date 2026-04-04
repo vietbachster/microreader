@@ -20,23 +20,21 @@ bool MrbReader::open(const char* path) {
     return false;
   }
 
-  // Skip paragraph index — entries are read on demand via seek in
-  // load_paragraph() to avoid allocating paragraph_count * 8 bytes of RAM.
-  // (War and Peace has ~17 000 paragraphs → 136 KB just for the index.)
-
-  // Read chapter table
+  // Read chapter table (16 bytes per entry in v2)
   chapters_.resize(header_.chapter_count);
   if (header_.chapter_count > 0) {
     fseek(f_, static_cast<long>(header_.chapter_offset), SEEK_SET);
     for (uint16_t i = 0; i < header_.chapter_count; ++i) {
-      uint8_t buf[8];
-      if (!read_bytes(buf, 8)) {
+      uint8_t buf[16];
+      if (!read_bytes(buf, 16)) {
         close();
         return false;
       }
-      chapters_[i].first_paragraph = mrb_read_u32(buf);
-      chapters_[i].paragraph_count = mrb_read_u16(buf + 4);
-      chapters_[i].reserved = mrb_read_u16(buf + 6);
+      chapters_[i].first_para_offset = mrb_read_u32(buf);
+      chapters_[i].last_para_offset = mrb_read_u32(buf + 4);
+      chapters_[i].paragraph_count = mrb_read_u16(buf + 8);
+      chapters_[i].reserved1 = mrb_read_u16(buf + 10);
+      chapters_[i].reserved2 = mrb_read_u32(buf + 12);
     }
   }
 
@@ -97,10 +95,16 @@ void MrbReader::close() {
   toc_ = {};
 }
 
-uint32_t MrbReader::chapter_first_paragraph(uint16_t chapter_idx) const {
+uint32_t MrbReader::chapter_first_offset(uint16_t chapter_idx) const {
   if (chapter_idx >= chapters_.size())
     return 0;
-  return chapters_[chapter_idx].first_paragraph;
+  return chapters_[chapter_idx].first_para_offset;
+}
+
+uint32_t MrbReader::chapter_last_offset(uint16_t chapter_idx) const {
+  if (chapter_idx >= chapters_.size())
+    return 0;
+  return chapters_[chapter_idx].last_para_offset;
 }
 
 uint16_t MrbReader::chapter_paragraph_count(uint16_t chapter_idx) const {
@@ -109,22 +113,24 @@ uint16_t MrbReader::chapter_paragraph_count(uint16_t chapter_idx) const {
   return chapters_[chapter_idx].paragraph_count;
 }
 
-bool MrbReader::load_paragraph(uint32_t index, Paragraph& out) {
-  if (!f_ || index >= header_.paragraph_count)
-    return false;
+MrbReader::LoadResult MrbReader::load_paragraph(uint32_t file_offset, Paragraph& out) {
+  LoadResult result;
+  if (!f_ || file_offset == 0)
+    return result;
 
-  // Seek to the paragraph's index entry (8 bytes each) to get file offset.
-  uint8_t idx_buf[8];
-  if (!read_at(header_.index_offset + index * 8, idx_buf, 8))
-    return false;
-  uint32_t para_offset = mrb_read_u32(idx_buf);
+  fseek(f_, static_cast<long>(file_offset), SEEK_SET);
 
-  fseek(f_, static_cast<long>(para_offset), SEEK_SET);
+  // Read 8-byte link header: prev_offset(4) + next_offset(4)
+  uint8_t link[8];
+  if (!read_bytes(link, 8))
+    return result;
+  result.prev_offset = mrb_read_u32(link);
+  result.next_offset = mrb_read_u32(link + 4);
 
   // Read type + data_size (uint32)
   uint8_t hdr[5];
   if (!read_bytes(hdr, 5))
-    return false;
+    return result;
 
   uint8_t type = hdr[0];
   uint32_t data_size = mrb_read_u32(hdr + 1);
@@ -132,11 +138,13 @@ bool MrbReader::load_paragraph(uint32_t index, Paragraph& out) {
   // Read body
   std::vector<uint8_t> body(data_size);
   if (data_size > 0 && !read_bytes(body.data(), data_size))
-    return false;
+    return result;
 
   switch (type) {
     case kMrbParaText:
-      return deserialize_text(body.data(), body.size(), out);
+      if (deserialize_text(body.data(), body.size(), out))
+        result.ok = true;
+      return result;
 
     case kMrbParaImage: {
       out = Paragraph{};
@@ -154,7 +162,8 @@ bool MrbReader::load_paragraph(uint32_t index, Paragraph& out) {
         if (sp != kMrbSpacingDefault)
           out.spacing_before = sp;
       }
-      return true;
+      result.ok = true;
+      return result;
     }
 
     case kMrbParaHr: {
@@ -164,15 +173,17 @@ bool MrbReader::load_paragraph(uint32_t index, Paragraph& out) {
         if (sp != kMrbSpacingDefault)
           out.spacing_before = sp;
       }
-      return true;
+      result.ok = true;
+      return result;
     }
 
     case kMrbParaPageBreak:
       out = Paragraph::make_page_break();
-      return true;
+      result.ok = true;
+      return result;
 
     default:
-      return false;
+      return result;
   }
 }
 

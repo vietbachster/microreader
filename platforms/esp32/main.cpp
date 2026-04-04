@@ -1,7 +1,10 @@
 #include "driver/gpio.h"
+#include "driver/usb_serial_jtag.h"
 #include "epd.h"
+#include "esp_heap_caps.h"
 #include "esp_ota_ops.h"
 #include "esp_sleep.h"
+#include "hal/usb_serial_jtag_ll.h"
 #include "input.h"
 #include "logger.h"
 #include "microreader/Application.h"
@@ -35,17 +38,28 @@ extern "C" void app_main(void) {
   static microreader::Application app;
   static microreader::DisplayQueue queue(epd);
 
-  // Wait for the serial monitor to connect before logging anything.
-  vTaskDelay(pdMS_TO_TICKS(3000));
+  // Only wait for serial monitor if USB is connected.
+  if (usb_serial_jtag_ll_txfifo_writable()) {
+    vTaskDelay(pdMS_TO_TICKS(3000));
+  }
+
+  // --- Memory audit: log heap at every stage ---
+  ESP_LOGI("mem", "after static init (DisplayQueue+App etc): free=%lu largest=%lu",
+           (unsigned long)esp_get_free_heap_size(), (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
 
   logger.log(microreader::LogLevel::Info, "Booting up...");
 
   epd.begin();
 
+  ESP_LOGI("mem", "after epd.begin: free=%lu largest=%lu", (unsigned long)esp_get_free_heap_size(),
+           (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+
   // Mount SD card (shares SPI bus with display).
   if (sd_init()) {
     logger.log(microreader::LogLevel::Info, "SD card ready");
-    ESP_LOGI("mem", "Free heap after SD init: %lu", (unsigned long)esp_get_free_heap_size());
+
+    ESP_LOGI("mem", "after sd_init: free=%lu largest=%lu", (unsigned long)esp_get_free_heap_size(),
+             (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
 
     // Ensure books directory exists.
     mkdir("/sdcard/books", 0775);
@@ -58,9 +72,15 @@ extern "C" void app_main(void) {
 
   serial_start();
 
+  ESP_LOGI("mem", "after serial_start: free=%lu largest=%lu", (unsigned long)esp_get_free_heap_size(),
+           (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+
   static uint8_t lut_buf[kLutSize];
 
   app.start(logger, queue);
+
+  ESP_LOGI("mem", "after app.start: free=%lu largest=%lu", (unsigned long)esp_get_free_heap_size(),
+           (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
 
   // Discard the power-button press that woke us from deep sleep.
   input.clear_button(microreader::Button::Power);
@@ -71,6 +91,12 @@ extern "C" void app_main(void) {
         epd.setCustomSettleLUT(lut_buf);
       else
         epd.setCustomLUT(lut_buf);
+    }
+
+    // Check for serial "open book" command.
+    const char* open_path = serial_open_take();
+    if (open_path) {
+      app.auto_open_book(open_path, queue);
     }
 
     microreader::run_loop_iteration(app, queue, input, runtime, logger);

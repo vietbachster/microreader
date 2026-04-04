@@ -6,7 +6,10 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_system.h"
+#include "esp_task_wdt.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #endif
 
 namespace microreader {
@@ -68,7 +71,7 @@ bool convert_epub_to_mrb(Book& book, const char* output_path) {
   return writer.finish(book.metadata(), book.toc());
 }
 
-bool convert_epub_to_mrb_streaming(Book& book, const char* output_path) {
+bool convert_epub_to_mrb_streaming(Book& book, const char* output_path, uint8_t* work_buf, uint8_t* xml_buf) {
   MrbWriter writer;
   if (!writer.open(output_path))
     return false;
@@ -107,7 +110,7 @@ bool convert_epub_to_mrb_streaming(Book& book, const char* output_path) {
     int64_t ch_start = esp_timer_get_time();
 #endif
 
-    book.load_chapter_streaming(ci, sink, &ctx);
+    book.load_chapter_streaming(ci, sink, &ctx, work_buf, xml_buf);
     if (ctx.error)
       return false;
 
@@ -117,6 +120,9 @@ bool convert_epub_to_mrb_streaming(Book& book, const char* output_path) {
     long ch_ms = (long)((esp_timer_get_time() - ch_start) / 1000);
     ESP_LOGI("mrb", "ch %u/%u  %ldms  free=%lu largest=%lu", (unsigned)ci, (unsigned)book.chapter_count(), ch_ms,
              (unsigned long)esp_get_free_heap_size(), (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+    // Yield periodically so the IDLE task can reset the watchdog.
+    if (ci % 50 == 49)
+      vTaskDelay(1);
 #endif
   }
 
@@ -124,7 +130,7 @@ bool convert_epub_to_mrb_streaming(Book& book, const char* output_path) {
 
 #ifdef ESP_PLATFORM
   long total_ms = (long)((esp_timer_get_time() - total_start) / 1000);
-  ESP_LOGI("mrb", "TOTAL conversion: %ldms (%u chapters)", total_ms, (unsigned)book.chapter_count());
+  ESP_LOGI("mrb", "TOTAL conversion: %ldms (%u chapters) ok=%d", total_ms, (unsigned)book.chapter_count(), ok);
 #endif
 
   return ok;
