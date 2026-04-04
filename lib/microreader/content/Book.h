@@ -17,6 +17,9 @@ namespace microreader {
 class Book {
  public:
   Book() = default;
+  ~Book() {
+    close();
+  }
 
   // Set CSS unit conversion config (call before open()).
   void set_css_config(const CssConfig& config) {

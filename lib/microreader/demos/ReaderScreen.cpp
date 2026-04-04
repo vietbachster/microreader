@@ -69,7 +69,7 @@ void ReaderScreen::start(Canvas& /*canvas*/, DisplayQueue& queue) {
     HEAP_LOG("after streaming convert");
 
     // Release EPUB resources — we only need the MRB from now on.
-    book_ = Book{};
+    book_.close();
 
     // Reinitialize display buffers after scratch use (no hardware refresh yet).
     queue.reset_buffers();

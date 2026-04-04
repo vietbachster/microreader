@@ -243,12 +243,13 @@ XmlError XmlReader::skip_element() {
       pos_ += gt + 1;
       return XmlError::Ok;
     }
-    // Consume the whole view and try to read more.
+    // No '>' in current view — discard everything and read a fresh buffer.
     if (remaining_ == 0) {
       pos_ = end_;
       return XmlError::Eof;
     }
-    XmlError err = advance(pos_);
+    // Discard the entire current view so advance() can read fresh data.
+    XmlError err = advance(end_);
     if (err != XmlError::Ok)
       return err;
     if (view_len() == 0)

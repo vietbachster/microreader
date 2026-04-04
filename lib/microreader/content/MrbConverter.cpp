@@ -120,13 +120,11 @@ bool convert_epub_to_mrb_streaming(Book& book, const char* output_path, uint8_t*
     long ch_ms = (long)((esp_timer_get_time() - ch_start) / 1000);
     ESP_LOGI("mrb", "ch %u/%u  %ldms  free=%lu largest=%lu", (unsigned)ci, (unsigned)book.chapter_count(), ch_ms,
              (unsigned long)esp_get_free_heap_size(), (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
-    // Yield periodically so the IDLE task can reset the watchdog.
-    if (ci % 50 == 49)
-      vTaskDelay(1);
 #endif
   }
 
   bool ok = writer.finish(book.metadata(), book.toc());
+  writer.close();  // explicit close so fclose() happens before we return
 
 #ifdef ESP_PLATFORM
   long total_ms = (long)((esp_timer_get_time() - total_start) / 1000);
