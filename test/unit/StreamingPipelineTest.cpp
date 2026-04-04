@@ -9,88 +9,18 @@
 
 #include <gtest/gtest.h>
 
-#include <algorithm>
 #include <cstdio>
 #include <filesystem>
 #include <string>
 #include <vector>
 
+#include "TestBooks.h"
 #include "microreader/content/Book.h"
 #include "microreader/content/EpubParser.h"
 #include "microreader/content/ZipReader.h"
 
 namespace fs = std::filesystem;
 using namespace microreader;
-
-#ifndef TEST_FIXTURES_DIR
-#define TEST_FIXTURES_DIR "."
-#endif
-
-// ---------------------------------------------------------------------------
-// Shared helpers (same discovery logic as MrbLayoutComparisonTest)
-// ---------------------------------------------------------------------------
-
-static std::string workspace_root() {
-  std::string fixtures = TEST_FIXTURES_DIR;
-  auto pos = fixtures.rfind('/');
-  if (pos == std::string::npos)
-    pos = fixtures.rfind('\\');
-  std::string up1 = fixtures.substr(0, pos);
-  pos = up1.rfind('/');
-  if (pos == std::string::npos)
-    pos = up1.rfind('\\');
-  std::string up2 = up1.substr(0, pos);
-  pos = up2.rfind('/');
-  if (pos == std::string::npos)
-    pos = up2.rfind('\\');
-  return up2.substr(0, pos);
-}
-
-static std::vector<std::string> discover_epubs(const std::string& dir) {
-  std::vector<std::string> result;
-  if (!fs::exists(dir))
-    return result;
-  for (auto& entry : fs::recursive_directory_iterator(dir)) {
-    if (entry.is_regular_file()) {
-      auto ext = entry.path().extension().string();
-      std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-      if (ext == ".epub")
-        result.push_back(entry.path().string());
-    }
-  }
-  std::sort(result.begin(), result.end());
-  return result;
-}
-
-static std::vector<std::string> get_all_test_books() {
-  std::string root = workspace_root();
-  // Curated list — same 15 books as MrbLayoutComparisonTest.
-  static const char* kBooks[] = {
-      "gutenberg/alice-wonderland.epub",
-      "gutenberg/frankenstein.epub",
-      "gutenberg/pride-prejudice.epub",
-      "gutenberg/moby-dick.epub",
-      "gutenberg/dracula.epub",
-      "gutenberg/adventures-tom-sawyer.epub",
-      "gutenberg/complete-shakespeare.epub",
-      "gutenberg/origin-species-darwin.epub",
-      "gutenberg/alice-illustrated.epub",
-      "gutenberg/war-and-peace.epub",
-      "gutenberg/heart-darkness.epub",
-      "gutenberg/metamorphosis-kafka.epub",
-      "gutenberg/ulysses-joyce.epub",
-      "other/buddenbrooks-de.epub",
-      "other/divina-commedia-it.epub",
-  };
-  std::vector<std::string> all;
-  std::string base = root + "/microreader2/test/books/";
-  for (auto& b : kBooks) {
-    std::string path = base + b;
-    if (fs::exists(path))
-      all.push_back(path);
-  }
-  return all;
-}
 
 // ===========================================================================
 // Level 1: ZipEntryInput read-all vs ZipReader::extract
@@ -156,13 +86,9 @@ TEST_P(ZipStreamingTest, AllXhtmlEntriesMatch) {
   printf("  [%s] %zu XHTML entries — ZIP STREAMING OK\n", filename.c_str(), tested);
 }
 
-INSTANTIATE_TEST_SUITE_P(AllBooks, ZipStreamingTest, ::testing::ValuesIn(get_all_test_books()),
+INSTANTIATE_TEST_SUITE_P(AllBooks, ZipStreamingTest, ::testing::ValuesIn(test_books::get_curated_books()),
                          [](const ::testing::TestParamInfo<std::string>& info) {
-                           auto name = fs::path(info.param).stem().string();
-                           for (auto& c : name)
-                             if (!std::isalnum(static_cast<unsigned char>(c)))
-                               c = '_';
-                           return name;
+                           return test_books::epub_test_name(info.param);
                          });
 
 // ===========================================================================
@@ -269,11 +195,7 @@ TEST_P(ChapterStreamingTest, ParagraphsMatch) {
          total_paras);
 }
 
-INSTANTIATE_TEST_SUITE_P(AllBooks, ChapterStreamingTest, ::testing::ValuesIn(get_all_test_books()),
+INSTANTIATE_TEST_SUITE_P(AllBooks, ChapterStreamingTest, ::testing::ValuesIn(test_books::get_curated_books()),
                          [](const ::testing::TestParamInfo<std::string>& info) {
-                           auto name = fs::path(info.param).stem().string();
-                           for (auto& c : name)
-                             if (!std::isalnum(static_cast<unsigned char>(c)))
-                               c = '_';
-                           return name;
+                           return test_books::epub_test_name(info.param);
                          });

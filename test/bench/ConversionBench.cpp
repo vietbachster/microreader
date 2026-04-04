@@ -1,66 +1,21 @@
 #include <benchmark/benchmark.h>
 
-#include <algorithm>
 #include <cstdio>
 #include <filesystem>
 #include <string>
 #include <vector>
 
+#include "../unit/TestBooks.h"
 #include "microreader/content/Book.h"
 #include "microreader/content/MrbConverter.h"
 
 namespace fs = std::filesystem;
 using namespace microreader;
 
-// ---------------------------------------------------------------------------
-// Helpers (same discovery logic as the test suite)
-// ---------------------------------------------------------------------------
-
-static std::string workspace_root() {
-  std::string fixtures = TEST_FIXTURES_DIR;
-  auto pos = fixtures.rfind('/');
-  if (pos == std::string::npos)
-    pos = fixtures.rfind('\\');
-  std::string up1 = fixtures.substr(0, pos);
-  pos = up1.rfind('/');
-  if (pos == std::string::npos)
-    pos = up1.rfind('\\');
-  std::string up2 = up1.substr(0, pos);
-  pos = up2.rfind('/');
-  if (pos == std::string::npos)
-    pos = up2.rfind('\\');
-  return up2.substr(0, pos);
-}
-
-static std::vector<std::string> discover_epubs(const std::string& dir) {
-  std::vector<std::string> result;
-  if (!fs::exists(dir))
-    return result;
-  for (auto& entry : fs::recursive_directory_iterator(dir)) {
-    if (entry.is_regular_file()) {
-      auto ext = entry.path().extension().string();
-      std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-      if (ext == ".epub")
-        result.push_back(entry.path().string());
-    }
-  }
-  std::sort(result.begin(), result.end());
-  return result;
-}
-
-static std::vector<std::string> get_all_test_books() {
-  std::string root = workspace_root();
-  std::vector<std::string> all;
-  for (auto& dir : {root + "/microreader2/test/books/gutenberg", root + "/microreader2/test/books/other"}) {
-    auto books = discover_epubs(dir);
-    all.insert(all.end(), books.begin(), books.end());
-  }
-  return all;
-}
-
 // Cache the book list so discovery only happens once.
+// Benchmarks use ALL books (not the curated 15).
 static const std::vector<std::string>& all_books() {
-  static auto books = get_all_test_books();
+  static auto books = test_books::get_all_books();
   return books;
 }
 

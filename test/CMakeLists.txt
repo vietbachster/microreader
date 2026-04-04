@@ -85,7 +85,6 @@ add_executable(unit_tests
     unit/MrbFormatTest.cpp
     unit/MrbLayoutComparisonTest.cpp
     unit/StreamingPipelineTest.cpp
-    unit/OhlerDiag.cpp
 )
 target_link_libraries(unit_tests PRIVATE
     microreader_content
@@ -106,7 +105,6 @@ add_executable(microreader_tests
     unit/EpubParserTest.cpp
     unit/ImageDecoderTest.cpp
     unit/RealBookTest.cpp
-    unit/DebugOhlerTest.cpp
     unit/BulkBookTest.cpp
     unit/TextLayoutTest.cpp
     unit/HtmlExportTest.cpp
