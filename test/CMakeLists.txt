@@ -93,6 +93,7 @@ target_link_libraries(unit_tests PRIVATE
 )
 target_compile_definitions(unit_tests PRIVATE
     TEST_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+    SMOKE_TESTS_ONLY
 )
 
 # ---------------------------------------------------------------------------

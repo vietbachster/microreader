@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Interactive serial commander for microreader2 device.
+"""Serial tool for microreader2 device.
 
-Sends CMND-protocol commands over USB serial to control the device UI,
-inject button presses, query status, list books, and open books.
-
-Usage:
+Interactive mode (default):
     python serial_cmd.py [--port COM4] [--baud 115200]
 
-Commands (interactive):
+Capture mode (non-interactive, saves output to file):
+    python serial_cmd.py --capture bench.log [--reset] [--timeout 300] [--done-marker "=== DONE:"]
+
+Interactive commands:
     btn <N>           Press button N (0=back, 1=select, 2=down/next, 3=up/prev, 4=up, 5=down, 6=power)
     back              Alias for btn 0
     select / sel      Alias for btn 1
@@ -17,6 +17,12 @@ Commands (interactive):
     books / ls        List books on SD card
     open <path>       Open book by full path (e.g. /sdcard/books/alice.epub)
     open <name>       Open book by filename (auto-prepends /sdcard/books/)
+    test [filter] [--clean] [-v] [--timeout N]
+                      Test books: open each and watch for BOOK_OK/BOOK_FAIL.
+                      --clean deletes .mrb files first (tests full conversion).
+                      filter narrows to books whose filename contains the string.
+    clear             Delete all .mrb files on the device
+    upload <file>     Upload an EPUB file to the device
     help              Show this help
     quit / exit       Exit
 """
@@ -24,6 +30,8 @@ import argparse
 import struct
 import sys
 import time
+import zlib
+from pathlib import Path
 
 import serial
 
@@ -92,6 +100,228 @@ def read_multiline_response(ser: serial.Serial, timeout: float = 5.0) -> str:
     return "\n".join(result) if result else "(no books found)"
 
 
+def upload_epub(ser: serial.Serial, filepath: Path) -> bool:
+    """Upload an EPUB file to the device over the existing serial connection."""
+    data = filepath.read_bytes()
+    name = filepath.name.encode("utf-8")
+    crc = zlib.crc32(data) & 0xFFFFFFFF
+    print(f"Uploading {filepath.name} ({len(data)} bytes, CRC32=0x{crc:08x})")
+
+    header = b"EPUB"
+    header += struct.pack("<H", len(name))
+    header += name
+    header += struct.pack("<I", len(data))
+    ser.write(header)
+
+    # Wait for READY
+    deadline = time.time() + 10
+    while time.time() < deadline:
+        resp = ser.readline().decode("utf-8", errors="replace").strip()
+        if not resp:
+            continue
+        if resp == "READY":
+            break
+        if resp.startswith("ERR:"):
+            print(f"Upload failed: {resp!r}")
+            return False
+    else:
+        print("Timeout waiting for READY")
+        return False
+    print("Device ready, sending data...")
+
+    chunk_size = 2048
+    sent = 0
+    t0 = time.time()
+    while sent < len(data):
+        end = min(sent + chunk_size, len(data))
+        ser.write(data[sent:end])
+        sent = end
+        deadline_ack = time.time() + 30
+        got_ack = False
+        while time.time() < deadline_ack:
+            b = ser.read(1)
+            if b == b"\x06":
+                got_ack = True
+                break
+        if not got_ack:
+            print("\nTimeout waiting for ACK")
+            return False
+        elapsed = time.time() - t0
+        rate = sent / elapsed / 1024 if elapsed > 0 else 0
+        pct = sent * 100 // len(data)
+        print(
+            f"\r  {sent}/{len(data)} bytes ({pct}%) {rate:.0f} KB/s", end="", flush=True
+        )
+    print()
+
+    ser.write(struct.pack("<I", crc))
+
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        resp = ser.readline().decode("utf-8", errors="replace").strip()
+        if not resp:
+            continue
+        if resp == "OK":
+            print("Upload successful!")
+            return True
+        if resp.startswith("ERR:"):
+            print(f"Upload failed: {resp!r}")
+            return False
+    print("Timeout waiting for result")
+    return False
+
+
+def drain(ser: serial.Serial):
+    """Drain any pending serial data."""
+    ser.timeout = 0.1
+    while ser.read(4096):
+        pass
+    ser.timeout = 1
+
+
+def send_list_books_raw(ser: serial.Serial) -> list[str]:
+    """Return book list as a list of filenames."""
+    drain(ser)
+    ser.write(MAGIC + b"L")
+    deadline = time.time() + 5.0
+    result = []
+    started = False
+    while time.time() < deadline:
+        line = ser.readline().decode("utf-8", errors="replace").strip()
+        if not line:
+            continue
+        if line.startswith("BOOKS:"):
+            started = True
+            continue
+        if line == "END":
+            break
+        if started:
+            result.append(line)
+    return result
+
+
+def send_clear_mrb(ser: serial.Serial) -> str:
+    """Send 'C' command to delete all .mrb files. Returns 'CLEARED:N' or error."""
+    drain(ser)
+    ser.write(MAGIC + b"C")
+    deadline = time.time() + 10.0
+    while time.time() < deadline:
+        line = ser.readline().decode("utf-8", errors="replace").strip()
+        if not line:
+            continue
+        if line.startswith("CLEARED:") or line.startswith("ERR:"):
+            return line
+    return "TIMEOUT"
+
+
+def wait_for_book_result(
+    ser: serial.Serial, timeout: float, verbose: bool = False
+) -> str | None:
+    """Watch serial output for BOOK_OK or BOOK_FAIL."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        line = ser.readline().decode("utf-8", errors="replace").strip()
+        if not line:
+            continue
+        if verbose:
+            print(f"\n    {line}", end="", flush=True)
+        if "BOOK_OK:" in line:
+            return "OK"
+        if "BOOK_FAIL:" in line:
+            return "FAIL"
+    return None
+
+
+def run_test(
+    ser: serial.Serial,
+    filter_str: str,
+    clean: bool,
+    verbose: bool,
+    per_book_timeout: int,
+):
+    """Test books on the device, reporting OK/FAIL/TIMEOUT for each."""
+    if clean:
+        print("Clearing .mrb files ... ", end="", flush=True)
+        result = send_clear_mrb(ser)
+        print(result)
+        if result.startswith("ERR"):
+            return
+        time.sleep(1)
+
+    books = send_list_books_raw(ser)
+    if not books:
+        print("No books found on device!")
+        return
+
+    if clean:
+        test_books = sorted(b for b in books if b.endswith(".epub"))
+        mode = "conversion"
+    else:
+        mrb_set = {b for b in books if b.endswith(".mrb")}
+        epub_set = {b for b in books if b.endswith(".epub")}
+        test_books = []
+        for epub in sorted(epub_set):
+            mrb = epub.rsplit(".", 1)[0] + ".mrb"
+            if mrb in mrb_set:
+                test_books.append(mrb)
+            else:
+                test_books.append(epub)
+        for mrb in sorted(mrb_set):
+            epub = mrb.rsplit(".", 1)[0] + ".epub"
+            if epub not in epub_set:
+                test_books.append(mrb)
+        mode = "open"
+
+    if filter_str:
+        test_books = [b for b in test_books if filter_str in b]
+
+    if not test_books:
+        print(
+            f"No books matching '{filter_str}'." if filter_str else "No books to test."
+        )
+        return
+
+    print(
+        f"\nTesting {len(test_books)} books ({mode} mode, {per_book_timeout}s timeout):\n"
+    )
+    results: dict[str, list[str]] = {"OK": [], "FAIL": [], "TIMEOUT": []}
+
+    for i, book in enumerate(test_books, 1):
+        path = f"/sdcard/books/{book}"
+        print(f"[{i}/{len(test_books)}] {book} ... ", end="", flush=True)
+        drain(ser)
+        path_bytes = path.encode("utf-8")
+        ser.write(MAGIC + b"O" + struct.pack("<H", len(path_bytes)) + path_bytes)
+        outcome = wait_for_book_result(ser, per_book_timeout, verbose=verbose)
+        if outcome == "OK":
+            print("OK")
+            results["OK"].append(book)
+        elif outcome == "FAIL":
+            print("FAIL")
+            results["FAIL"].append(book)
+        else:
+            print("TIMEOUT")
+            results["TIMEOUT"].append(book)
+        time.sleep(0.5)
+        ser.write(MAGIC + b"B" + bytes([1]))  # back button
+        time.sleep(2.0)
+        drain(ser)
+
+    print(f"\n{'='*50}")
+    print(
+        f"Results: {len(results['OK'])} OK, {len(results['FAIL'])} FAIL, "
+        f"{len(results['TIMEOUT'])} TIMEOUT"
+    )
+    if results["FAIL"]:
+        print("\nFailed:")
+        for b in results["FAIL"]:
+            print(f"  - {b}")
+    if results["TIMEOUT"]:
+        print("\nTimed out:")
+        for b in results["TIMEOUT"]:
+            print(f"  - {b}")
+
+
 BUTTON_ALIASES = {
     "back": 0,
     "select": 1,
@@ -104,10 +334,38 @@ BUTTON_ALIASES = {
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Serial commander for microreader2")
+    parser = argparse.ArgumentParser(description="Serial tool for microreader2")
     parser.add_argument("--port", default="COM4", help="Serial port (default: COM4)")
     parser.add_argument(
         "--baud", type=int, default=115200, help="Baud rate (default: 115200)"
+    )
+    parser.add_argument(
+        "--capture",
+        metavar="FILE",
+        default=None,
+        help="Non-interactive: capture all serial output to FILE and exit",
+    )
+    parser.add_argument(
+        "--reset",
+        action="store_true",
+        help="Toggle DTR/RTS to reset the device before capturing (use with --capture)",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=300,
+        help="Capture timeout in seconds (default: 300, use with --capture)",
+    )
+    parser.add_argument(
+        "--done-marker",
+        default="=== DONE:",
+        help="Stop capturing when this string appears in a line (default: '=== DONE:')",
+    )
+    parser.add_argument(
+        "--upload",
+        metavar="FILE",
+        default=None,
+        help="Non-interactive: upload an EPUB file then exit",
     )
     args = parser.parse_args()
 
@@ -117,6 +375,46 @@ def main():
         print(f"Cannot open {args.port}: {e}", file=sys.stderr)
         sys.exit(1)
 
+    if args.upload:
+        fp = Path(args.upload)
+        if not fp.exists():
+            print(f"File not found: {fp}", file=sys.stderr)
+            ser.close()
+            sys.exit(1)
+        ok = upload_epub(ser, fp)
+        ser.close()
+        sys.exit(0 if ok else 1)
+
+    if args.capture:
+        # --- Capture mode ---
+        print(f"Capturing {args.port} → {args.capture} (timeout={args.timeout}s)")
+        if args.reset:
+            ser.dtr = False
+            ser.rts = True
+            time.sleep(0.1)
+            ser.rts = False
+            time.sleep(0.1)
+            ser.reset_input_buffer()
+        with open(args.capture, "w", encoding="utf-8") as out:
+            t0 = time.time()
+            while time.time() - t0 < args.timeout:
+                line = ser.readline().decode("utf-8", errors="replace")
+                if not line:
+                    continue
+                line = line.rstrip("\r\n")
+                print(line)
+                out.write(line + "\n")
+                out.flush()
+                if args.done_marker and args.done_marker in line:
+                    print("\n--- Done marker reached ---")
+                    break
+            else:
+                print("\n--- Timeout ---")
+        ser.close()
+        print(f"Output saved to {args.capture}")
+        return
+
+    # --- Interactive mode ---
     print(f"Connected to {args.port} @ {args.baud}")
     print("Type 'help' for commands, 'quit' to exit.\n")
 
@@ -158,6 +456,40 @@ def main():
                 if not path.startswith("/"):
                     path = f"/sdcard/books/{path}"
                 print(send_open(ser, path))
+            elif verb == "test":
+                targs = arg.split()
+                clean = "--clean" in targs
+                verbose_test = "-v" in targs or "--verbose" in targs
+                default_timeout = 120 if clean else 30
+                per_book_timeout = default_timeout
+                filter_parts = []
+                skip_next = False
+                for j, tok in enumerate(targs):
+                    if skip_next:
+                        skip_next = False
+                        continue
+                    if tok == "--timeout" and j + 1 < len(targs):
+                        try:
+                            per_book_timeout = int(targs[j + 1])
+                            skip_next = True
+                        except ValueError:
+                            pass
+                    elif not tok.startswith("-"):
+                        filter_parts.append(tok)
+                run_test(
+                    ser, " ".join(filter_parts), clean, verbose_test, per_book_timeout
+                )
+            elif verb == "clear":
+                print(send_clear_mrb(ser))
+            elif verb == "upload":
+                if not arg:
+                    print("Usage: upload <file>")
+                    continue
+                fp = Path(arg)
+                if not fp.exists():
+                    print(f"File not found: {fp}")
+                    continue
+                upload_epub(ser, fp)
             else:
                 print(f"Unknown command: {verb!r}. Type 'help' for commands.")
     except KeyboardInterrupt:

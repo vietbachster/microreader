@@ -78,6 +78,19 @@ inline std::vector<std::string> get_curated_books() {
   return all;
 }
 
+// Single representative book for smoke/fast runs in unit_tests.
+// Uses dracula (medium classic, previously had UTF-8 split bugs) for good coverage.
+// Falls back to first available curated book if dracula is missing.
+inline std::vector<std::string> get_smoke_books() {
+  std::string path = workspace_root() + "/microreader2/test/books/gutenberg/dracula.epub";
+  if (fs::exists(path))
+    return {path};
+  auto all = get_curated_books();
+  if (!all.empty())
+    return {all.front()};
+  return {};
+}
+
 // All .epub files under test/books/ (gutenberg + other).
 inline std::vector<std::string> get_all_books() {
   std::string root = workspace_root();

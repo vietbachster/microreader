@@ -1695,7 +1695,7 @@ static EpubError parse_xhtml_events(XmlReader& reader, const CssStylesheet* inli
 
 #ifdef ESP_PLATFORM
   parser.emit_us_ = nullptr;
-  ESP_LOGI("perf", "  head=%ldms xml=%ldms css=%ldms elem=%ldms end=%ldms text=%ldms emit=%ldms  events=%u txtB=%u",
+  ESP_LOGD("perf", "  head=%ldms xml=%ldms css=%ldms elem=%ldms end=%ldms text=%ldms emit=%ldms  events=%u txtB=%u",
            (long)(head_us / 1000), (long)(xml_us / 1000), (long)(css_us / 1000), (long)(elem_us / 1000),
            (long)(end_us / 1000), (long)(text_us / 1000), (long)(emit_us / 1000), (unsigned)event_count,
            (unsigned)text_bytes);
@@ -1884,7 +1884,7 @@ EpubError Epub::parse_chapter_streaming(IZipFile& file, size_t index, ParagraphS
   parser.finish();
 #ifdef ESP_PLATFORM
   int64_t fin_us = esp_timer_get_time() - fin_t0;
-  ESP_LOGI("perf", "  io=%ldms finish=%ldms", (long)(io_us / 1000), (long)(fin_us / 1000));
+  ESP_LOGD("perf", "  io=%ldms finish=%ldms", (long)(io_us / 1000), (long)(fin_us / 1000));
 #endif
 
   return EpubError::Ok;

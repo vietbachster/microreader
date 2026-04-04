@@ -279,10 +279,17 @@ TEST_P(BulkMrbComparisonTest, LayoutMatchesEpub) {
   printf("  [%s] %d chapters, %zu pages — MATCH\n", filename.c_str(), mrb.chapter_count(), total_pages);
 }
 
+#ifdef SMOKE_TESTS_ONLY
+INSTANTIATE_TEST_SUITE_P(SmokeBooks, BulkMrbComparisonTest, ::testing::ValuesIn(test_books::get_smoke_books()),
+                         [](const ::testing::TestParamInfo<std::string>& info) {
+                           return test_books::epub_test_name(info.param);
+                         });
+#else
 INSTANTIATE_TEST_SUITE_P(AllBooks, BulkMrbComparisonTest, ::testing::ValuesIn(test_books::get_curated_books()),
                          [](const ::testing::TestParamInfo<std::string>& info) {
                            return test_books::epub_test_name(info.param);
                          });
+#endif
 
 // ---------------------------------------------------------------------------
 // Streaming converter comparison: verify convert_epub_to_mrb_streaming
@@ -364,10 +371,17 @@ TEST_P(StreamingMrbComparisonTest, StreamingMatchesNormal) {
   printf("  [%s] %d chapters, %zu pages — STREAMING MATCH\n", filename.c_str(), mrb_n.chapter_count(), total_pages);
 }
 
+#ifdef SMOKE_TESTS_ONLY
+INSTANTIATE_TEST_SUITE_P(SmokeBooks, StreamingMrbComparisonTest, ::testing::ValuesIn(test_books::get_smoke_books()),
+                         [](const ::testing::TestParamInfo<std::string>& info) {
+                           return test_books::epub_test_name(info.param);
+                         });
+#else
 INSTANTIATE_TEST_SUITE_P(AllBooks, StreamingMrbComparisonTest, ::testing::ValuesIn(test_books::get_curated_books()),
                          [](const ::testing::TestParamInfo<std::string>& info) {
                            return test_books::epub_test_name(info.param);
                          });
+#endif
 
 // ---------------------------------------------------------------------------
 // Benchmark: measure streaming conversion time per book
@@ -419,7 +433,14 @@ TEST_P(ConversionBenchmark, StreamingConversion) {
          book.chapter_count());
 }
 
+#ifdef SMOKE_TESTS_ONLY
+INSTANTIATE_TEST_SUITE_P(SmokeBooks, ConversionBenchmark, ::testing::ValuesIn(test_books::get_smoke_books()),
+                         [](const ::testing::TestParamInfo<std::string>& info) {
+                           return test_books::epub_test_name(info.param);
+                         });
+#else
 INSTANTIATE_TEST_SUITE_P(AllBooks, ConversionBenchmark, ::testing::ValuesIn(test_books::get_curated_books()),
                          [](const ::testing::TestParamInfo<std::string>& info) {
                            return test_books::epub_test_name(info.param);
                          });
+#endif

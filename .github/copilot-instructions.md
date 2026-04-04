@@ -209,6 +209,13 @@ Interactive commands in `serial_cmd.py`:
 > open alice.epub  # open book (auto-prepends /sdcard/books/)
 ```
 
+Capture mode (non-interactive, saves all output to file):
+```bash
+python tools/serial_cmd.py --capture bench.log --reset --timeout 300
+# --reset toggles DTR/RTS to reboot the device before capturing
+# stops early when "=== DONE:" appears (override with --done-marker)
+```
+
 Useful heap logging pattern:
 ```cpp
 #include "esp_heap_caps.h"

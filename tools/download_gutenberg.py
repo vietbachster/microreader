@@ -19,105 +19,106 @@ from pathlib import Path
 
 # Well-known popular Gutenberg book IDs (mix of genres, sizes, with/without images)
 POPULAR_IDS = [
-    1342,   # Pride and Prejudice
-    11,     # Alice's Adventures in Wonderland
-    1661,   # Sherlock Holmes
-    84,     # Frankenstein
-    1952,   # The Yellow Wallpaper
-    98,     # A Tale of Two Cities
-    2701,   # Moby Dick
-    1080,   # A Modest Proposal
-    174,    # The Picture of Dorian Gray
+    1342,  # Pride and Prejudice
+    11,  # Alice's Adventures in Wonderland
+    1661,  # Sherlock Holmes
+    84,  # Frankenstein
+    1952,  # The Yellow Wallpaper
+    98,  # A Tale of Two Cities
+    2701,  # Moby Dick
+    1080,  # A Modest Proposal
+    174,  # The Picture of Dorian Gray
     16328,  # Beowulf
-    345,    # Dracula
-    5200,   # Metamorphosis
-    2600,   # War and Peace
-    1260,   # Jane Eyre
-    46,     # A Christmas Carol
-    76,     # Adventures of Huckleberry Finn
-    74,     # Adventures of Tom Sawyer
-    1232,   # The Prince
-    219,    # Heart of Darkness
-    2542,   # A Doll's House
-    1400,   # Great Expectations
+    345,  # Dracula
+    5200,  # Metamorphosis
+    2600,  # War and Peace
+    1260,  # Jane Eyre
+    46,  # A Christmas Carol
+    76,  # Adventures of Huckleberry Finn
+    74,  # Adventures of Tom Sawyer
+    1232,  # The Prince
+    219,  # Heart of Darkness
+    2542,  # A Doll's House
+    1400,  # Great Expectations
     25344,  # The Scarlet Letter
-    1184,   # The Count of Monte Cristo
-    120,    # Treasure Island
+    1184,  # The Count of Monte Cristo
+    120,  # Treasure Island
     44881,  # A Room with a View
-    16,     # Peter Pan
-    6130,   # The Iliad
+    16,  # Peter Pan
+    6130,  # The Iliad
     58585,  # The Brothers Karamazov
-    3207,   # Leviathan
-    36,     # The War of the Worlds
-    43,     # The Strange Case of Dr. Jekyll and Mr. Hyde
-    55,     # The Wonderful Wizard of Oz
-    1497,   # Republic (Plato)
-    514,    # Little Women
-    4300,   # Ulysses
-    100,    # Complete Works of Shakespeare
-    1727,   # The Odyssey
-    160,    # The Awakening
-    2591,   # Grimms' Fairy Tales
-    205,    # Walden
-    768,    # Wuthering Heights
-    1998,   # Thus Spake Zarathustra
-    996,    # Don Quixote
-    730,    # Oliver Twist
-    1250,   # Anthem
+    3207,  # Leviathan
+    36,  # The War of the Worlds
+    43,  # The Strange Case of Dr. Jekyll and Mr. Hyde
+    55,  # The Wonderful Wizard of Oz
+    1497,  # Republic (Plato)
+    514,  # Little Women
+    4300,  # Ulysses
+    100,  # Complete Works of Shakespeare
+    1727,  # The Odyssey
+    160,  # The Awakening
+    2591,  # Grimms' Fairy Tales
+    205,  # Walden
+    768,  # Wuthering Heights
+    1998,  # Thus Spake Zarathustra
+    996,  # Don Quixote
+    730,  # Oliver Twist
+    1250,  # Anthem
     28054,  # The Brothers Grimm
-    3600,   # Essays of Michel de Montaigne
-    2500,   # Siddhartha
-    8800,   # The Divine Comedy
-    2852,   # The Hound of the Baskervilles
-    5740,   # Tractatus Logico-Philosophicus
-    161,    # Sense and Sensibility
-    2554,   # Crime and Punishment
-    1399,   # Anna Karenina
+    3600,  # Essays of Michel de Montaigne
+    2500,  # Siddhartha
+    8800,  # The Divine Comedy
+    2852,  # The Hound of the Baskervilles
+    5740,  # Tractatus Logico-Philosophicus
+    161,  # Sense and Sensibility
+    2554,  # Crime and Punishment
+    1399,  # Anna Karenina
     28885,  # The Federalist Papers
-    1023,   # Bleak House
-    244,    # A Study in Scarlet
-    35,     # The Time Machine
-    135,    # Les Misérables
-    4363,   # Pygmalion
-    158,    # Emma
-    1259,   # Twenty Thousand Leagues Under the Seas
-    779,    # The Trial
-    408,    # The Souls of Black Folk
-    1951,   # The Food of the Gods
-    5827,   # The Problems of Philosophy
-    41,     # The Legend of Sleepy Hollow
-    2814,   # Dubliners
-    33,     # The Scarlet Pimpernel
-    2097,   # The Sign of the Four
-    544,    # Anne of Green Gables
-    23,     # Narrative of Frederick Douglass
-    61,     # The Communist Manifesto
-    103,    # Around the World in 80 Days
-    45,     # Anne of the Island
-    829,    # Gulliver's Travels
-    1661,   # Adventures of Sherlock Holmes
+    1023,  # Bleak House
+    244,  # A Study in Scarlet
+    35,  # The Time Machine
+    135,  # Les Misérables
+    4363,  # Pygmalion
+    158,  # Emma
+    1259,  # Twenty Thousand Leagues Under the Seas
+    779,  # The Trial
+    408,  # The Souls of Black Folk
+    1951,  # The Food of the Gods
+    5827,  # The Problems of Philosophy
+    41,  # The Legend of Sleepy Hollow
+    2814,  # Dubliners
+    33,  # The Scarlet Pimpernel
+    2097,  # The Sign of the Four
+    544,  # Anne of Green Gables
+    23,  # Narrative of Frederick Douglass
+    61,  # The Communist Manifesto
+    103,  # Around the World in 80 Days
+    45,  # Anne of the Island
+    829,  # Gulliver's Travels
+    1661,  # Adventures of Sherlock Holmes
     30254,  # The Romance of Lust
-    2148,   # The Works of Edgar Allan Poe Volume 2
-    215,    # The Call of the Wild
-    236,    # The Jungle Book
-    3825,   # Psychopathia Sexualis
+    2148,  # The Works of Edgar Allan Poe Volume 2
+    215,  # The Call of the Wild
+    236,  # The Jungle Book
+    3825,  # Psychopathia Sexualis
     27827,  # The Kama Sutra
     69087,  # The Art of War (Sun Tzu)
     14264,  # Paradise Lost
     42324,  # Frankenstein (1818 text)
-    1518,   # The Complete Poetical Works of Percy Bysshe Shelley
-    2680,   # Meditations
-    2097,   # The Sign of Four
-    4517,   # Ethan Frome
-    2147,   # The Works of Edgar Allan Poe Volume 1
+    1518,  # The Complete Poetical Works of Percy Bysshe Shelley
+    2680,  # Meditations
+    2097,  # The Sign of Four
+    4517,  # Ethan Frome
+    2147,  # The Works of Edgar Allan Poe Volume 1
     10007,  # Twelfth Night
-    5197,   # My Life and Work
-    1934,   # Winesburg, Ohio
+    5197,  # My Life and Work
+    1934,  # Winesburg, Ohio
 ]
 
 
 class CatalogPageParser(HTMLParser):
     """Parse a Gutenberg catalog/search page to extract book IDs."""
+
     def __init__(self):
         super().__init__()
         self.book_ids = []
@@ -197,16 +198,21 @@ def get_book_ids_from_catalog(start_page=1, max_pages=20, existing_count=0, targ
 
 def main():
     parser = argparse.ArgumentParser(description="Download Gutenberg EPUBs for testing")
-    parser.add_argument("--count", type=int, default=50, help="Number of EPUBs to download")
+    parser.add_argument(
+        "--count", type=int, default=50, help="Number of EPUBs to download"
+    )
     parser.add_argument("--output", type=str, default=None, help="Output directory")
-    parser.add_argument("--catalog", action="store_true",
-                        help="Scrape catalog for more IDs beyond the built-in popular list")
+    parser.add_argument(
+        "--catalog",
+        action="store_true",
+        help="Scrape catalog for more IDs beyond the built-in popular list",
+    )
     args = parser.parse_args()
 
     if args.output:
         output_dir = Path(args.output)
     else:
-        output_dir = Path(__file__).parent.parent / "books" / "gutenberg"
+        output_dir = Path(__file__).parent.parent / "test" / "books" / "gutenberg"
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -269,7 +275,9 @@ def main():
                 downloaded += 1
                 total_bytes += size
                 existing.add(tag)
-                print(f"  [{downloaded}/{args.count}] {filename_noimages} ({size/1024:.0f} KB)")
+                print(
+                    f"  [{downloaded}/{args.count}] {filename_noimages} ({size/1024:.0f} KB)"
+                )
             else:
                 errors += 1
                 print(f"  FAILED: pg{book_id}")
