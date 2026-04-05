@@ -7,6 +7,9 @@ Interactive mode (default):
 Capture mode (non-interactive, saves output to file):
     python serial_cmd.py --capture bench.log [--reset] [--timeout 300] [--done-marker "=== DONE:"]
 
+Benchmark mode (non-interactive, sends bench command and saves output):
+    python serial_cmd.py --bench ohler.epub [--capture bench.log] [--timeout 300]
+
 Interactive commands:
     btn <N>           Press button N (0=back, 1=select, 2=down/next, 3=up/prev, 4=up, 5=down, 6=power)
     back              Alias for btn 0
@@ -57,6 +60,12 @@ def send_open(ser: serial.Serial, path: str) -> str:
     path_bytes = path.encode("utf-8")
     ser.write(MAGIC + b"O" + struct.pack("<H", len(path_bytes)) + path_bytes)
     return read_response(ser)
+
+
+def send_bench(ser: serial.Serial, path: str) -> str:
+    path_bytes = path.encode("utf-8")
+    ser.write(MAGIC + b"X" + struct.pack("<H", len(path_bytes)) + path_bytes)
+    return read_response(ser, timeout=10.0)
 
 
 def read_response(ser: serial.Serial, timeout: float = 3.0) -> str:
@@ -367,6 +376,12 @@ def main():
         default=None,
         help="Non-interactive: upload an EPUB file then exit",
     )
+    parser.add_argument(
+        "--bench",
+        metavar="BOOK",
+        default=None,
+        help="Non-interactive: send bench command for BOOK (filename or full path), stream output until done",
+    )
     args = parser.parse_args()
 
     try:
@@ -384,6 +399,44 @@ def main():
         ok = upload_epub(ser, fp)
         ser.close()
         sys.exit(0 if ok else 1)
+
+    if args.bench:
+        # --- Benchmark mode ---
+        path = args.bench
+        if not path.startswith("/"):
+            path = f"/sdcard/books/{path}"
+        capture_file = args.capture  # optional, may be None
+        timeout = args.timeout
+        done_marker = "BENCHMARK DONE"
+        print(f"Sending bench for {path} (timeout={timeout}s)")
+        resp = send_bench(ser, path)
+        print(resp)
+        if not resp.startswith("OK") and not resp.endswith("OK"):
+            ser.close()
+            sys.exit(1)
+        out_f = open(capture_file, "w", encoding="utf-8") if capture_file else None
+        try:
+            t0 = time.time()
+            while time.time() - t0 < timeout:
+                line = ser.readline().decode("utf-8", errors="replace").rstrip("\r\n")
+                if not line:
+                    continue
+                print(line)
+                sys.stdout.flush()
+                if out_f:
+                    out_f.write(line + "\n")
+                    out_f.flush()
+                if done_marker in line:
+                    print("--- Done ---")
+                    break
+            else:
+                print("--- Timeout ---")
+        finally:
+            if out_f:
+                out_f.close()
+                print(f"Saved to {capture_file}")
+        ser.close()
+        return
 
     if args.capture:
         # --- Capture mode ---
@@ -490,6 +543,21 @@ def main():
                     print(f"File not found: {fp}")
                     continue
                 upload_epub(ser, fp)
+            elif verb == "bench":
+                if not arg:
+                    print("Usage: bench <path_or_filename>")
+                    continue
+                path = arg
+                if not path.startswith("/"):
+                    path = f"/sdcard/books/{path}"
+                print(f"Sending bench request for {path} ...")
+                resp = send_bench(ser, path)
+                print(resp)
+                if resp.startswith("OK"):
+                    print(
+                        "Benchmark running — watch serial output for BENCH1..BENCH5 results."
+                    )
+                    print("(Use --capture to save logs, or just watch the terminal.)")
             else:
                 print(f"Unknown command: {verb!r}. Type 'help' for commands.")
     except KeyboardInterrupt:

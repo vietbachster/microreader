@@ -17,4 +17,10 @@ bool convert_epub_to_mrb(Book& book, const char* output_path);
 bool convert_epub_to_mrb_streaming(Book& book, const char* output_path, uint8_t* work_buf = nullptr,
                                    uint8_t* xml_buf = nullptr);
 
+#ifdef ESP_PLATFORM
+// Measures conversion sub-stages individually via serial log output.
+void benchmark_epub_conversion(Book& book, const char* tmp_path, uint8_t* work_buf = nullptr,
+                               uint8_t* xml_buf = nullptr);
+#endif
+
 }  // namespace microreader

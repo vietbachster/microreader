@@ -1,6 +1,7 @@
 #include "MrbConverter.h"
 
 #include "EpubParser.h"
+#include "ZipReader.h"
 
 #ifdef ESP_PLATFORM
 #include "esp_heap_caps.h"
@@ -164,5 +165,111 @@ bool convert_epub_to_mrb_streaming(Book& book, const char* output_path, uint8_t*
 
   return ok;
 }
+
+#ifdef ESP_PLATFORM
+void benchmark_epub_conversion(Book& book, const char* tmp_path, uint8_t* work_buf, uint8_t* xml_buf) {
+  static constexpr const char* TAG = "bench";
+  static constexpr size_t kWorkBufSize = ZipEntryInput::kMinWorkBufSize;
+  static constexpr size_t kXmlBufSize = 4096;
+
+  std::unique_ptr<uint8_t[]> owned_work, owned_xml;
+  if (!work_buf) {
+    owned_work = std::make_unique<uint8_t[]>(kWorkBufSize);
+    work_buf = owned_work.get();
+  }
+  if (!xml_buf) {
+    owned_xml = std::make_unique<uint8_t[]>(kXmlBufSize);
+    xml_buf = owned_xml.get();
+  }
+
+  const ZipReader& zip = book.epub().zip();
+  const auto& spine = book.epub().spine();
+  IZipFile& file = book.file();
+  const unsigned nch = (unsigned)book.chapter_count();
+
+  ESP_LOGI(TAG, "=== EPUB BENCHMARK START ===");
+  ESP_LOGI(TAG, "chapters=%u  free=%lu largest=%lu", nch, (unsigned long)esp_get_free_heap_size(),
+           (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+
+  auto discard_cb = [](const uint8_t*, size_t, void*) -> bool { return true; };
+
+  // BENCH_CONV: full streaming conversion (main metric)
+  ESP_LOGI(TAG, "--- BENCH_CONV ---");
+  int64_t t = esp_timer_get_time();
+  bool ok = convert_epub_to_mrb_streaming(book, tmp_path, work_buf, xml_buf);
+  long t_conv = (long)((esp_timer_get_time() - t) / 1000);
+  long out_bytes = 0;
+  if (ok) {
+    FILE* f2 = fopen(tmp_path, "rb");
+    if (f2) {
+      fseek(f2, 0, SEEK_END);
+      out_bytes = ftell(f2);
+      fclose(f2);
+      remove(tmp_path);
+    }
+  }
+  ESP_LOGI(TAG, "BENCH_CONV: %ldms  output=%ldB  ok=%d", t_conv, out_bytes, ok);
+
+  // BENCH_SEEK: raw SD seek cost — seeks to each chapter's local header, no inflate
+  ESP_LOGI(TAG, "--- BENCH_SEEK (pure SD seek cost, %u seeks) ---", nch);
+  uint8_t lhbuf[30];
+  t = esp_timer_get_time();
+  for (const auto& si : spine) {
+    const ZipEntry& e = zip.entry(si.file_idx);
+    file.seek(e.local_header_offset, SEEK_SET);
+    file.read(lhbuf, sizeof(lhbuf));
+  }
+  long t_seek = (long)((esp_timer_get_time() - t) / 1000);
+  ESP_LOGI(TAG, "BENCH_SEEK: %ldms  avg=%ldms/seek", t_seek, t_seek / (long)nch);
+
+  // BENCH_DECOMP: decompress all chapters to /dev/null (seek + inflate, no parse)
+  ESP_LOGI(TAG, "--- BENCH_DECOMP (decompress only, %u chapters) ---", nch);
+  size_t decomp_bytes = 0;
+  t = esp_timer_get_time();
+  for (const auto& si : spine) {
+    const ZipEntry& e = zip.entry(si.file_idx);
+    decomp_bytes += e.uncompressed_size;
+    zip.extract_streaming(file, e, discard_cb, nullptr, work_buf, kWorkBufSize);
+  }
+  long t_decomp = (long)((esp_timer_get_time() - t) / 1000);
+  ESP_LOGI(TAG, "BENCH_DECOMP: %ldms  %uB", t_decomp, (unsigned)decomp_bytes);
+
+  // BENCH_BUILD: decompress + XML parse + paragraph build (no write)
+  ESP_LOGI(TAG, "--- BENCH_BUILD (decompress + XML + paragraph build) ---");
+  unsigned total_paras = 0;
+  auto count_sink = [](void* ctx, Paragraph&&) { ++(*(unsigned*)ctx); };
+  t = esp_timer_get_time();
+  for (size_t ci = 0; ci < book.chapter_count(); ++ci)
+    book.load_chapter_streaming(ci, count_sink, &total_paras, work_buf, xml_buf);
+  long t_build = (long)((esp_timer_get_time() - t) / 1000);
+  ESP_LOGI(TAG, "BENCH_BUILD: %ldms  paras=%u", t_build, total_paras);
+
+  // BENCH_WRITE: raw fwrite — isolates SD write throughput
+  long t_write = 0;
+  if (out_bytes > 0) {
+    ESP_LOGI(TAG, "--- BENCH_WRITE (raw fwrite %ldB) ---", out_bytes);
+    char wr_path[300];
+    snprintf(wr_path, sizeof(wr_path), "%s.wr", tmp_path);
+    FILE* wf = fopen(wr_path, "wb");
+    if (wf) {
+      static uint8_t dummy[4096];
+      t = esp_timer_get_time();
+      for (long rem = out_bytes; rem > 0;) {
+        int want = rem < 4096 ? (int)rem : 4096;
+        fwrite(dummy, 1, (size_t)want, wf);
+        rem -= want;
+      }
+      fclose(wf);
+      t_write = (long)((esp_timer_get_time() - t) / 1000);
+      remove(wr_path);
+      long kbps = t_write > 0 ? (long)(out_bytes / 1024) * 1000 / t_write : 0;
+      ESP_LOGI(TAG, "BENCH_WRITE: %ldms  %ldKB/s", t_write, kbps);
+    }
+  }
+
+  ESP_LOGI(TAG, "=== BENCHMARK DONE: CONV=%ldms SEEK=%ldms DECOMP=%ldms BUILD=%ldms WRITE=%ldms ===", t_conv, t_seek,
+           t_decomp, t_build, t_write);
+}
+#endif
 
 }  // namespace microreader

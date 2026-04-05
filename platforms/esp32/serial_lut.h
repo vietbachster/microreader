@@ -60,6 +60,10 @@ volatile uint8_t g_serial_buttons = 0;
 static char g_serial_open_path[256] = {};
 static volatile bool g_serial_open_pending = false;
 
+// Serial command: benchmark a book (set by serial task, consumed by main loop).
+static char g_serial_bench_path[256] = {};
+static volatile bool g_serial_bench_pending = false;
+
 // Call from the main loop. Returns true (and copies into `out`) when a fresh
 // LUT has been received since the last call.
 inline bool serial_lut_take(uint8_t* out) {
@@ -76,6 +80,14 @@ inline const char* serial_open_take() {
     return nullptr;
   g_serial_open_pending = false;
   return g_serial_open_path;
+}
+
+// Call from the main loop. Returns the path if a serial benchmark was requested.
+inline const char* serial_bench_take() {
+  if (!g_serial_bench_pending)
+    return nullptr;
+  g_serial_bench_pending = false;
+  return g_serial_bench_path;
 }
 
 // Read exactly `n` bytes with a timeout. Returns true on success.
@@ -333,15 +345,34 @@ static void handle_serial_cmd() {
       ESP_LOGI(kCmdTag, "cleared %d .mrb files", count);
       break;
     }
+    case 'X': {
+      // Benchmark: read path length + path, then trigger benchmark in main loop.
+      uint8_t len_buf[2];
+      if (!serial_read_exact(len_buf, 2, 1000)) {
+        serial_write("ERR:bench_len\n");
+        return;
+      }
+      uint16_t path_len = len_buf[0] | (len_buf[1] << 8);
+      if (path_len == 0 || path_len >= sizeof(g_serial_bench_path)) {
+        serial_write("ERR:bench_path_len\n");
+        return;
+      }
+      if (!serial_read_exact((uint8_t*)g_serial_bench_path, path_len, 2000)) {
+        serial_write("ERR:bench_path_read\n");
+        return;
+      }
+      g_serial_bench_path[path_len] = '\0';
+      g_serial_bench_pending = true;
+      ESP_LOGI(kCmdTag, "bench book: %s", g_serial_bench_path);
+      serial_write("OK\n");
+      break;
+    }
     default:
       ESP_LOGW(kCmdTag, "unknown sub-command: 0x%02x", sub);
       serial_write("ERR:unknown_cmd\n");
       break;
   }
 }
-
-// ---------------------------------------------------------------------------
-// Unified receiver task — scans for both magic sequences byte by byte.
 // ---------------------------------------------------------------------------
 static void serial_receiver_task(void* /*arg*/) {
   uint8_t lut_pos = 0;   // progress matching kLutMagic

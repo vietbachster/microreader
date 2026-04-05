@@ -68,6 +68,11 @@ class Book {
     return epub_;
   }
 
+  // Direct access to the underlying ZIP file handle (benchmark/tools only).
+  IZipFile& file() {
+    return file_;
+  }
+
  private:
   StdioZipFile file_;
   Epub epub_;

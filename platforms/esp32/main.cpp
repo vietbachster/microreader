@@ -10,6 +10,8 @@
 #include "microreader/Application.h"
 #include "microreader/DisplayQueue.h"
 #include "microreader/Loop.h"
+#include "microreader/content/Book.h"
+#include "microreader/content/MrbConverter.h"
 #include "runtime.h"
 #include "sdcard.h"
 #include "serial_lut.h"
@@ -97,6 +99,19 @@ extern "C" void app_main(void) {
     const char* open_path = serial_open_take();
     if (open_path) {
       app.auto_open_book(open_path, queue);
+    }
+
+    // Check for serial benchmark command.
+    // Runs inline on main task, reusing display queue scratch buffers
+    // (same approach as ReaderScreen — no extra heap or task needed).
+    const char* bench_path = serial_bench_take();
+    if (bench_path) {
+      microreader::Book book;
+      book.open(bench_path);
+      uint8_t* work_buf = queue.scratch_buf1();
+      uint8_t* xml_buf = queue.scratch_buf2();
+      microreader::benchmark_epub_conversion(book, "/sdcard/bench_tmp.mrb", work_buf, xml_buf);
+      queue.reset_buffers();
     }
 
     microreader::run_loop_iteration(app, queue, input, runtime, logger);
