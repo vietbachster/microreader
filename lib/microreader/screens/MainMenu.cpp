@@ -1,4 +1,4 @@
-#include "MenuDemo.h"
+#include "MainMenu.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -15,7 +15,7 @@
 
 namespace microreader {
 
-void MenuDemo::build_items_(DisplayQueue& queue) {
+void MainMenu::build_items_(DisplayQueue& queue) {
   count_ = 0;
   // Book selection (shown first if a books directory has been set).
   if (book_select_.has_books_dir()) {
@@ -51,7 +51,7 @@ void MenuDemo::build_items_(DisplayQueue& queue) {
 #endif
 }
 
-void MenuDemo::update_phases_label_(int phases) {
+void MainMenu::update_phases_label_(int phases) {
   char* p = phases_label_;
   const char* prefix = "Phases: ";
   while (*prefix)
@@ -62,7 +62,7 @@ void MenuDemo::update_phases_label_(int phases) {
   *p = '\0';
 }
 
-void MenuDemo::update_settle_label_(bool enabled) {
+void MainMenu::update_settle_label_(bool enabled) {
   char* p = settle_label_;
   const char* prefix = "Settle: ";
   while (*prefix)
@@ -73,12 +73,12 @@ void MenuDemo::update_settle_label_(bool enabled) {
   *p = '\0';
 }
 
-void MenuDemo::rotate_action_(MenuDemo& /*self*/, DisplayQueue& queue) {
+void MainMenu::rotate_action_(MainMenu& /*self*/, DisplayQueue& queue) {
   Rotation next = queue.rotation() == Rotation::Deg0 ? Rotation::Deg90 : Rotation::Deg0;
   queue.set_rotation(next);
 }
 
-void MenuDemo::phases_action_(MenuDemo& self, DisplayQueue& queue) {
+void MainMenu::phases_action_(MainMenu& self, DisplayQueue& queue) {
   int next = queue.phases + 1;
   if (next > kMaxPhases)
     next = kMinPhases;
@@ -86,12 +86,12 @@ void MenuDemo::phases_action_(MenuDemo& self, DisplayQueue& queue) {
   self.update_phases_label_(next);
 }
 
-void MenuDemo::settle_action_(MenuDemo& self, DisplayQueue& queue) {
+void MainMenu::settle_action_(MainMenu& self, DisplayQueue& queue) {
   queue.settle_enabled = !queue.settle_enabled;
   self.update_settle_label_(queue.settle_enabled);
 }
 
-void MenuDemo::clear_converted_action_(MenuDemo& self, DisplayQueue& /*queue*/) {
+void MainMenu::clear_converted_action_(MainMenu& self, DisplayQueue& /*queue*/) {
   const char* dir = self.book_select_.books_dir();
   if (!dir)
     return;
@@ -127,7 +127,7 @@ extern bool g_lut_target_settle;
 
 namespace microreader {
 
-void MenuDemo::update_lut_target_label_() {
+void MainMenu::update_lut_target_label_() {
   char* p = lut_target_label_;
   const char* prefix = "LUT Target: ";
   while (*prefix)
@@ -138,12 +138,12 @@ void MenuDemo::update_lut_target_label_() {
   *p = '\0';
 }
 
-void MenuDemo::lut_target_action_(MenuDemo& self, DisplayQueue& /*queue*/) {
+void MainMenu::lut_target_action_(MainMenu& self, DisplayQueue& /*queue*/) {
   g_lut_target_settle = !g_lut_target_settle;
   self.update_lut_target_label_();
 }
 
-void MenuDemo::ota_action_(MenuDemo& /*self*/, DisplayQueue& /*queue*/) {
+void MainMenu::ota_action_(MainMenu& /*self*/, DisplayQueue& /*queue*/) {
   auto running = esp_ota_get_running_partition();
   auto next = esp_ota_get_next_update_partition(running);
   esp_ota_set_boot_partition(next);
@@ -155,7 +155,7 @@ void MenuDemo::ota_action_(MenuDemo& /*self*/, DisplayQueue& /*queue*/) {
 
 namespace microreader {
 
-void MenuDemo::start(Canvas& canvas, DisplayQueue& queue) {
+void MainMenu::start(Canvas& canvas, DisplayQueue& queue) {
   chosen_ = nullptr;
   build_items_(queue);
 
@@ -181,9 +181,9 @@ void MenuDemo::start(Canvas& canvas, DisplayQueue& queue) {
   canvas.commit(queue);
 }
 
-void MenuDemo::stop() {}
+void MainMenu::stop() {}
 
-bool MenuDemo::update(const ButtonState& buttons, Canvas& canvas, DisplayQueue& queue, IRuntime& /*runtime*/) {
+bool MainMenu::update(const ButtonState& buttons, Canvas& canvas, DisplayQueue& queue, IRuntime& /*runtime*/) {
   bool moved = false;
 
   if (buttons.is_pressed(Button::Button3)) {
@@ -205,7 +205,7 @@ bool MenuDemo::update(const ButtonState& buttons, Canvas& canvas, DisplayQueue& 
       stop();
       canvas.clear();
       start(canvas, queue);
-      queue.partial_refresh();
+      // queue.partial_refresh();
     } else {
       chosen_ = item.target_screen;
       return false;
@@ -214,14 +214,14 @@ bool MenuDemo::update(const ButtonState& buttons, Canvas& canvas, DisplayQueue& 
   return true;
 }
 
-void MenuDemo::update_cursor(Canvas& canvas, DisplayQueue& queue) {
+void MainMenu::update_cursor(Canvas& canvas, DisplayQueue& queue) {
   const int H = queue.height();
   const int total_h = kLineHeight * count_;
   const int items_y = (H - total_h) / 2;
   update_cursor_(items_y, canvas, queue);
 }
 
-void MenuDemo::update_cursor_(int /*items_y*/, Canvas& canvas, DisplayQueue& queue) {
+void MainMenu::update_cursor_(int /*items_y*/, Canvas& canvas, DisplayQueue& queue) {
   for (int i = 0; i < count_; ++i)
     labels_[i].set_color(i != selected_);
   canvas.commit(queue);

@@ -28,7 +28,7 @@ static void verify_ota() {
 
 // Toggled by the menu; controls whether the serial LUT editor
 // overrides the fast (active) LUT or the settle LUT.
-bool g_lut_target_settle = false;  // kept for MenuDemo extern
+bool g_lut_target_settle = false;  // kept for MainMenu extern
 
 extern "C" void app_main(void) {
   verify_ota();

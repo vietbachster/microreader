@@ -9,7 +9,7 @@
 #include "display/Display.h"
 #include "display/DisplayQueue.h"
 #include "screens/IScreen.h"
-#include "screens/MenuDemo.h"
+#include "screens/MainMenu.h"
 #include "screens/ReaderScreen.h"
 
 namespace microreader {
@@ -39,7 +39,7 @@ class Application {
 
   Canvas canvas_;
   ScreenManager screen_mgr_;
-  MenuDemo menu_;
+  MainMenu menu_;
   ReaderScreen auto_reader_;  // used by auto_open_book
 };
 

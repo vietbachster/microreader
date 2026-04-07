@@ -15,11 +15,11 @@ namespace microreader {
 // Simple text menu for selecting between screens and toggling options.
 // Button3/Button2 to navigate up/down, Button1 to select.
 // Owns its demo screens and actions internally.
-class MenuDemo final : public IScreen {
+class MainMenu final : public IScreen {
  public:
   static constexpr int kMaxItems = 10;
 
-  MenuDemo() = default;
+  MainMenu() = default;
 
   // Set the directory to scan for books (call before start).
   void set_books_dir(const char* dir) {
@@ -63,7 +63,7 @@ class MenuDemo final : public IScreen {
   struct Item {
     const char* label = nullptr;
     IScreen* target_screen = nullptr;
-    void (*action)(MenuDemo& self, DisplayQueue& queue) = nullptr;
+    void (*action)(MainMenu& self, DisplayQueue& queue) = nullptr;
   };
   Item items_[kMaxItems] = {};
   int count_ = 0;
@@ -87,13 +87,13 @@ class MenuDemo final : public IScreen {
   void update_lut_target_label_();
 #endif
 
-  static void rotate_action_(MenuDemo& self, DisplayQueue& queue);
-  static void phases_action_(MenuDemo& self, DisplayQueue& queue);
-  static void settle_action_(MenuDemo& self, DisplayQueue& queue);
-  static void clear_converted_action_(MenuDemo& self, DisplayQueue& queue);
+  static void rotate_action_(MainMenu& self, DisplayQueue& queue);
+  static void phases_action_(MainMenu& self, DisplayQueue& queue);
+  static void settle_action_(MainMenu& self, DisplayQueue& queue);
+  static void clear_converted_action_(MainMenu& self, DisplayQueue& queue);
 #ifdef ESP_PLATFORM
-  static void ota_action_(MenuDemo& self, DisplayQueue& queue);
-  static void lut_target_action_(MenuDemo& self, DisplayQueue& queue);
+  static void ota_action_(MainMenu& self, DisplayQueue& queue);
+  static void lut_target_action_(MainMenu& self, DisplayQueue& queue);
 #endif
 
   void update_cursor(Canvas& canvas, DisplayQueue& queue);

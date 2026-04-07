@@ -84,7 +84,7 @@ All inherit from `IScreen` (`lib/microreader/screens/IScreen.h`): `name()`, `sta
 
 | Screen | File | Description |
 |--------|------|-------------|
-| `MenuDemo` | `MenuDemo.h/.cpp` | Main navigation menu. Owns all child screens. Items: Select Book, demos, settings. |
+| `MainMenu` | `MainMenu.h/.cpp` | Main navigation menu. Owns all child screens. Items: Select Book, demos, settings. |
 | `BookSelectScreen` | `BookSelectScreen.h/.cpp` | Lists `.epub`/`.mrb` files from a directory. Up/down navigation (no scroll — flat list via Canvas). Owns a `ReaderScreen`. |
 | `ReaderScreen` | `ReaderScreen.h/.cpp` | EPUB page viewer. 2×-scaled 8×8 bitmap font (16×16 glyphs). Next/prev page, chapter transitions. |
 | `BouncingBallDemo` | `BouncingBallDemo.h/.cpp` | Bouncing ball + random shapes. |
@@ -95,7 +95,7 @@ All inherit from `IScreen` (`lib/microreader/screens/IScreen.h`): `name()`, `sta
 ```
 Application
   └─ ScreenManager (push/pop stack, max depth 8)
-       └─ MenuDemo (always at bottom)
+       └─ MainMenu (always at bottom)
             ├─ "Select Book" → push BookSelectScreen
             │     └─ user picks → push ReaderScreen (via Application chain)
             └─ "Bouncing Ball" → push BouncingBallDemo

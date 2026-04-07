@@ -59,7 +59,7 @@ add_library(microreader_core STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/microreader/Application.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/microreader/Loop.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/microreader/screens/BouncingBallDemo.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/microreader/screens/MenuDemo.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/microreader/screens/MainMenu.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/microreader/screens/ReaderScreen.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/microreader/screens/BookSelectScreen.cpp
 )
