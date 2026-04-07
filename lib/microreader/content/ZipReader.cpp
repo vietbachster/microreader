@@ -190,6 +190,23 @@ const ZipEntry* ZipReader::find(const char* name) const {
   return nullptr;
 }
 
+ZipError ZipReader::read_local_entry(IZipFile& file, uint32_t offset, ZipEntry& out) {
+  file.seek(offset, SEEK_SET);
+
+  LocalFileHeader lfh{};
+  if (!read_exact(file, &lfh, sizeof(lfh)))
+    return ZipError::ReadError;
+  if (lfh.signature != kLocalHeaderSig)
+    return ZipError::InvalidSignature;
+
+  out.local_header_offset = offset;
+  out.compression = lfh.compression;
+  out.compressed_size = lfh.compressed_size;
+  out.uncompressed_size = lfh.uncompressed_size;
+  out.name = {};
+  return ZipError::Ok;
+}
+
 // Seek to the start of the compressed data for an entry.
 static ZipError seek_to_data(IZipFile& file, const ZipEntry& entry) {
   file.seek(entry.local_header_offset, SEEK_SET);

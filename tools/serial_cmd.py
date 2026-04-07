@@ -31,6 +31,7 @@ Interactive commands:
     upload <file>     Upload an EPUB file to the device
     bench <book>      Run full EPUB conversion benchmark for a book
     imgsize <book>    Run image format+size benchmark for a book
+    imgdecode <book>  Fully decode every image in a book (streaming decoder test)
     help              Show this help
     quit / exit       Exit
 """
@@ -76,6 +77,12 @@ def send_bench(ser: serial.Serial, path: str) -> str:
 def send_imgbench(ser: serial.Serial, path: str) -> str:
     path_bytes = path.encode("utf-8")
     ser.write(MAGIC + b"I" + struct.pack("<H", len(path_bytes)) + path_bytes)
+    return read_response(ser, timeout=10.0)
+
+
+def send_imgdecode(ser: serial.Serial, path: str) -> str:
+    path_bytes = path.encode("utf-8")
+    ser.write(MAGIC + b"D" + struct.pack("<H", len(path_bytes)) + path_bytes)
     return read_response(ser, timeout=10.0)
 
 
@@ -400,6 +407,12 @@ def main():
         help="Non-interactive: send image-size benchmark for BOOK, stream output until done",
     )
     parser.add_argument(
+        "--imgdecode",
+        metavar="BOOK",
+        default=None,
+        help="Non-interactive: fully decode every image in BOOK (streaming decoder test)",
+    )
+    parser.add_argument(
         "--imgbench-all",
         action="store_true",
         default=False,
@@ -505,6 +518,45 @@ def main():
         done_marker = "IMAGE SIZE BENCH DONE"
         print(f"Sending imgbench for {path} (timeout={timeout}s)")
         resp = send_imgbench(ser, path)
+        print(resp)
+        if not resp.startswith("OK") and not resp.endswith("OK"):
+            ser.close()
+            sys.exit(1)
+        out_f = open(capture_file, "w", encoding="utf-8") if capture_file else None
+        try:
+            t0 = time.time()
+            while time.time() - t0 < timeout:
+                line = ser.readline().decode("utf-8", errors="replace").rstrip("\r\n")
+                if not line:
+                    continue
+                print(line)
+                sys.stdout.flush()
+                if out_f:
+                    out_f.write(line + "\n")
+                    out_f.flush()
+                if done_marker in line:
+                    print("--- Done ---")
+                    break
+            else:
+                print("--- Timeout ---")
+        finally:
+            if out_f:
+                out_f.close()
+                if capture_file:
+                    print(f"Saved to {capture_file}")
+        ser.close()
+        return
+
+    if args.imgdecode:
+        # --- Image decode test mode ---
+        path = args.imgdecode
+        if not path.startswith("/"):
+            path = f"/sdcard/books/{path}"
+        capture_file = args.capture
+        timeout = args.timeout
+        done_marker = "IMAGE DECODE TEST DONE"
+        print(f"Sending imgdecode for {path} (timeout={timeout}s)")
+        resp = send_imgdecode(ser, path)
         print(resp)
         if not resp.startswith("OK") and not resp.endswith("OK"):
             ser.close()
@@ -669,6 +721,21 @@ def main():
                         "Image-size benchmark running — watch serial output for results."
                     )
                     print("Done when: '=== IMAGE SIZE BENCH DONE' appears in the log.")
+            elif verb == "imgdecode":
+                if not arg:
+                    print("Usage: imgdecode <path_or_filename>")
+                    continue
+                path = arg
+                if not path.startswith("/"):
+                    path = f"/sdcard/books/{path}"
+                print(f"Sending image decode test for {path} ...")
+                resp = send_imgdecode(ser, path)
+                print(resp)
+                if resp.startswith("OK"):
+                    print(
+                        "Image decode test running — watch serial output for per-image results."
+                    )
+                    print("Done when: '=== IMAGE DECODE TEST DONE' appears in the log.")
             else:
                 print(f"Unknown command: {verb!r}. Type 'help' for commands.")
     except KeyboardInterrupt:

@@ -33,6 +33,19 @@ EpubError Book::open(const char* path, uint8_t* work_buf, uint8_t* xml_buf) {
   return err;
 }
 
+bool Book::open_zip_only(const char* path) {
+  close();
+  if (!file_.open(path))
+    return false;
+  file_open_ = true;
+  auto err = epub_.open_zip_only(file_);
+  if (err != EpubError::Ok) {
+    close();
+    return false;
+  }
+  return true;
+}
+
 void Book::close() {
   epub_.close();
   file_.close();
@@ -48,19 +61,15 @@ EpubError Book::load_chapter_streaming(size_t index, ParagraphSink sink, void* s
   return epub_.parse_chapter_streaming(file_, index, sink, sink_ctx, work_buf, xml_buf);
 }
 
-ImageError Book::decode_image(uint16_t entry_index, DecodedImage& out, uint16_t max_w, uint16_t max_h) {
+ImageError Book::decode_image(uint16_t entry_index, DecodedImage& out, uint16_t max_w, uint16_t max_h,
+                              uint8_t* work_buf, size_t work_buf_size) {
   if (!images_enabled)
     return ImageError::UnsupportedFormat;
   if (entry_index >= epub_.zip().entry_count())
     return ImageError::UnsupportedFormat;
 
   auto& entry = epub_.zip().entry(entry_index);
-  std::vector<uint8_t> data;
-  if (epub_.zip().extract(file_, entry, data) != ZipError::Ok) {
-    return ImageError::ReadError;
-  }
-
-  return microreader::decode_image(data.data(), data.size(), max_w, max_h, out);
+  return decode_image_from_entry(file_, entry, max_w, max_h, out, work_buf, work_buf_size);
 }
 
 ZipError Book::extract_entry(uint16_t entry_index, std::vector<uint8_t>& out) {

@@ -24,7 +24,7 @@ namespace microreader {
 // ---------------------------------------------------------------------------
 
 static constexpr uint8_t kMrbMagic[4] = {'M', 'R', 'B', '1'};
-static constexpr uint16_t kMrbVersion = 2;
+static constexpr uint16_t kMrbVersion = 3;
 
 // ---------------------------------------------------------------------------
 // Header (32 bytes, fixed)
@@ -62,10 +62,9 @@ static_assert(sizeof(MrbChapterEntry) == 16, "MrbChapterEntry must be 16 bytes")
 // ---------------------------------------------------------------------------
 
 struct MrbImageRef {
-  uint16_t zip_entry_index;  // index into the EPUB's ZIP entries
+  uint32_t local_header_offset;  // offset to local file header in EPUB ZIP
   uint16_t width;
   uint16_t height;
-  uint16_t reserved;
 };
 static_assert(sizeof(MrbImageRef) == 8, "MrbImageRef must be 8 bytes");
 

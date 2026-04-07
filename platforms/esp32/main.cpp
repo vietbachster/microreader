@@ -109,6 +109,13 @@ extern "C" void app_main(void) {
           queue.reset_buffers();
           break;
         }
+        case SerialCmdType::ImgDecode: {
+          microreader::Book book;
+          book.open(cmd_path);
+          microreader::benchmark_image_decode(book, queue.scratch_buf1());
+          queue.reset_buffers();
+          break;
+        }
         default:
           break;
       }

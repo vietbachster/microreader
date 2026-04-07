@@ -60,6 +60,8 @@ add_library(microreader_content STATIC
     ${LIB_DIR}/content/CssParser.cpp
     ${LIB_DIR}/content/EpubParser.cpp
     ${LIB_DIR}/content/ImageDecoder.cpp
+    ${LIB_DIR}/content/JpegDecoder.cpp
+    ${LIB_DIR}/content/PngDecoder.cpp
     ${LIB_DIR}/content/Book.cpp
     ${LIB_DIR}/content/TextLayout.cpp
     ${LIB_DIR}/content/HtmlExporter.cpp
@@ -85,6 +87,7 @@ add_executable(unit_tests
     unit/MrbFormatTest.cpp
     unit/MrbLayoutComparisonTest.cpp
     unit/StreamingPipelineTest.cpp
+    unit/DisplayQueueRenderTest.cpp
 )
 target_link_libraries(unit_tests PRIVATE
     microreader_content
@@ -112,6 +115,7 @@ add_executable(microreader_tests
     unit/MrbFormatTest.cpp
     unit/MrbLayoutComparisonTest.cpp
     unit/StreamingPipelineTest.cpp
+    unit/DisplayQueueRenderTest.cpp
 )
 target_link_libraries(microreader_tests PRIVATE
     microreader_content

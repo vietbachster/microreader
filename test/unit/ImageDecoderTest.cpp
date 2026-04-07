@@ -32,7 +32,8 @@ static std::vector<uint8_t> extract_from_epub(const std::string& epub_path, cons
   EXPECT_EQ(zip.open(zf), ZipError::Ok);
   auto* entry = zip.find(inner_path.c_str());
   EXPECT_NE(entry, nullptr) << "Cannot find in epub: " << inner_path;
-  if (!entry) return {};
+  if (!entry)
+    return {};
   std::vector<uint8_t> buf;
   EXPECT_EQ(zip.extract(zf, *entry, buf), ZipError::Ok);
   return buf;
@@ -504,4 +505,67 @@ TEST_F(ImageFixtureTest, RoundTrip_ExtractAndDecode) {
   EXPECT_GT(img.width, 0);
   EXPECT_GT(img.height, 0);
   EXPECT_FALSE(img.data.empty());
+}
+
+// ===========================================================================
+// Progressive JPEG decode tests (non-interleaved scan)
+// ===========================================================================
+
+#include "TestBooks.h"
+
+// The Bobiverse German cover is a progressive JPEG (SOF2) with 4:2:0
+// subsampling (Y h_samp=2, v_samp=2).  The first scan is non-interleaved
+// (single Y component).  This previously caused a duplication bug because
+// the decoder used interleaved MCU structure for non-interleaved scans.
+TEST(DecodeImage, ProgressiveJpeg_BobiverseGerman_NoDuplication) {
+  std::string root = test_books::workspace_root();
+  std::string epub = root +
+                     "/microreader2/test/books/other/Bobiverse 1 Ich "
+                     "bin viele (Dennis E. Taylor) (Z-Library).epub";
+  if (!std::filesystem::exists(epub)) {
+    GTEST_SKIP() << "Bobiverse German epub not found";
+  }
+
+  // Extract the cover JPEG
+  StdioZipFile zf;
+  ASSERT_TRUE(zf.open(epub.c_str()));
+  ZipReader zip;
+  ASSERT_EQ(zip.open(zf), ZipError::Ok);
+  auto* entry = zip.find("OEBPS/cover.jpg");
+  ASSERT_NE(entry, nullptr) << "cover.jpg not found in epub";
+
+  // Decode via streaming path (same as device uses)
+  DecodedImage img;
+  auto err = decode_jpeg_from_entry(zf, *entry, 479, 732, img);
+  ASSERT_EQ(err, ImageError::Ok) << "Failed to decode progressive JPEG";
+
+  EXPECT_GT(img.width, 0);
+  EXPECT_GT(img.height, 0);
+  printf("  Decoded: %dx%d, stride=%zu, data=%zu bytes\n", img.width, img.height, img.stride(), img.data.size());
+
+  // Verify no horizontal duplication: the left quarter and right quarter
+  // of the image should NOT be identical.  With the old bug, the image
+  // was rendered as two squished copies side by side.
+  int quarter_w = img.width / 4;
+  int check_h = std::min(static_cast<int>(img.height), 200);
+  int matching_rows = 0;
+  for (int y = 0; y < check_h; ++y) {
+    bool row_matches = true;
+    for (int x = 0; x < quarter_w; ++x) {
+      int right_x = img.width / 2 + x;
+      if (right_x >= img.width)
+        break;
+      if (img.pixel(x, y) != img.pixel(right_x, y)) {
+        row_matches = false;
+        break;
+      }
+    }
+    if (row_matches)
+      ++matching_rows;
+  }
+  // Allow some rows to match (solid color regions), but not most.
+  // With the duplication bug, nearly ALL rows match.
+  float match_ratio = static_cast<float>(matching_rows) / check_h;
+  printf("  Left/right half match ratio: %.1f%% (%d/%d rows)\n", match_ratio * 100, matching_rows, check_h);
+  EXPECT_LT(match_ratio, 0.5f) << "Image appears duplicated horizontally (left/right halves too similar)";
 }

@@ -7,7 +7,6 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_system.h"
-#include "esp_task_wdt.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -22,25 +21,29 @@ struct ImageMapping {
   uint16_t mrb_idx;
 };
 
-uint16_t get_or_add_image(MrbWriter& writer, std::vector<ImageMapping>& image_map, uint16_t zip_key, uint16_t w,
-                          uint16_t h) {
+uint16_t get_or_add_image(MrbWriter& writer, std::vector<ImageMapping>& image_map, uint16_t zip_key,
+                          uint32_t local_offset, uint16_t w, uint16_t h) {
   bool caller_has_size = (w != 0 || h != 0);
   for (const auto& m : image_map) {
     if (m.zip_key == zip_key && writer.image_size_known(m.mrb_idx) == caller_has_size)
       return m.mrb_idx;
   }
-  uint16_t idx = writer.add_image_ref(zip_key, w, h);
+  uint16_t idx = writer.add_image_ref(local_offset, w, h);
   image_map.push_back({zip_key, idx});
   return idx;
 }
 
-void remap_paragraph_images(Paragraph& para, MrbWriter& writer, std::vector<ImageMapping>& image_map) {
+void remap_paragraph_images(Paragraph& para, MrbWriter& writer, std::vector<ImageMapping>& image_map,
+                            const ZipReader& zip) {
   if (para.type == ParagraphType::Image) {
-    para.image.key = get_or_add_image(writer, image_map, para.image.key, para.image.attr_width, para.image.attr_height);
+    uint32_t offset = zip.entry(para.image.key).local_header_offset;
+    para.image.key =
+        get_or_add_image(writer, image_map, para.image.key, offset, para.image.attr_width, para.image.attr_height);
   }
   if (para.type == ParagraphType::Text && para.text.inline_image.has_value()) {
     auto& img = *para.text.inline_image;
-    img.key = get_or_add_image(writer, image_map, img.key, img.attr_width, img.attr_height);
+    uint32_t offset = zip.entry(img.key).local_header_offset;
+    img.key = get_or_add_image(writer, image_map, img.key, offset, img.attr_width, img.attr_height);
   }
 }
 
@@ -52,6 +55,7 @@ bool convert_epub_to_mrb(Book& book, const char* output_path) {
     return false;
 
   std::vector<ImageMapping> image_map;
+  const auto& zip = book.epub().zip();
 
   for (size_t ci = 0; ci < book.chapter_count(); ++ci) {
     Chapter ch;
@@ -62,7 +66,7 @@ bool convert_epub_to_mrb(Book& book, const char* output_path) {
     writer.begin_chapter();
 
     for (auto& para : ch.paragraphs) {
-      remap_paragraph_images(para, writer, image_map);
+      remap_paragraph_images(para, writer, image_map, zip);
       if (!writer.write_paragraph(para))
         return false;
     }
@@ -94,6 +98,7 @@ bool convert_epub_to_mrb_streaming(Book& book, const char* output_path, uint8_t*
   }
 
   std::vector<ImageMapping> image_map;
+  const auto& zip = book.epub().zip();
 
 #ifdef ESP_PLATFORM
   int64_t total_start = esp_timer_get_time();
@@ -103,13 +108,14 @@ bool convert_epub_to_mrb_streaming(Book& book, const char* output_path, uint8_t*
   struct SinkCtx {
     MrbWriter* writer;
     std::vector<ImageMapping>* image_map;
+    const ZipReader* zip;
     bool error;
 #ifdef ESP_PLATFORM
     int64_t write_us;  // time in write_paragraph (MRB I/O)
     size_t para_count;
 #endif
   };
-  SinkCtx ctx{&writer, &image_map, false};
+  SinkCtx ctx{&writer, &image_map, &zip, false};
 #ifdef ESP_PLATFORM
   ctx.write_us = 0;
   ctx.para_count = 0;
@@ -125,7 +131,7 @@ bool convert_epub_to_mrb_streaming(Book& book, const char* output_path, uint8_t*
     if (c.error)
       return;
 
-    remap_paragraph_images(para, *c.writer, *c.image_map);
+    remap_paragraph_images(para, *c.writer, *c.image_map, *c.zip);
 
 #ifdef ESP_PLATFORM
     int64_t t0 = esp_timer_get_time();
@@ -356,6 +362,80 @@ void benchmark_image_size_read(Book& book, uint8_t* work_buf) {
   long avg_us = total > 0 ? (long)(t_total / total) : 0;
   ESP_LOGI(TAG, "=== IMAGE SIZE BENCH DONE: images=%u ok=%u fail=%u total=%ldms avg=%ldus ===", total, ok, fail,
            (long)(t_total / 1000), avg_us);
+}
+
+// ---------------------------------------------------------------------------
+// benchmark_image_decode
+// ---------------------------------------------------------------------------
+
+void benchmark_image_decode(Book& book, uint8_t* work_buf) {
+  static constexpr const char* TAG = "img_decode";
+  // Full display resolution — same cap the ReaderScreen uses.
+  // 480×800 → stride=60, output=48 000 bytes (fits in scratch_buf1).
+  static constexpr uint16_t kMaxW = 480;
+  static constexpr uint16_t kMaxH = 800;
+
+  IZipFile& file = book.file();
+  const ZipReader& zip = book.epub().zip();
+
+  ESP_LOGI(TAG, "=== IMAGE DECODE TEST START ===");
+  ESP_LOGI(TAG, "zip_entries=%u  free=%lu largest=%lu", (unsigned)zip.entry_count(),
+           (unsigned long)esp_get_free_heap_size(), (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+
+  // Work buffer for ZipEntryInput (~44 KB).  Caller passes queue.scratch_buf1().
+  static constexpr size_t kWorkBufSize = ZipEntryInput::kDecompSize + ZipEntryInput::kDictSize + 1024;
+  std::unique_ptr<uint8_t[]> local_work;
+  if (!work_buf) {
+    local_work = std::make_unique<uint8_t[]>(kWorkBufSize);
+    work_buf = local_work.get();
+    if (!work_buf) {
+      ESP_LOGE(TAG, "OOM: no work buffer");
+      return;
+    }
+  }
+
+  unsigned total = 0, ok_count = 0, fail_count = 0;
+  int64_t t_total = 0;
+
+  for (unsigned i = 0; i < zip.entry_count(); ++i) {
+    const ZipEntry& entry = zip.entry(i);
+    auto name = entry.name;
+    auto dot = name.rfind('.');
+    if (dot == std::string_view::npos)
+      continue;
+    auto ext = name.substr(dot + 1);
+    bool is_jpeg = (ext == "jpg" || ext == "jpeg" || ext == "JPG" || ext == "JPEG");
+    bool is_png = (ext == "png" || ext == "PNG");
+    if (!is_jpeg && !is_png)
+      continue;
+
+    ++total;
+    const char* fmt_str = is_jpeg ? "JPEG" : "PNG ";
+
+    uint32_t free_before = esp_get_free_heap_size();
+    int64_t t0 = esp_timer_get_time();
+
+    DecodedImage decoded;
+    ImageError err = book.decode_image(i, decoded, kMaxW, kMaxH, work_buf, kWorkBufSize);
+
+    int64_t us = esp_timer_get_time() - t0;
+    t_total += us;
+    uint32_t free_after = esp_get_free_heap_size();
+
+    if (err == ImageError::Ok) {
+      ++ok_count;
+      ESP_LOGI(TAG, "  entry %3u %-4s  %4ux%-4u  OK   %5ldms  heap_delta=%ld", i, fmt_str, decoded.width,
+               decoded.height, (long)(us / 1000), (long)free_before - (long)free_after);
+    } else {
+      ++fail_count;
+      ESP_LOGI(TAG, "  entry %3u %-4s          FAIL err=%d  %5ldms  heap_delta=%ld", i, fmt_str, (int)err,
+               (long)(us / 1000), (long)free_before - (long)free_after);
+    }
+  }
+
+  long avg_ms = total > 0 ? (long)(t_total / 1000 / total) : 0;
+  ESP_LOGI(TAG, "=== IMAGE DECODE TEST DONE: images=%u ok=%u fail=%u total=%ldms avg=%ldms free=%lu===", total,
+           ok_count, fail_count, (long)(t_total / 1000), avg_ms, (unsigned long)esp_get_free_heap_size());
 }
 #endif
 

@@ -218,10 +218,10 @@ bool MrbWriter::write_paragraph(const Paragraph& para) {
   return stage_paragraph(para);
 }
 
-uint16_t MrbWriter::add_image_ref(uint16_t zip_entry_index, uint16_t width, uint16_t height) {
+uint16_t MrbWriter::add_image_ref(uint32_t local_header_offset, uint16_t width, uint16_t height) {
   uint16_t idx = static_cast<uint16_t>(images_.size());
   MrbImageRef ref{};
-  ref.zip_entry_index = zip_entry_index;
+  ref.local_header_offset = local_header_offset;
   ref.width = width;
   ref.height = height;
   images_.push_back(ref);
@@ -260,10 +260,9 @@ bool MrbWriter::finish(const EpubMetadata& meta, const TableOfContents& toc) {
   uint32_t image_offset = bw_.tell();
   for (const auto& img : images_) {
     uint8_t buf[8];
-    mrb_write_u16(buf, img.zip_entry_index);
-    mrb_write_u16(buf + 2, img.width);
-    mrb_write_u16(buf + 4, img.height);
-    mrb_write_u16(buf + 6, 0);
+    mrb_write_u32(buf, img.local_header_offset);
+    mrb_write_u16(buf + 4, img.width);
+    mrb_write_u16(buf + 6, img.height);
     if (!write_bytes(buf, 8))
       return false;
   }

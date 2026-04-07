@@ -56,7 +56,7 @@ EPUB file (ZIP on SD card)
 | `CssParser.h/.cpp` | Minimal CSS parser for EPUB stylesheets. `CssStylesheet` cascades by specificity. |
 | `ImageDecoder.h/.cpp` | JPEG/PNG detection and dimension reading. `ImageSizeStream` is a streaming header parser (~44 bytes state) used for lazy image size resolution. `images_enabled` runtime flag (default `true`). |
 | `Book.h/.cpp` | High-level wrapper: owns `StdioZipFile` + `Epub`. Methods: `open(path)`, `load_chapter(index, Chapter&)`, `decode_image()`. |
-| `MrbFormat.h` | MRB binary format constants and on-disk structs: `MrbHeader` (32 bytes), `MrbChapterEntry` (16 bytes), paragraph record layout. Shared between `MrbReader` and `MrbWriter`. |
+| `MrbFormat.h` | MRB binary format constants and on-disk structs: `MrbHeader` (32 bytes), `MrbChapterEntry` (16 bytes), `MrbImageRef` (8 bytes: `local_header_offset(u32)` + `width(u16)` + `height(u16)`), paragraph record layout. Version 3. Shared between `MrbReader` and `MrbWriter`. |
 | `MrbWriter.h/.cpp` | Writes `.mrb` binary files. `BufferedFileWriter` batches into 4KB buffer. Paragraphs are doubly-linked (prev/next offsets). Uses **deferred paragraph writing**: each paragraph is serialized into `pending_para_` buffer, then flushed when the *next* paragraph arrives (so `next_offset` can be filled in without seeking). This eliminates all backward seeks in `end_chapter()`. |
 | `MrbConverter.h/.cpp` | Orchestrates EPUB→MRB conversion: iterates spine chapters, streams paragraphs via `ParagraphSink` callback from `EpubParser` → `MrbWriter`. Exposes `convert_epub_to_mrb()` and `convert_epub_to_mrb_streaming()`. |
 | `HtmlExporter.h/.cpp` | Exports a `Book` to a self-contained HTML file using the `TextLayout` engine to paginate content exactly as the reader would. Used by `HtmlExportTest`. Options control page size, padding, chapter limit, and debug output. |
@@ -77,6 +77,12 @@ The ESP32-C3 has **~320KB total RAM**, of which **~155KB is free after SD card i
 **Known crash**: ohler.epub ("Der totale Rausch") has 487 spine items mapping to only ~10 XHTML files, the largest being 218KB. The current `parse_chapter()` approach of extracting the full XHTML + resolving image dimensions exceeds available heap. **This needs to be fixed** — likely by pre-processing EPUBs into a compact on-device format or by streaming the XHTML parsing.
 
 **`convert_epub_to_mrb_streaming()`** in `MrbConverter.h` uses ~37KB of working memory per chapter (vs. full XHTML extract) and is safe for ESP32's limited RAM. Optional `work_buf`/`xml_buf` parameters let callers pass pre-allocated split buffers to avoid heap fragmentation from a single large allocation.
+
+### ⚠️ CRITICAL: Image sizes are NOT resolved during MRB conversion
+
+The MRB conversion step does **NOT** load, decode, or read the dimensions of any images. It records the **local file header offset** (`local_header_offset`) for each image reference, allowing direct access to the image data in the EPUB ZIP at render time without parsing the central directory. Image dimensions stored in `MrbImageRef.width/height` come **only** from explicit HTML `width`/`height` attributes in the EPUB's XHTML — most EPUBs do **not** have these, so `width=0, height=0` is the common case.
+
+**Do NOT try to add image size resolution to the conversion step.** Image dimensions are resolved lazily at display time by `ReaderScreen::resolve_image_size_()`, which decodes images directly from the EPUB using `ZipReader::read_local_entry()` + `decode_image_from_entry()`. This reads ~30 bytes from the local file header (no central directory needed), saving ~35KB+ vs the old `open_zip_only()` approach that parsed the full central directory and caused OOM on books like ohler.epub (487 entries).
 
 ## Screens (IScreen implementations)
 

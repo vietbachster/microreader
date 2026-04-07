@@ -48,10 +48,9 @@ bool MrbReader::open(const char* path) {
         close();
         return false;
       }
-      images_[i].zip_entry_index = mrb_read_u16(buf);
-      images_[i].width = mrb_read_u16(buf + 2);
-      images_[i].height = mrb_read_u16(buf + 4);
-      images_[i].reserved = mrb_read_u16(buf + 6);
+      images_[i].local_header_offset = mrb_read_u32(buf);
+      images_[i].width = mrb_read_u16(buf + 4);
+      images_[i].height = mrb_read_u16(buf + 6);
     }
   }
 
@@ -231,8 +230,14 @@ bool MrbReader::deserialize_text(const uint8_t* data, size_t size, Paragraph& ou
   pos += 2;
   uint16_t img_h = mrb_read_u16(data + pos);
   pos += 2;
-  if (img_key != kMrbNoImage)
+  if (img_key != kMrbNoImage) {
+    // Fall back to image ref table if inline dimensions are unknown.
+    if ((img_w == 0 || img_h == 0) && img_key < images_.size()) {
+      img_w = images_[img_key].width;
+      img_h = images_[img_key].height;
+    }
     out.text.inline_image = ImageRef{img_key, img_w, img_h};
+  }
 
   // run count
   if (pos + 2 > size)

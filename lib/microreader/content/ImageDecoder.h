@@ -120,6 +120,23 @@ extern bool images_enabled;
 // max_w/max_h: maximum output dimensions (image is scaled to fit).
 ImageError decode_image(const uint8_t* data, size_t size, uint16_t max_w, uint16_t max_h, DecodedImage& out);
 
+// Decode a JPEG image by streaming directly from a ZIP entry.
+// work_buf must be >= ZipEntryInput::kMinWorkBufSize for deflate entries;
+// if nullptr (or too small), a buffer is heap-allocated internally.
+ImageError decode_jpeg_from_entry(IZipFile& file, const ZipEntry& entry, uint16_t max_w, uint16_t max_h,
+                                  DecodedImage& out, uint8_t* work_buf = nullptr, size_t work_buf_size = 0);
+
+// Decode a PNG image by streaming directly from a ZIP entry.
+// Same work_buf semantics as decode_jpeg_from_entry.
+ImageError decode_png_from_entry(IZipFile& file, const ZipEntry& entry, uint16_t max_w, uint16_t max_h,
+                                 DecodedImage& out, uint8_t* work_buf = nullptr, size_t work_buf_size = 0);
+
+// Decode a JPEG or PNG image by streaming from a ZIP entry.
+// Detects format from the first bytes of the entry.
+// work_buf: optional caller-provided buffer (>= ZipEntryInput::kMinWorkBufSize).
+ImageError decode_image_from_entry(IZipFile& file, const ZipEntry& entry, uint16_t max_w, uint16_t max_h,
+                                   DecodedImage& out, uint8_t* work_buf = nullptr, size_t work_buf_size = 0);
+
 // Floyd-Steinberg dither a grayscale buffer to 1-bit packed bitmap.
 // grayscale: width*height bytes, 0=black, 255=white.
 // out: pre-allocated packed bitmap, (width+7)/8 * height bytes.

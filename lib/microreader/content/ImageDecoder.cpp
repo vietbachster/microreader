@@ -429,17 +429,69 @@ ImageError decode_image(const uint8_t* data, size_t size, uint16_t max_w, uint16
 
 #else  // ESP_PLATFORM
 // ---------------------------------------------------------------------------
-// ESP32 image decoding stub
-// TODO: Replace with a real streaming JPEG/PNG decoder for ESP32.
+// ESP32: use the streaming decoders; no stb_image.
+// floyd_steinberg_dither is not needed on ESP32 (streaming decoders handle it).
 // ---------------------------------------------------------------------------
 
 void floyd_steinberg_dither(const uint8_t* /*grayscale*/, int /*width*/, int /*height*/, uint8_t* /*out*/) {}
 
 ImageError decode_image(const uint8_t* /*data*/, size_t /*size*/, uint16_t /*max_w*/, uint16_t /*max_h*/,
                         DecodedImage& /*out*/) {
+  // Buffer-based decode path not used on ESP32 — use decode_image_from_entry().
   return ImageError::UnsupportedFormat;
 }
 
 #endif  // ESP_PLATFORM
+
+// ---------------------------------------------------------------------------
+// decode_image_from_entry — streaming decode from a ZIP entry (all platforms)
+// ---------------------------------------------------------------------------
+
+ImageError decode_image_from_entry(IZipFile& file, const ZipEntry& entry, uint16_t max_w, uint16_t max_h,
+                                   DecodedImage& out, uint8_t* work_buf, size_t work_buf_size) {
+  if (!images_enabled)
+    return ImageError::UnsupportedFormat;
+
+  // Detect format from the entry filename extension (fast, no I/O).
+  auto fmt = guess_format(std::string(entry.name).c_str());
+  if (fmt == ImageFormat::Unknown) {
+    // Fall back to magic-byte detection via a small ZipEntryInput peek.
+    // Use a temporary small buffer for stored entries; for deflate we need
+    // the full work_buf — if that's not available, give up gracefully.
+    std::unique_ptr<uint8_t[]> tmp_buf;
+    uint8_t* peek_buf = work_buf;
+    size_t peek_buf_size = work_buf_size;
+    if (!peek_buf || peek_buf_size < ZipEntryInput::kMinWorkBufSize) {
+      // Allocate just enough for a stored-entry peek (256 bytes)
+      static constexpr size_t kPeekSize = 256;
+      tmp_buf = std::unique_ptr<uint8_t[]>(new (std::nothrow) uint8_t[kPeekSize]);
+      if (!tmp_buf)
+        return ImageError::ReadError;
+      peek_buf = tmp_buf.get();
+      peek_buf_size = kPeekSize;
+    }
+    ZipEntryInput peek_inp;
+    if (peek_inp.open(file, entry, peek_buf, peek_buf_size) != ZipError::Ok)
+      return ImageError::ReadError;
+    uint8_t magic[4] = {};
+    auto* p = magic;
+    size_t got = 0;
+    while (got < 4) {
+      size_t r = peek_inp.read(p + got, 4 - got);
+      if (r == 0)
+        break;
+      got += r;
+    }
+    fmt = guess_format_from_magic(magic, got);
+    // peek_inp destroyed here; next open() will re-seek to entry start
+  }
+
+  if (fmt == ImageFormat::Jpeg)
+    return decode_jpeg_from_entry(file, entry, max_w, max_h, out, work_buf, work_buf_size);
+  if (fmt == ImageFormat::Png)
+    return decode_png_from_entry(file, entry, max_w, max_h, out, work_buf, work_buf_size);
+
+  return ImageError::UnsupportedFormat;
+}
 
 }  // namespace microreader

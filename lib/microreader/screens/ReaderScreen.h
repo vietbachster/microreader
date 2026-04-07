@@ -58,12 +58,13 @@ class ReaderScreen final : public IScreen {
   int screen_h_ = 800;
   bool open_ok_ = false;
 
-  // Image size cache: [key] = (w, h), (0,0) = not yet resolved.
-  std::vector<std::pair<uint16_t, uint16_t>> img_cache_;
+  // Decoded image cache: [key] = decoded bitmap (empty = not yet decoded).
+  std::vector<DecodedImage> decoded_cache_;
 
   CanvasText error_label_{0, 0, "", false, kScale};
 
   bool resolve_image_size_(uint16_t key, uint16_t& w, uint16_t& h);
+  bool decode_image_by_offset_(uint32_t offset, DecodedImage& out);
   void render_page_(DisplayQueue& queue);
   bool next_page_();
   bool prev_page_();

@@ -76,6 +76,11 @@ class ZipReader {
     return entries_;
   }
 
+  // Build a ZipEntry by reading the local file header at `offset`.
+  // No central directory needed — reads ~30 bytes from disk.
+  // entry.name will be empty (callers should use magic-byte format detection).
+  static ZipError read_local_entry(IZipFile& file, uint32_t offset, ZipEntry& out);
+
   // Find an entry by name. Returns nullptr if not found.
   const ZipEntry* find(const char* name) const;
   const ZipEntry* find(const std::string& name) const {

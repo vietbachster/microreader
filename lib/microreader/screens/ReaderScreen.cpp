@@ -20,28 +20,45 @@ namespace microreader {
 // ---------------------------------------------------------------------------
 
 bool ReaderScreen::resolve_image_size_(uint16_t key, uint16_t& w, uint16_t& h) {
-  if (key >= static_cast<uint16_t>(img_cache_.size()))
+  if (key >= static_cast<uint16_t>(decoded_cache_.size()))
     return false;
-  auto& [cw, ch] = img_cache_[key];
-  if (cw != 0 || ch != 0) {
-    w = cw;
-    h = ch;
+  auto& img = decoded_cache_[key];
+  if (img.width != 0 || img.height != 0) {
+    w = img.width;
+    h = img.height;
     return true;
   }
-  // book_ may be closed (freed after conversion, or never opened on the MRB-already-exists path).
-  // Reopen it lazily for image size lookups.
-  if (!book_.is_open()) {
-    if (book_.open(path_, queue_->scratch_buf1(), queue_->scratch_buf2()) != EpubError::Ok)
-      return false;
+  // Check if MRB already has the dimensions (stored during conversion).
+  const auto& ref = mrb_.image_ref(key);
+  if (ref.width != 0 || ref.height != 0) {
+    // Store dimensions in the cache entry without decoding yet.
+    img.width = ref.width;
+    img.height = ref.height;
+    w = ref.width;
+    h = ref.height;
+    return true;
   }
-  uint16_t ze = mrb_.image_ref(key).zip_entry_index;
-  bool ok = book_.read_image_size(ze, cw, ch, queue_->scratch_buf1(), DisplayQueue::kScratchBufSize);
-  queue_->restore_scratch_buf1();
-  if (!ok)
+  // Decode the image now to get its dimensions.  We cache the decoded
+  // bitmap so render_page_ can reuse it instead of decoding again.
+  // Uses the local file header offset stored in MRB — no central directory needed.
+  if (!decode_image_by_offset_(ref.local_header_offset, img))
     return false;
-  w = cw;
-  h = ch;
+  w = img.width;
+  h = img.height;
   return true;
+}
+
+bool ReaderScreen::decode_image_by_offset_(uint32_t offset, DecodedImage& out) {
+  StdioZipFile file;
+  if (!file.open(path_))
+    return false;
+  ZipEntry entry;
+  if (ZipReader::read_local_entry(file, offset, entry) != ZipError::Ok)
+    return false;
+  auto err = decode_image_from_entry(file, entry, static_cast<uint16_t>(screen_w_), static_cast<uint16_t>(screen_h_),
+                                     out, queue_->scratch_buf1(), DisplayQueue::kScratchBufSize);
+  queue_->restore_scratch_buf1();
+  return err == ImageError::Ok;
 }
 
 // ---------------------------------------------------------------------------
@@ -110,12 +127,19 @@ void ReaderScreen::start(Canvas& canvas, DisplayQueue& queue) {
   open_ok_ = true;
   chapter_idx_ = 0;
   page_pos_ = PagePosition{0, 0};
-  img_cache_.assign(mrb_.image_count(), {0, 0});
+  decoded_cache_.assign(mrb_.image_count(), DecodedImage{});
+  HEAP_LOG("reader: after mrb open + decoded_cache");
   load_chapter_(0);
+  HEAP_LOG("reader: after load_chapter(0)");
 #ifdef ESP_PLATFORM
   ESP_LOGI("reader", "BOOK_OK: %s", path_);
 #endif
+  // Ensure command queue is idle before rendering (render_page_ needs this
+  // for safe scratch_buf1 usage during image decode).
+  queue.flush();
   render_page_(queue);
+  queue.partial_refresh();
+  HEAP_LOG("reader: after first render_page");
   return;
 
 show_error:
@@ -163,7 +187,7 @@ show_error:
 
 void ReaderScreen::stop() {
   // Release all heavy resources so the next book can be opened.
-  img_cache_.clear();
+  decoded_cache_.clear();
   chapter_src_.reset();
   mrb_.close();
   book_.close();
@@ -188,9 +212,13 @@ bool ReaderScreen::update(const ButtonState& buttons, Canvas& canvas, DisplayQue
   }
 
   if (changed) {
+    // Flush pending commands from the previous page so ground_truth is
+    // fully committed before we start building the new page.  This ensures
+    // the display queue sees a clean old→new delta for partial refresh.
+    queue.flush();
     render_page_(queue);
     canvas.commit(queue);
-    // queue.partial_refresh();
+    queue.partial_refresh();
   }
 
   return true;
@@ -218,14 +246,56 @@ void ReaderScreen::render_page_(DisplayQueue& queue) {
   page_ = layout_page(font, opts, *chapter_src_, page_pos_,
                       [this](uint16_t key, uint16_t& w, uint16_t& h) { return resolve_image_size_(key, w, h); });
 
-  // Build a local copy of the text items for the paint lambda.
-  // We need: for each word, its x, y_offset, text, len, and glyph advance.
+  // ── Collect images ──────────────────────────────────────────────
+  // Images were already decoded by resolve_image_size_ during layout.
+  // For any that weren't (e.g. MRB had the size but not the bitmap),
+  // decode them now before submitting to the display queue.
+  struct PreparedImage {
+    int x, y;
+    DecodedImage* decoded;  // points into decoded_cache_
+    bool ok;
+  };
+  std::vector<PreparedImage> prepared_images;
+  for (const auto& img_item : page_.image_items) {
+    int img_x = static_cast<int>(img_item.x_offset);
+    int img_y = static_cast<int>(kPaddingTop + img_item.y_offset + page_.vertical_offset);
+    int img_w = static_cast<int>(img_item.width);
+    int img_h = static_cast<int>(img_item.height);
+    if (img_w <= 0 || img_h <= 0)
+      continue;
+
+    PreparedImage pi;
+    pi.x = img_x;
+    pi.y = img_y;
+    pi.ok = false;
+
+    if (img_item.key < static_cast<uint16_t>(decoded_cache_.size())) {
+      auto& cached = decoded_cache_[img_item.key];
+      if (cached.data.empty()) {
+        // MRB had the size but resolve_image_size_ didn't decode.  Decode now
+        // using the local header offset (no central directory needed).
+        uint32_t offset = mrb_.image_ref(img_item.key).local_header_offset;
+        pi.ok = decode_image_by_offset_(offset, cached);
+      } else {
+        pi.ok = !cached.data.empty();
+      }
+      pi.decoded = &cached;
+    }
+
+    if (!pi.ok) {
+      // Use a temporary for fallback sizing
+      pi.decoded = nullptr;
+    }
+    prepared_images.push_back(pi);
+  }
+
+  // ── Build word list ────────────────────────────────────────────────
   struct DrawWord {
     int x;
     int y;
     char text[64];
     int len;
-    int glyph_advance;  // pixel advance per glyph (accounts for FontSize)
+    int glyph_advance;
   };
   std::vector<DrawWord> words;
   for (const auto& item : page_.text_items) {
@@ -243,7 +313,6 @@ void ReaderScreen::render_page_(DisplayQueue& queue) {
     }
   }
 
-  // Draw HRs as thin lines.
   struct DrawHr {
     int x, y, w;
   };
@@ -253,22 +322,11 @@ void ReaderScreen::render_page_(DisplayQueue& queue) {
                    static_cast<int>(hr.width)});
   }
 
-  // Draw images as black boxes.
-  struct DrawImg {
-    int x, y, w, h;
-  };
-  std::vector<DrawImg> imgs;
-  for (const auto& img : page_.image_items) {
-    imgs.push_back({static_cast<int>(img.x_offset),
-                    static_cast<int>(kPaddingTop + img.y_offset + page_.vertical_offset), static_cast<int>(img.width),
-                    static_cast<int>(img.height)});
-  }
-
-  // White background — bool path uses fast_forward_rect_, no save_buf allocation.
+  // ── Submit everything to display queue ─────────────────────────────
+  // White background
   queue.submit(0, 0, W, H, true);
 
-  // Submit each word with its tight bounding box so save_buf only needs
-  // word_width * ~2 bytes (via Deg90 physical layout) instead of 48000.
+  // Text words
   const int word_h = kGlyphH * kScale;
   const int scale = kScale;
   for (const auto& dw : words) {
@@ -306,14 +364,31 @@ void ReaderScreen::render_page_(DisplayQueue& queue) {
     });
   }
 
-  // HRs — bool path, no save_buf.
+  // Horizontal rules
   for (const auto& hr : hrs) {
     queue.submit(hr.x, hr.y, hr.w, 1, false);
   }
 
-  // Images — bool path, no save_buf.
-  for (const auto& img : imgs) {
-    queue.submit(img.x, img.y, img.w, img.h, false);
+  // Decoded images
+  for (auto& pi : prepared_images) {
+    if (pi.ok && pi.decoded) {
+      int dw = pi.decoded->width, dh = pi.decoded->height;
+      int ix = pi.x, iy = pi.y;
+      // Copy the decoded data into the lambda since decoded_cache_ may be
+      // cleared before the queue processes this command.
+      DecodedImage img_copy = std::move(*pi.decoded);
+      queue.submit(ix, iy, dw, dh, [decoded = std::move(img_copy), ix, iy](DisplayFrame& frame) mutable {
+        for (int y = 0; y < decoded.height; ++y)
+          for (int x = 0; x < decoded.width; ++x)
+            frame.set_pixel(ix + x, iy + y, decoded.pixel(x, y));
+      });
+    } else {
+      // Fallback: black rect
+      int fw = pi.decoded ? pi.decoded->width : 0;
+      int fh = pi.decoded ? pi.decoded->height : 0;
+      if (fw > 0 && fh > 0)
+        queue.submit(pi.x, pi.y, fw, fh, false);
+    }
   }
 }
 

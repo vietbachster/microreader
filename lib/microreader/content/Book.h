@@ -29,6 +29,11 @@ class Book {
   // on desktop/tests pass nullptr to have Book::open allocate them.
   EpubError open(const char* path, uint8_t* work_buf = nullptr, uint8_t* xml_buf = nullptr);
 
+  // Lightweight open: only parses the ZIP central directory (no OPF/NCX/CSS).
+  // Sufficient for image decode operations that only need zip entry access.
+  // Uses ~15-20KB less RAM than full open().
+  bool open_zip_only(const char* path);
+
   // Release all resources (file handle, parsed EPUB data).
   void close();
 
@@ -56,8 +61,12 @@ class Book {
   // Extract and decode an image from the EPUB (by zip entry index).
   // Returns the 1-bit dithered bitmap. The caller owns the memory.
   // max_w/max_h: maximum output dimensions (0 = no limit).
+  // work_buf: optional caller-provided scratch (>= ZipEntryInput::kMinWorkBufSize).
+  //   On ESP32, pass queue.scratch_buf1() to avoid a 45 KB heap allocation.
+  //   If nullptr (or too small), the buffer is heap-allocated internally.
   // Returns UnsupportedFormat if images_enabled is false.
-  ImageError decode_image(uint16_t entry_index, DecodedImage& out, uint16_t max_w = 0, uint16_t max_h = 0);
+  ImageError decode_image(uint16_t entry_index, DecodedImage& out, uint16_t max_w = 0, uint16_t max_h = 0,
+                          uint8_t* work_buf = nullptr, size_t work_buf_size = 0);
 
   // Extract raw image data (for format detection, etc).
   ZipError extract_entry(uint16_t entry_index, std::vector<uint8_t>& out);

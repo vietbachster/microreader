@@ -431,6 +431,13 @@ EpubError Epub::open(IZipFile& file, uint8_t* work_buf, uint8_t* xml_buf) {
   return parse_opf(file, rootfile_path, work_buf, xml_buf);
 }
 
+EpubError Epub::open_zip_only(IZipFile& file) {
+  close();
+  if (zip_.open(file) != ZipError::Ok)
+    return EpubError::ZipError;
+  return EpubError::Ok;
+}
+
 // ---------------------------------------------------------------------------
 // XHTML body → Paragraphs
 // ---------------------------------------------------------------------------

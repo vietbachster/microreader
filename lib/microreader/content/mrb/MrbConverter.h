@@ -26,6 +26,10 @@ void benchmark_epub_conversion(Book& book, const char* tmp_path, uint8_t* work_b
 // reads the raw bytes from the ZIP and calls read_image_size().
 // Emits a per-image table and summary over ESP_LOGI.
 void benchmark_image_size_read(Book& book, uint8_t* work_buf = nullptr);
+
+// Fully decodes every image in the EPUB using the streaming decoder, capped
+// at 240×320.  Emits per-image timing, decoded dimensions, and heap delta.
+void benchmark_image_decode(Book& book, uint8_t* work_buf = nullptr);
 #endif
 
 }  // namespace microreader

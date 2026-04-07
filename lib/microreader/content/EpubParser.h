@@ -41,6 +41,11 @@ class Epub {
   // OPF/NCX parsing. Caller must provide both; allocate them before calling.
   EpubError open(IZipFile& file, uint8_t* work_buf, uint8_t* xml_buf);
 
+  // Lightweight open: only parses the ZIP central directory.
+  // No OPF/NCX/CSS parsing — only zip().entry() is available afterwards.
+  // Sufficient for image decode operations.
+  EpubError open_zip_only(IZipFile& file);
+
   // Release all parsed data (ZIP entries, spine, stylesheet, TOC, metadata).
   void close();
 

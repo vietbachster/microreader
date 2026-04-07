@@ -73,7 +73,7 @@ class MrbWriter {
 
   // Add an image reference (dimensions pre-resolved from EPUB).
   // Returns the image index to use in paragraph image refs.
-  uint16_t add_image_ref(uint16_t zip_entry_index, uint16_t width, uint16_t height);
+  uint16_t add_image_ref(uint32_t local_header_offset, uint16_t width, uint16_t height);
 
   // Update the size of an existing image ref (used by MRB converter after
   // lazy resolution).  No-op if idx is out of range.

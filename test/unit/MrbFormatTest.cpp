@@ -346,9 +346,9 @@ TEST_F(MrbFormatTest, RoundTrip_ImageRefTable) {
   MrbWriter writer;
   ASSERT_TRUE(writer.open(tmp_path_.c_str()));
 
-  uint16_t idx0 = writer.add_image_ref(10, 640, 480);
-  uint16_t idx1 = writer.add_image_ref(25, 100, 100);
-  uint16_t idx2 = writer.add_image_ref(30, 800, 600);
+  uint16_t idx0 = writer.add_image_ref(1000, 640, 480);
+  uint16_t idx1 = writer.add_image_ref(2500, 100, 100);
+  uint16_t idx2 = writer.add_image_ref(30000, 800, 600);
   EXPECT_EQ(idx0, 0);
   EXPECT_EQ(idx1, 1);
   EXPECT_EQ(idx2, 2);
@@ -362,10 +362,10 @@ TEST_F(MrbFormatTest, RoundTrip_ImageRefTable) {
   ASSERT_TRUE(reader.open(tmp_path_.c_str()));
   EXPECT_EQ(reader.image_count(), 3);
 
-  EXPECT_EQ(reader.image_ref(0).zip_entry_index, 10);
+  EXPECT_EQ(reader.image_ref(0).local_header_offset, 1000u);
   EXPECT_EQ(reader.image_ref(0).width, 640);
   EXPECT_EQ(reader.image_ref(0).height, 480);
-  EXPECT_EQ(reader.image_ref(1).zip_entry_index, 25);
+  EXPECT_EQ(reader.image_ref(1).local_header_offset, 2500u);
   EXPECT_EQ(reader.image_ref(2).width, 800);
 }
 
