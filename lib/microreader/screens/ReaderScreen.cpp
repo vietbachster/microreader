@@ -31,13 +31,12 @@ bool ReaderScreen::resolve_image_size_(uint16_t key, uint16_t& w, uint16_t& h) {
   // book_ may be closed (freed after conversion, or never opened on the MRB-already-exists path).
   // Reopen it lazily for image size lookups.
   if (!book_.is_open()) {
-    if (book_.open(path_) != EpubError::Ok)
+    if (book_.open(path_, queue_->scratch_buf1(), queue_->scratch_buf2()) != EpubError::Ok)
       return false;
   }
   uint16_t ze = mrb_.image_ref(key).zip_entry_index;
-  HEAP_LOG("img_size_before");
-  bool ok = book_.read_image_size(ze, cw, ch);
-  HEAP_LOG("img_size_after");
+  bool ok = book_.read_image_size(ze, cw, ch, queue_->scratch_buf1(), DisplayQueue::kScratchBufSize);
+  queue_->restore_scratch_buf1();
   if (!ok)
     return false;
   w = cw;
@@ -49,7 +48,8 @@ bool ReaderScreen::resolve_image_size_(uint16_t key, uint16_t& w, uint16_t& h) {
 
 ReaderScreen::ReaderScreen(const char* epub_path) : path_(epub_path) {}
 
-void ReaderScreen::start(Canvas& /*canvas*/, DisplayQueue& queue) {
+void ReaderScreen::start(Canvas& canvas, DisplayQueue& queue) {
+  queue_ = &queue;
   // Build .mrb path from .epub path (sibling file).
   mrb_path_ = path_;
   auto dot = mrb_path_.rfind('.');
@@ -59,7 +59,6 @@ void ReaderScreen::start(Canvas& /*canvas*/, DisplayQueue& queue) {
 
   // Try to open existing MRB first.
   bool mrb_ok = mrb_.open(mrb_path_.c_str());
-  bool did_convert = false;
 
   if (!mrb_ok) {
     // Convert EPUB → MRB.
@@ -67,7 +66,7 @@ void ReaderScreen::start(Canvas& /*canvas*/, DisplayQueue& queue) {
 #ifdef ESP_PLATFORM
     int64_t open_start = esp_timer_get_time();
 #endif
-    auto err = book_.open(path_);
+    auto err = book_.open(path_, queue.scratch_buf1(), queue.scratch_buf2());
 #ifdef ESP_PLATFORM
     long open_ms = (long)((esp_timer_get_time() - open_start) / 1000);
     ESP_LOGI("perf", "Book::open: %ldms", open_ms);
@@ -98,9 +97,8 @@ void ReaderScreen::start(Canvas& /*canvas*/, DisplayQueue& queue) {
     // Release EPUB resources — we only need the MRB from now on.
     book_.close();
 
-    // Reinitialize display buffers after scratch use (no hardware refresh yet).
-    queue.reset_buffers();
-    did_convert = true;
+    // Reinitialize display buffers after scratch use, restoring the scene.
+    canvas.rebuild(queue);
 
     mrb_ok = mrb_.open(mrb_path_.c_str());
     if (!mrb_ok) {
@@ -118,10 +116,6 @@ void ReaderScreen::start(Canvas& /*canvas*/, DisplayQueue& queue) {
   ESP_LOGI("reader", "BOOK_OK: %s", path_);
 #endif
   render_page_(queue);
-  // After conversion used the display buffers as scratch, do a single
-  // half refresh to push the first page to the screen.
-  if (did_convert)
-    queue.full_refresh(RefreshMode::Half);
   return;
 
 show_error:
@@ -175,6 +169,7 @@ void ReaderScreen::stop() {
   book_.close();
   page_ = PageContent{};
   open_ok_ = false;
+  queue_ = nullptr;
 }
 
 bool ReaderScreen::update(const ButtonState& buttons, Canvas& canvas, DisplayQueue& queue, IRuntime& /*runtime*/) {
@@ -269,56 +264,57 @@ void ReaderScreen::render_page_(DisplayQueue& queue) {
                     static_cast<int>(img.height)});
   }
 
-  const int scale = kScale;
-  queue.submit(
-      0, 0, W, H,
-      [words = std::move(words), hrs = std::move(hrs), imgs = std::move(imgs), W, H, scale](DisplayFrame& frame) {
-        // White background.
-        for (int row = 0; row < H; ++row)
-          frame.fill_row(row, 0, W, true);
+  // White background — bool path uses fast_forward_rect_, no save_buf allocation.
+  queue.submit(0, 0, W, H, true);
 
-        // Draw each word's glyphs at 2× scale (UTF-8 aware).
-        for (const auto& dw : words) {
-          const char* p = dw.text;
-          const char* end = dw.text + dw.len;
-          int ci = 0;
-          while (p < end && *p) {
-            const int idx = next_glyph_index(p);
-            const auto& glyph = detail::kFont8x8[idx];
-            const int gx = dw.x + ci * dw.glyph_advance;
-            const int gy = dw.y;
-            for (int grow = 0; grow < 8; ++grow) {
-              const uint8_t bits = glyph[grow];
-              if (bits == 0)
-                continue;
-              int col = 0;
-              while (col < 8) {
-                if (!(bits & (0x80u >> col))) {
-                  ++col;
-                  continue;
-                }
-                const int start = col;
-                while (col < 8 && (bits & (0x80u >> col)))
-                  ++col;
-                for (int sr = 0; sr < scale; ++sr)
-                  frame.fill_row(gy + grow * scale + sr, gx + start * scale, gx + col * scale, false);
-              }
+  // Submit each word with its tight bounding box so save_buf only needs
+  // word_width * ~2 bytes (via Deg90 physical layout) instead of 48000.
+  const int word_h = kGlyphH * kScale;
+  const int scale = kScale;
+  for (const auto& dw : words) {
+    const int word_w = dw.len * dw.glyph_advance;
+    if (word_w <= 0)
+      continue;
+    queue.submit(dw.x, dw.y, word_w, word_h, [dw, scale](DisplayFrame& frame) {
+      const char* p = dw.text;
+      const char* end = dw.text + dw.len;
+      int ci = 0;
+      while (p < end && *p) {
+        const int idx = next_glyph_index(p);
+        const auto& glyph = detail::kFont8x8[idx];
+        const int gx = dw.x + ci * dw.glyph_advance;
+        const int gy = dw.y;
+        for (int grow = 0; grow < 8; ++grow) {
+          const uint8_t bits = glyph[grow];
+          if (bits == 0)
+            continue;
+          int col = 0;
+          while (col < 8) {
+            if (!(bits & (0x80u >> col))) {
+              ++col;
+              continue;
             }
-            ++ci;
+            const int start = col;
+            while (col < 8 && (bits & (0x80u >> col)))
+              ++col;
+            for (int sr = 0; sr < scale; ++sr)
+              frame.fill_row(gy + grow * scale + sr, gx + start * scale, gx + col * scale, false);
           }
         }
+        ++ci;
+      }
+    });
+  }
 
-        // Draw HRs.
-        for (const auto& hr : hrs) {
-          frame.fill_row(hr.y, hr.x, hr.x + hr.w, false);
-        }
+  // HRs — bool path, no save_buf.
+  for (const auto& hr : hrs) {
+    queue.submit(hr.x, hr.y, hr.w, 1, false);
+  }
 
-        // Draw images as black rectangles.
-        for (const auto& img : imgs) {
-          for (int row = img.y; row < img.y + img.h && row < H; ++row)
-            frame.fill_row(row, img.x, img.x + img.w, false);
-        }
-      });
+  // Images — bool path, no save_buf.
+  for (const auto& img : imgs) {
+    queue.submit(img.x, img.y, img.w, img.h, false);
+  }
 }
 
 bool ReaderScreen::next_page_() {

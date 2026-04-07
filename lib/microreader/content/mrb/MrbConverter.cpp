@@ -78,6 +78,21 @@ bool convert_epub_to_mrb_streaming(Book& book, const char* output_path, uint8_t*
   if (!writer.open(output_path))
     return false;
 
+  // On ESP32, caller always passes pre-allocated buffers. On desktop (tests etc.)
+  // allocate here so the leaf parse_chapter_streaming never has to.
+  static constexpr size_t kWorkBufSize = ZipEntryInput::kDecompSize + ZipEntryInput::kDictSize + 1024;
+  static constexpr size_t kXmlBufSize = 16384;
+  std::unique_ptr<uint8_t[]> owned_work;
+  std::unique_ptr<uint8_t[]> owned_xml;
+  if (!work_buf) {
+    owned_work = std::make_unique<uint8_t[]>(kWorkBufSize);
+    work_buf = owned_work.get();
+  }
+  if (!xml_buf) {
+    owned_xml = std::make_unique<uint8_t[]>(kXmlBufSize);
+    xml_buf = owned_xml.get();
+  }
+
   std::vector<ImageMapping> image_map;
 
 #ifdef ESP_PLATFORM

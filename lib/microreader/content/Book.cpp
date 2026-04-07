@@ -4,13 +4,31 @@
 
 namespace microreader {
 
-EpubError Book::open(const char* path) {
+EpubError Book::open(const char* path, uint8_t* work_buf, uint8_t* xml_buf) {
   close();  // release previous resources
   if (!file_.open(path))
     return EpubError::ZipError;
   HEAP_LOG("book.open: file opened");
   file_open_ = true;
-  auto err = epub_.open(file_);
+
+  // If caller didn't provide buffers (desktop / tests), allocate here.
+  // Two separate allocations so heap fragmentation can't block us: the
+  // 45KB work buf and 4KB xml buf fit individually even when no single
+  // 49KB block is free.
+  static constexpr size_t kWorkBufSize = ZipEntryInput::kDecompSize + ZipEntryInput::kDictSize + 1024;
+  static constexpr size_t kXmlBufSize = 4096;
+  std::unique_ptr<uint8_t[]> owned_work;
+  std::unique_ptr<uint8_t[]> owned_xml;
+  if (!work_buf) {
+    owned_work = std::make_unique<uint8_t[]>(kWorkBufSize);
+    work_buf = owned_work.get();
+  }
+  if (!xml_buf) {
+    owned_xml = std::make_unique<uint8_t[]>(kXmlBufSize);
+    xml_buf = owned_xml.get();
+  }
+
+  auto err = epub_.open(file_, work_buf, xml_buf);
   HEAP_LOG("book.open: done");
   return err;
 }
@@ -52,19 +70,23 @@ ZipError Book::extract_entry(uint16_t entry_index, std::vector<uint8_t>& out) {
   return epub_.zip().extract(file_, entry, out);
 }
 
-bool Book::read_image_size(uint16_t entry_index, uint16_t& w, uint16_t& h) {
+bool Book::read_image_size(uint16_t entry_index, uint16_t& w, uint16_t& h, uint8_t* work_buf, size_t work_size) {
   if (entry_index >= epub_.zip().entry_count()) {
     MR_LOGI("book", "read_image_size: entry %u out of range (count=%u)", entry_index,
             (unsigned)epub_.zip().entry_count());
     return false;
   }
   static constexpr size_t kWorkSize = ZipEntryInput::kDecompSize + ZipEntryInput::kDictSize + 1024;
-  auto work_buf = std::make_unique<uint8_t[]>(kWorkSize);
+  std::unique_ptr<uint8_t[]> owned;
+  if (!work_buf || work_size < kWorkSize) {
+    owned = std::make_unique<uint8_t[]>(kWorkSize);
+    work_buf = owned.get();
+  }
   ImageSizeStream stream;
   epub_.zip().extract_streaming(
       file_, epub_.zip().entry(entry_index),
       [](const uint8_t* d, size_t n, void* ud) -> bool { return !static_cast<ImageSizeStream*>(ud)->feed(d, n); },
-      &stream, work_buf.get(), kWorkSize);
+      &stream, work_buf, kWorkSize);
   if (!stream.ok()) {
     MR_LOGI("book", "read_image_size: entry %u stream failed", entry_index);
     return false;

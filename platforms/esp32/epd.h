@@ -52,40 +52,6 @@
 // ---- Refresh modes ----
 enum RefreshMode { FULL_REFRESH, HALF_REFRESH, FAST_REFRESH, CUSTOM_LUT_REFRESH };
 
-static const uint8_t lut_settle[] = {
-    // VS L0–L3 (voltage patterns per transition)
-    // Black → Black: [VSS → VSS → VSS → VSS]
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    // Black → White: [VSS → VSS → VSS → VSS]
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    // White → Black: [VSS → VSS → VSS → VSS]
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    // White → White: [VSH1 → VSL → VSS → VSS]
-    0x60, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    // L4 VCOM: [VSS → VSS → VSS → VSS]
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-
-    // TP/RP groups
-    0x01, 0x03, 0x02, 0x00, 0x01,  // G0: A=1 B=3 C=2 D=0 RP=1 (12 frames)
-    0x00, 0x00, 0x00, 0x00, 0x00,  // G1: A=0 B=0 C=0 D=0 RP=0
-    0x00, 0x00, 0x00, 0x00, 0x00,  // G2: A=0 B=0 C=0 D=0 RP=0
-    0x00, 0x00, 0x00, 0x00, 0x00,  // G3: A=0 B=0 C=0 D=0 RP=0
-    0x00, 0x00, 0x00, 0x00, 0x00,  // G4: A=0 B=0 C=0 D=0 RP=0
-    0x00, 0x00, 0x00, 0x00, 0x00,  // G5: A=0 B=0 C=0 D=0 RP=0
-    0x00, 0x00, 0x00, 0x00, 0x00,  // G6: A=0 B=0 C=0 D=0 RP=0
-    0x00, 0x00, 0x00, 0x00, 0x00,  // G7: A=0 B=0 C=0 D=0 RP=0
-    0x00, 0x00, 0x00, 0x00, 0x00,  // G8: A=0 B=0 C=0 D=0 RP=0
-    0x00, 0x00, 0x00, 0x00, 0x00,  // G9: A=0 B=0 C=0 D=0 RP=0
-
-    // Frame rate
-    0x86, 0x86, 0x86, 0x86, 0x86,
-
-    // Voltages (VGH, VSH1, VSH2, VSL, VCOM)
-    0x17, 0x41, 0xA8, 0x32, 0x30,
-
-    // Reserved
-    0x00, 0x00};
-
 static const uint8_t lut_fast[] = {
     // VS L0–L3 (voltage patterns per transition)
     // Black → Black: [VSS → VSS → VSS → VSS]
@@ -133,11 +99,9 @@ class EInkDisplay : public microreader::IDisplay {
 
   spi_device_handle_t spi_;
   uint8_t activeLut_[110];  // current LUT programmed to hardware; defaults to lut_fast
-  uint8_t settleLut_[110];  // settle LUT; defaults to lut_settle
 
   EInkDisplay() {
     memcpy(activeLut_, lut_fast, sizeof(activeLut_));
-    memcpy(settleLut_, lut_settle, sizeof(settleLut_));
   }
 
   void begin() {
@@ -248,27 +212,6 @@ class EInkDisplay : public microreader::IDisplay {
     refreshDisplay(FAST_REFRESH);
   }
 
-  void settle_refresh(const uint8_t* pixels) override {
-    wakeIfNeeded();
-    waitWhileBusy();
-    setRamArea(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
-    writeRamBuffer(CMD_WRITE_RAM_BW, pixels, BUFFER_SIZE);
-    writeRamBuffer(CMD_WRITE_RAM_RED, pixels, BUFFER_SIZE);
-    // Program settle LUT temporarily; next tick() will restore activeLut_.
-    sendCommand(CMD_WRITE_LUT);
-    for (uint16_t i = 0; i < 105; i++)
-      sendData(settleLut_[i]);
-    sendCommand(CMD_GATE_VOLTAGE);
-    sendData(settleLut_[105]);
-    sendCommand(CMD_SOURCE_VOLTAGE);
-    sendData(settleLut_[106]);
-    sendData(settleLut_[107]);
-    sendData(settleLut_[108]);
-    sendCommand(CMD_WRITE_VCOM);
-    sendData(settleLut_[109]);
-    refreshDisplay(CUSTOM_LUT_REFRESH);
-  }
-
   void refreshDisplay(RefreshMode mode) {
     if ((mode == FULL_REFRESH || mode == HALF_REFRESH) && !pingPongMode) {
       isScreenOn = false;
@@ -336,10 +279,6 @@ class EInkDisplay : public microreader::IDisplay {
   // automatically whenever the controller reloads OTP.
   void setCustomLUT(const uint8_t* lutData) {
     memcpy(activeLut_, lutData, sizeof(activeLut_));
-  }
-
-  void setCustomSettleLUT(const uint8_t* lutData) {
-    memcpy(settleLut_, lutData, sizeof(settleLut_));
   }
 
   void deep_sleep() override {

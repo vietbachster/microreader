@@ -218,20 +218,14 @@ static EpubError parse_ncx(IZipFile& file, const ZipReader& zip, const ZipEntry&
   return EpubError::Ok;
 }
 
-EpubError Epub::parse_opf(IZipFile& file, const std::string& opf_path) {
+EpubError Epub::parse_opf(IZipFile& file, const std::string& opf_path, uint8_t* work_buf, uint8_t* xml_buf) {
   auto* entry = zip_.find(opf_path);
   if (!entry)
     return EpubError::ContentOpfMissing;
 
-  // Single heap allocation for work buffer + XML buffer (~48KB).
-  // Work buffer layout: [tinfl_decompressor(~11KB) | dict(32KB) | input(1KB)].
-  // Allocated in a unique_ptr so we can free it between phases.
   static constexpr size_t kWorkBufSize = ZipEntryInput::kDecompSize + ZipEntryInput::kDictSize + 1024;
   static constexpr size_t kXmlBufSize = 4096;
-  auto mem = std::make_unique<uint8_t[]>(kWorkBufSize + kXmlBufSize);
-  uint8_t* work_buf = mem.get();
-  uint8_t* xml_buf = mem.get() + kWorkBufSize;
-  HEAP_LOG("parse_opf: after alloc work_buf (49KB)");
+  HEAP_LOG("parse_opf: enter");
 
   // --- Phase 1: Stream-parse OPF metadata ---
   ZipEntryInput zip_input;
@@ -414,7 +408,7 @@ void Epub::close() {
   cover_idx_ = -1;
 }
 
-EpubError Epub::open(IZipFile& file) {
+EpubError Epub::open(IZipFile& file, uint8_t* work_buf, uint8_t* xml_buf) {
   close();  // release previous data
   if (zip_.open(file) != ZipError::Ok)
     return EpubError::ZipError;
@@ -434,7 +428,7 @@ EpubError Epub::open(IZipFile& file) {
     root_dir_.clear();
   }
 
-  return parse_opf(file, rootfile_path);
+  return parse_opf(file, rootfile_path, work_buf, xml_buf);
 }
 
 // ---------------------------------------------------------------------------
@@ -1757,48 +1751,6 @@ EpubError Epub::parse_chapter(IZipFile& file, size_t index, Chapter& out) const 
   if (err != EpubError::Ok)
     return err;
 
-  // Promote inline float images to standalone Image paragraphs when they are large.
-  // Use attr_width/attr_height (HTML values) for the threshold when available.
-  // When both are 0 (no HTML attrs), read the actual image dimensions from the ZIP
-  // into local variables purely for the threshold decision — never stored back into attr_.
-  // The promoted paragraph retains attr_width/attr_height = 0; real size is resolved
-  // at layout time via IImageSizeProvider.
-  const uint16_t content_w = stylesheet_.config().content_width;
-  if (images_enabled) {
-    static constexpr size_t kImgWorkSize = ZipEntryInput::kDecompSize + ZipEntryInput::kDictSize + 1024;
-    std::unique_ptr<uint8_t[]> img_work;
-
-    for (size_t i = 0; i < out.paragraphs.size(); ++i) {
-      auto& para = out.paragraphs[i];
-      if (para.type == ParagraphType::Text && para.text.inline_image.has_value()) {
-        const auto& img = *para.text.inline_image;
-        uint16_t check_w = img.attr_width;
-        uint16_t check_h = img.attr_height;
-        if (check_w == 0 && check_h == 0 && img.key < zip_.entry_count()) {
-          if (!img_work)
-            img_work = std::make_unique<uint8_t[]>(kImgWorkSize);
-          ImageSizeStream stream;
-          zip_.extract_streaming(
-              file, zip_.entry(img.key),
-              [](const uint8_t* d, size_t n, void* ud) -> bool {
-                return !static_cast<ImageSizeStream*>(ud)->feed(d, n);
-              },
-              &stream, img_work.get(), kImgWorkSize);
-          if (stream.ok()) {
-            check_w = stream.width();
-            check_h = stream.height();
-          }
-        }
-        if (check_w > content_w / 3 || check_h > 120) {
-          auto img_para = Paragraph::make_image(img.key, img.attr_width, img.attr_height);
-          para.text.inline_image.reset();
-          out.paragraphs.insert(out.paragraphs.begin() + static_cast<ptrdiff_t>(i), std::move(img_para));
-          ++i;  // skip past the newly inserted image
-        }
-      }
-    }
-  }
-
   return EpubError::Ok;
 }
 
@@ -1821,117 +1773,28 @@ EpubError Epub::parse_chapter_streaming(IZipFile& file, size_t index, ParagraphS
     base_dir = entry.name.substr(0, slash + 1);
   }
 
-  // Single allocation for both work + XML buffers to avoid heap fragmentation.
-  // Work buffer layout: [tinfl_decompressor(~11KB) | dict(32KB) | input(1KB)].
-  // XML buffer must be large enough to hold any single element + attributes;
-  // 16KB handles virtually all real-world EPUB XHTML elements.
-  // Combined: one allocator header instead of two, so fits in a 61KB block.
   static constexpr size_t kWorkBufSize = ZipEntryInput::kDecompSize + ZipEntryInput::kDictSize + 1024;
   static constexpr size_t kXmlBufSize = 16384;
 
-  // Use caller-provided buffers (e.g. borrowed from DisplayQueue) or allocate.
-  std::unique_ptr<uint8_t[]> combined_mem;
-  uint8_t* work_ptr;
-  uint8_t* xml_ptr;
-  if (work_buf && xml_buf) {
-    work_ptr = work_buf;
-    xml_ptr = xml_buf;
-  } else {
-    combined_mem = std::make_unique<uint8_t[]>(kWorkBufSize + kXmlBufSize);
-    work_ptr = combined_mem.get();
-    xml_ptr = combined_mem.get() + kWorkBufSize;
-  }
+  uint8_t* work_ptr = work_buf;
+  uint8_t* xml_ptr = xml_buf;
 
   ZipEntryInput zip_input;
-#ifdef ESP_PLATFORM
-  int64_t io_t0 = esp_timer_get_time();
-#endif
   if (zip_input.open(file, entry, work_ptr, kWorkBufSize) != ZipError::Ok)
     return EpubError::ZipError;
 
   XmlReader reader;
   if (reader.open(zip_input, xml_ptr, kXmlBufSize) != XmlError::Ok)
     return EpubError::XmlError;
-#ifdef ESP_PLATFORM
-  int64_t io_us = esp_timer_get_time() - io_t0;
-#endif
-
-  // When images are disabled, stream paragraphs directly to the caller's sink
-  // to avoid buffering the entire chapter in memory.
-  if (!images_enabled) {
-    BodyParser parser;
-    parser.set_sink(sink, sink_ctx);
-
-    EpubError err = parse_xhtml_events(reader, nullptr, &stylesheet_, base_dir, zip_, parser);
-    if (err != EpubError::Ok)
-      return err;
-
-#ifdef ESP_PLATFORM
-    int64_t fin_t0 = esp_timer_get_time();
-#endif
-    parser.finish();
-#ifdef ESP_PLATFORM
-    int64_t fin_us = esp_timer_get_time() - fin_t0;
-    ESP_LOGD("perf", "  io=%ldms finish=%ldms", (long)(io_us / 1000), (long)(fin_us / 1000));
-#endif
-
-    return EpubError::Ok;
-  }
-
-  // Buffer paragraphs locally so we can do image resolution + promotion
-  // after the ZipEntryInput releases the file handle (can't seek during
-  // streaming decompression).
-  std::vector<Paragraph> paragraphs;
-  auto buffer_sink = [](void* ctx, Paragraph&& para) {
-    static_cast<std::vector<Paragraph>*>(ctx)->push_back(std::move(para));
-  };
 
   BodyParser parser;
-  parser.set_sink(buffer_sink, &paragraphs);
+  parser.set_sink(sink, sink_ctx);
 
   EpubError err = parse_xhtml_events(reader, nullptr, &stylesheet_, base_dir, zip_, parser);
   if (err != EpubError::Ok)
     return err;
 
   parser.finish();
-
-  // ZipEntryInput is done — file handle is now free, work_ptr is available for reuse.
-  // Promote inline float images to standalone Image paragraphs when they are large.
-  // Use attr_width/attr_height (HTML values) for the threshold when available.
-  // When both are 0 (no HTML attrs), read actual image dimensions into locals
-  // purely for the threshold decision — never stored back into attr_.
-  const uint16_t content_w = stylesheet_.config().content_width;
-  for (size_t i = 0; i < paragraphs.size(); ++i) {
-    auto& para = paragraphs[i];
-    if (para.type == ParagraphType::Text && para.text.inline_image.has_value()) {
-      const auto& img = *para.text.inline_image;
-      uint16_t check_w = img.attr_width;
-      uint16_t check_h = img.attr_height;
-      if (check_w == 0 && check_h == 0 && img.key < zip_.entry_count()) {
-        ImageSizeStream stream;
-        zip_.extract_streaming(
-            file, zip_.entry(img.key),
-            [](const uint8_t* d, size_t n, void* ud) -> bool { return !static_cast<ImageSizeStream*>(ud)->feed(d, n); },
-            &stream, work_ptr, kWorkBufSize);
-        if (stream.ok()) {
-          check_w = stream.width();
-          check_h = stream.height();
-        }
-      }
-      if (check_w > content_w / 3 || check_h > 120) {
-        auto img_para = Paragraph::make_image(img.key, img.attr_width, img.attr_height);
-        para.text.inline_image.reset();
-        paragraphs.insert(paragraphs.begin() + static_cast<ptrdiff_t>(i), std::move(img_para));
-        ++i;
-      }
-    }
-  }
-
-  // Forward all paragraphs through the caller's sink.
-  for (auto& para : paragraphs) {
-    sink(sink_ctx, std::move(para));
-  }
-
   return EpubError::Ok;
 }
 

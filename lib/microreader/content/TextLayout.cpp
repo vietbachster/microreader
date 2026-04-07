@@ -465,7 +465,9 @@ PageContent layout_page(const IFont& font, const PageOptions& opts, IParagraphSo
 
         size_t skip = (pi == start.paragraph) ? start.line : 0;
 
-        // Inline float image setup
+        // Inline float image setup — resolve dimensions, then decide:
+        // large images are promoted to standalone block items before the text;
+        // small ones keep first-line indent to wrap text beside them.
         uint16_t inline_img_w = 0, inline_img_h = 0;
         bool has_inline_img = false;
         if (skip == 0 && para.text.inline_image.has_value()) {
@@ -477,8 +479,32 @@ PageContent layout_page(const IFont& font, const PageOptions& opts, IParagraphSo
             size_provider(img.key, inline_img_w, inline_img_h);
           }
           if (inline_img_w > 0 && inline_img_h > 0) {
-            has_inline_img = true;
-            lo.first_line_extra_indent = inline_img_w + 4;
+            if (inline_img_w > content_width / 3 || inline_img_h > 120) {
+              // Promote: emit as a standalone block image before this paragraph's text.
+              uint16_t promo_w = inline_img_w, promo_h = inline_img_h;
+              uint16_t promo_x;
+              scale_image(opts, content_width, promo_w, promo_h, promo_x);
+              if (y + spacing + promo_h > page_height && has_content) {
+                end_pos = {static_cast<uint16_t>(pi), 0};
+                goto assemble;
+              }
+              y += spacing + promo_h;
+              items.push_back(PageItem{PageItem::Image,
+                                       static_cast<uint16_t>(pi),
+                                       0,
+                                       {},
+                                       promo_h,
+                                       img.key,
+                                       promo_w,
+                                       promo_h,
+                                       promo_x});
+              has_content = true;
+              has_text_or_image = true;
+              spacing = 0;  // consumed by image; don't re-apply before text lines
+            } else {
+              has_inline_img = true;
+              lo.first_line_extra_indent = inline_img_w + 4;
+            }
           }
         }
 
@@ -693,12 +719,37 @@ PageContent layout_page_backward(const IFont& font, const PageOptions& opts, IPa
           break;
         }
 
+        // Inline image — resolve dimensions, matching the forward path so line wrapping is identical.
+        // Small images keep first-line indent; large ones are promoted to a block item preceding the text.
+        uint16_t inline_img_w = 0, inline_img_h = 0;
+        uint16_t inline_img_key = 0;
+        bool inline_img_promoted = false;
+        if (para.text.inline_image.has_value()) {
+          const auto& img = para.text.inline_image.value();
+          inline_img_key = img.key;
+          if (img.attr_width > 0 && img.attr_height > 0) {
+            inline_img_w = img.attr_width;
+            inline_img_h = img.attr_height;
+          } else if (size_provider) {
+            size_provider(img.key, inline_img_w, inline_img_h);
+          }
+          if (inline_img_w > 0 && inline_img_h > 0) {
+            if (inline_img_w > content_width / 3 || inline_img_h > 120) {
+              inline_img_promoted = true;
+            } else {
+              lo.first_line_extra_indent = inline_img_w + 4;
+            }
+          }
+        }
+
         auto lines = layout_paragraph(font, lo, para.text);
+        lo.first_line_extra_indent = 0;
         size_t line_count = lines.size();
         size_t last_line = (line_limit < line_count) ? line_limit : line_count;
 
         // Collect lines from (last_line - 1) down to 0
         bool first_item_of_para = true;
+        bool collected_line_zero = false;
         for (size_t li_rev = 0; li_rev < last_line; ++li_rev) {
           size_t li = last_line - 1 - li_rev;
           uint16_t line_h = compute_line_height(font, lines[li], para.text.line_height_pct);
@@ -715,6 +766,26 @@ PageContent layout_page_backward(const IFont& font, const PageOptions& opts, IPa
           items.push_back(PageItem{PageItem::TextLine, static_cast<uint16_t>(pi), static_cast<uint16_t>(li),
                                    std::move(lines[li]), line_h});
           first_item_of_para = false;
+          if (li == 0)
+            collected_line_zero = true;
+        }
+
+        // If line 0 was collected, also emit the promoted image (appended last here,
+        // placed first after std::reverse — matching the forward layout order).
+        if (inline_img_promoted && collected_line_zero) {
+          uint16_t promo_w = inline_img_w, promo_h = inline_img_h;
+          uint16_t promo_x;
+          scale_image(opts, content_width, promo_w, promo_h, promo_x);
+          total_height += promo_h;
+          items.push_back(PageItem{PageItem::Image,
+                                   static_cast<uint16_t>(pi),
+                                   0,
+                                   {},
+                                   promo_h,
+                                   inline_img_key,
+                                   promo_w,
+                                   promo_h,
+                                   promo_x});
         }
         break;
       }

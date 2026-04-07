@@ -44,12 +44,12 @@ struct UpdateCommand {
 class DisplayQueue {
  public:
   int phases = 4;
-  bool settle_enabled = false;
 
   explicit DisplayQueue(IDisplay& display) : display_(display), next_ts_(0) {
     memset(ground_truth_, 0xFF, DisplayFrame::kPixelBytes);
     memset(target_, 0xFF, DisplayFrame::kPixelBytes);
     display_.set_rotation(rotation_);
+    save_buf_.reserve(1024);  // pre-allocate for per-word bbox saves (~word_w * 2 bytes max)
   }
 
   // Logical dimensions (rotation-aware).
@@ -154,17 +154,6 @@ class DisplayQueue {
   }
 
   void tick(bool force = false) {
-    // Settle refresh fires once, the tick after all commands finish.
-    if (needs_settle_ && commands_.empty()) {
-      needs_settle_ = false;
-      if (settle_enabled) {
-        MR_LOGI("DQ", "tick -> settle_refresh");
-        display_.settle_refresh(target_);
-      }
-      if (!force)
-        return;
-    }
-
     if (commands_.empty() && !force)
       return;
 
@@ -188,9 +177,6 @@ class DisplayQueue {
     // Queue just went idle — upload final state but skip the refresh
     // since ground_truth now matches target (no visible pixel changes).
     if (commands_.empty()) {
-      if (settle_enabled) {
-        needs_settle_ = true;
-      }
       display_.tick(ground_truth_, ground_truth_dirty_, target_, target_dirty_, /*refresh=*/false);
       ground_truth_dirty_ = false;
       target_dirty_ = false;
@@ -217,15 +203,9 @@ class DisplayQueue {
       tick();
   }
 
-  // Cancel any pending settle refresh.
-  void cancel_settle() {
-    needs_settle_ = false;
-  }
-
   void full_refresh(RefreshMode mode = RefreshMode::Half) {
     MR_LOGI("DQ", "full_refresh");
     commands_.clear();
-    needs_settle_ = false;
     memcpy(ground_truth_, target_, DisplayFrame::kPixelBytes);
     display_.full_refresh(target_, mode);
     ground_truth_dirty_ = false;
@@ -236,9 +216,8 @@ class DisplayQueue {
   // target_), then send ground_truth (old image) and target (new image) to the
   // display for a fast differential refresh.
   void partial_refresh() {
-    MR_LOGI("DQ", "partial_refresh (pending=%d, settle_enabled=%d)", pending_count(), settle_enabled);
+    MR_LOGI("DQ", "partial_refresh (pending=%d)", pending_count());
     commands_.clear();
-    needs_settle_ = settle_enabled;
     display_.partial_refresh(ground_truth_, target_);
     memcpy(ground_truth_, target_, DisplayFrame::kPixelBytes);
     ground_truth_dirty_ = false;
@@ -247,7 +226,6 @@ class DisplayQueue {
 
   void clear_screen(bool white = true, RefreshMode mode = RefreshMode::Full) {
     commands_.clear();
-    needs_settle_ = false;
     memset(ground_truth_, white ? 0xFF : 0x00, DisplayFrame::kPixelBytes);
     memset(target_, white ? 0xFF : 0x00, DisplayFrame::kPixelBytes);
     display_.full_refresh(target_, mode);
@@ -263,7 +241,6 @@ class DisplayQueue {
   // Use after loaning buffers as scratch memory, before painting new content.
   void reset_buffers(bool white = true) {
     commands_.clear();
-    needs_settle_ = false;
     memset(ground_truth_, white ? 0xFF : 0x00, DisplayFrame::kPixelBytes);
     memset(target_, white ? 0xFF : 0x00, DisplayFrame::kPixelBytes);
     ground_truth_dirty_ = false;
@@ -282,6 +259,12 @@ class DisplayQueue {
   }
   static constexpr size_t kScratchBufSize = DisplayFrame::kPixelBytes;  // 48000
 
+  // Restore ground_truth_ from target_ after using scratch_buf1 as temporary
+  // work memory. Only valid when scratch_buf2 (target_) was NOT modified.
+  void restore_scratch_buf1() {
+    memcpy(ground_truth_, target_, DisplayFrame::kPixelBytes);
+  }
+
   void set_rotation(Rotation r) {
     flush();
     rotation_ = r;
@@ -298,7 +281,6 @@ class DisplayQueue {
   alignas(4) uint8_t target_[DisplayFrame::kPixelBytes];
   bool ground_truth_dirty_ = false;
   bool target_dirty_ = false;
-  bool needs_settle_ = false;
   std::vector<UpdateCommand> commands_;
   uint32_t next_ts_;
   std::vector<uint8_t> save_buf_;  // reused by generic submit

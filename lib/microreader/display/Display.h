@@ -153,12 +153,6 @@ class IDisplay {
   // The display LUT uses the RED/BW difference to drive only changed pixels.
   virtual void partial_refresh(const uint8_t* old_pixels, const uint8_t* new_pixels) = 0;
 
-  // Settle refresh: writes the same pixels to both RAMs and applies a settle
-  // LUT whose B→B / W→W entries briefly drive particles to reinforce the
-  // current state, cleaning up ghosting left by fast partial updates.
-  // Called once by DisplayQueue after all commands finish.
-  virtual void settle_refresh(const uint8_t* pixels) = 0;
-
   // Put the display controller into deep sleep (low-power mode).
   virtual void deep_sleep() {}
 

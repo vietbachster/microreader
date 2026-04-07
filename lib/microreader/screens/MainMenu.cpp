@@ -35,17 +35,9 @@ void MainMenu::build_items_(DisplayQueue& queue) {
     update_phases_label_(queue.phases);
     items_[count_++] = {phases_label_, nullptr, phases_action_};
   }
-  if (count_ < kMaxItems) {
-    update_settle_label_(queue.settle_enabled);
-    items_[count_++] = {settle_label_, nullptr, settle_action_};
-  }
   if (count_ < kMaxItems && book_select_.has_books_dir())
     items_[count_++] = {"Clear Converted", nullptr, clear_converted_action_};
 #ifdef ESP_PLATFORM
-  if (count_ < kMaxItems) {
-    update_lut_target_label_();
-    items_[count_++] = {lut_target_label_, nullptr, lut_target_action_};
-  }
   if (count_ < kMaxItems)
     items_[count_++] = {"Switch OTA", nullptr, ota_action_};
 #endif
@@ -62,17 +54,6 @@ void MainMenu::update_phases_label_(int phases) {
   *p = '\0';
 }
 
-void MainMenu::update_settle_label_(bool enabled) {
-  char* p = settle_label_;
-  const char* prefix = "Settle: ";
-  while (*prefix)
-    *p++ = *prefix++;
-  const char* val = enabled ? "On" : "Off";
-  while (*val)
-    *p++ = *val++;
-  *p = '\0';
-}
-
 void MainMenu::rotate_action_(MainMenu& /*self*/, DisplayQueue& queue) {
   Rotation next = queue.rotation() == Rotation::Deg0 ? Rotation::Deg90 : Rotation::Deg0;
   queue.set_rotation(next);
@@ -84,11 +65,6 @@ void MainMenu::phases_action_(MainMenu& self, DisplayQueue& queue) {
     next = kMinPhases;
   queue.phases = next;
   self.update_phases_label_(next);
-}
-
-void MainMenu::settle_action_(MainMenu& self, DisplayQueue& queue) {
-  queue.settle_enabled = !queue.settle_enabled;
-  self.update_settle_label_(queue.settle_enabled);
 }
 
 void MainMenu::clear_converted_action_(MainMenu& self, DisplayQueue& /*queue*/) {
@@ -123,25 +99,7 @@ void MainMenu::clear_converted_action_(MainMenu& self, DisplayQueue& /*queue*/) 
 }  // namespace microreader
 
 #ifdef ESP_PLATFORM
-extern bool g_lut_target_settle;
-
 namespace microreader {
-
-void MainMenu::update_lut_target_label_() {
-  char* p = lut_target_label_;
-  const char* prefix = "LUT Target: ";
-  while (*prefix)
-    *p++ = *prefix++;
-  const char* val = g_lut_target_settle ? "Settle" : "Fast";
-  while (*val)
-    *p++ = *val++;
-  *p = '\0';
-}
-
-void MainMenu::lut_target_action_(MainMenu& self, DisplayQueue& /*queue*/) {
-  g_lut_target_settle = !g_lut_target_settle;
-  self.update_lut_target_label_();
-}
 
 void MainMenu::ota_action_(MainMenu& /*self*/, DisplayQueue& /*queue*/) {
   auto running = esp_ota_get_running_partition();

@@ -47,6 +47,7 @@ class ReaderScreen final : public IScreen {
 
   const char* path_ = nullptr;
   std::string mrb_path_;
+  DisplayQueue* queue_ = nullptr;  // set in start(), cleared in stop()
   Book book_;
   MrbReader mrb_;
   std::unique_ptr<MrbChapterSource> chapter_src_;

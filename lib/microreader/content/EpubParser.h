@@ -37,9 +37,9 @@ class Epub {
     return stylesheet_.config();
   }
 
-  // Parse an EPUB file. Opens the ZIP, reads container.xml, content.opf,
-  // TOC, and stylesheets.
-  EpubError open(IZipFile& file);
+  // Open an EPUB file. work_buf (~45KB) and xml_buf (~4KB) are used during
+  // OPF/NCX parsing. Caller must provide both; allocate them before calling.
+  EpubError open(IZipFile& file, uint8_t* work_buf, uint8_t* xml_buf);
 
   // Release all parsed data (ZIP entries, spine, stylesheet, TOC, metadata).
   void close();
@@ -54,8 +54,8 @@ class Epub {
 
   // Stream-parse a chapter: paragraphs are emitted one at a time via sink.
   // Uses ~37KB working memory instead of extracting the full XHTML.
-  EpubError parse_chapter_streaming(IZipFile& file, size_t index, ParagraphSink sink, void* sink_ctx,
-                                    uint8_t* work_buf = nullptr, uint8_t* xml_buf = nullptr) const;
+  EpubError parse_chapter_streaming(IZipFile& file, size_t index, ParagraphSink sink, void* sink_ctx, uint8_t* work_buf,
+                                    uint8_t* xml_buf) const;
 
   // Access metadata.
   const EpubMetadata& metadata() const {
@@ -99,7 +99,7 @@ class Epub {
 
   // Internal parsing steps
   EpubError parse_container(IZipFile& file, std::string& rootfile_path);
-  EpubError parse_opf(IZipFile& file, const std::string& opf_path);
+  EpubError parse_opf(IZipFile& file, const std::string& opf_path, uint8_t* work_buf, uint8_t* xml_buf);
 };
 
 // Parse XHTML body into paragraphs (used by Epub::parse_chapter, also

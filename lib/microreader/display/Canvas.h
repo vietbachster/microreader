@@ -180,6 +180,26 @@ class Canvas {
         elem->accept_commit_();
   }
 
+  // Rebuild both display buffers from the current scene without issuing a
+  // hardware refresh.  Use this after the buffers have been used as scratch
+  // memory (scratch_buf1/2): reset_buffers() clears them to white, then
+  // rebuild() repaints every visible element so the buffers correctly reflect
+  // the scene again before the next render.
+  void rebuild(DisplayQueue& queue) {
+    queue.reset_buffers(/*white=*/true);
+    for (auto* elem : elements_) {
+      if (!elem->visible())
+        continue;
+      int ex, ey, ew, eh;
+      elem->current_bounds(ex, ey, ew, eh);
+      if (ew > 0 && eh > 0)
+        elem->draw_content(queue);
+    }
+    // Mark all elements clean with valid committed bounds.
+    for (auto* elem : elements_)
+      elem->accept_commit_();
+  }
+
  private:
   std::vector<CanvasElement*> elements_;
 };

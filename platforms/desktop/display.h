@@ -70,18 +70,6 @@ class DesktopEmulatorDisplay final : public microreader::IDisplay {
     step_and_render(new_pixels, new_pixels);
   }
 
-  // Settle refresh: snap sim firmly to the final pixel state.
-  void settle_refresh(const uint8_t* pixels) override {
-    for (int y = 0; y < microreader::DisplayFrame::kPhysicalHeight; ++y) {
-      for (int x = 0; x < microreader::DisplayFrame::kPhysicalWidth; ++x) {
-        const std::size_t byte_idx = static_cast<std::size_t>(y * microreader::DisplayFrame::kStride + x / 8);
-        const uint8_t bit = static_cast<uint8_t>(0x80u >> (x & 7));
-        sim_[y * microreader::DisplayFrame::kPhysicalWidth + x] = (pixels[byte_idx] & bit) ? 1.0f : 0.0f;
-      }
-    }
-    step_and_render(pixels, pixels);
-  }
-
  private:
   DesktopRuntime& rt_;
   microreader::Rotation rotation_ = microreader::Rotation::Deg0;

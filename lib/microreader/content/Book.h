@@ -24,8 +24,10 @@ class Book {
     epub_.set_css_config(config);
   }
 
-  // Open an EPUB file from a filesystem path.
-  EpubError open(const char* path);
+  // Open an EPUB file. work_buf (~45KB) and xml_buf (~4KB) are forwarded to
+  // the EPUB open/parse pipeline. On ESP32 pass DisplayQueue scratch buffers;
+  // on desktop/tests pass nullptr to have Book::open allocate them.
+  EpubError open(const char* path, uint8_t* work_buf = nullptr, uint8_t* xml_buf = nullptr);
 
   // Release all resources (file handle, parsed EPUB data).
   void close();
@@ -48,8 +50,8 @@ class Book {
   EpubError load_chapter(size_t index, Chapter& out);
 
   // Stream-parse a chapter: paragraphs emitted via callback, ~37KB working memory.
-  EpubError load_chapter_streaming(size_t index, ParagraphSink sink, void* sink_ctx, uint8_t* work_buf = nullptr,
-                                   uint8_t* xml_buf = nullptr);
+  EpubError load_chapter_streaming(size_t index, ParagraphSink sink, void* sink_ctx, uint8_t* work_buf,
+                                   uint8_t* xml_buf);
 
   // Extract and decode an image from the EPUB (by zip entry index).
   // Returns the 1-bit dithered bitmap. The caller owns the memory.
@@ -61,9 +63,11 @@ class Book {
   ZipError extract_entry(uint16_t entry_index, std::vector<uint8_t>& out);
 
   // Read only the image dimensions (width/height) without decoding.
-  // Uses the Book's already-open ZIP file — no new allocations beyond a ~33KB work buffer.
+  // work_buf/work_size: optional pre-allocated scratch (must be >= ~45 KB, see kWorkSize).
+  // Falls back to heap allocation if not provided.
   // Returns false if the entry is invalid or the format is unrecognised.
-  bool read_image_size(uint16_t entry_index, uint16_t& w, uint16_t& h);
+  bool read_image_size(uint16_t entry_index, uint16_t& w, uint16_t& h, uint8_t* work_buf = nullptr,
+                       size_t work_size = 0);
 
   // Access the underlying EPUB for advanced queries.
   const Epub& epub() const {

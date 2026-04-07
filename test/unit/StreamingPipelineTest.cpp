@@ -193,9 +193,14 @@ TEST_P(ChapterStreamingTest, ParagraphsMatch) {
   if (err != EpubError::Ok)
     GTEST_SKIP() << "Cannot open " << filename;
 
+  static constexpr size_t kWorkBufSize = ZipEntryInput::kDecompSize + ZipEntryInput::kDictSize + 1024;
+  static constexpr size_t kXmlBufSize = 16384;
+  std::vector<uint8_t> work_buf(kWorkBufSize);
+  std::vector<uint8_t> xml_buf(kXmlBufSize);
+
   size_t total_paras = 0;
   for (size_t ci = 0; ci < book.chapter_count(); ++ci) {
-    // Non-streaming
+    // Non-streaming path.
     Chapter ch;
     EpubError cerr = book.load_chapter(ci, ch);
     if (cerr != EpubError::Ok)
@@ -203,7 +208,7 @@ TEST_P(ChapterStreamingTest, ParagraphsMatch) {
 
     // Streaming (now includes image resolution + promotion, same as parse_chapter)
     CollectCtx streaming;
-    EpubError serr = book.load_chapter_streaming(ci, collect_sink, &streaming);
+    EpubError serr = book.load_chapter_streaming(ci, collect_sink, &streaming, work_buf.data(), xml_buf.data());
     ASSERT_EQ(serr, EpubError::Ok) << filename << " ch" << ci << " streaming parse failed";
 
     std::string cctx = filename + " ch" + std::to_string(ci);

@@ -43,10 +43,12 @@ class EpubTest : public ::testing::Test {
  protected:
   StdioZipFile file;
   Epub epub;
+  std::vector<uint8_t> work_buf_ = std::vector<uint8_t>(ZipEntryInput::kDecompSize + ZipEntryInput::kDictSize + 1024);
+  std::vector<uint8_t> xml_buf_ = std::vector<uint8_t>(4096);
 
   void open_fixture(const char* name) {
     ASSERT_TRUE(file.open(fixture(name).c_str())) << name;
-    ASSERT_EQ(epub.open(file), EpubError::Ok) << name;
+    ASSERT_EQ(epub.open(file, work_buf_.data(), xml_buf_.data()), EpubError::Ok) << name;
   }
 };
 
@@ -1154,8 +1156,12 @@ TEST_P(EpubAllFixturesTest, OpenAndParseAllChapters) {
   StdioZipFile file;
   ASSERT_TRUE(file.open(fixture(GetParam()).c_str())) << GetParam();
 
+  static constexpr size_t kWorkBufSize = ZipEntryInput::kDecompSize + ZipEntryInput::kDictSize + 1024;
+  std::vector<uint8_t> work_buf(kWorkBufSize);
+  std::vector<uint8_t> xml_buf(4096);
+
   Epub epub;
-  ASSERT_EQ(epub.open(file), EpubError::Ok) << GetParam();
+  ASSERT_EQ(epub.open(file, work_buf.data(), xml_buf.data()), EpubError::Ok) << GetParam();
   EXPECT_GT(epub.chapter_count(), 0u);
   EXPECT_FALSE(epub.metadata().title.empty());
 

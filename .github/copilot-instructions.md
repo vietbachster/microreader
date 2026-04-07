@@ -108,7 +108,7 @@ Button3 = up / prev page
 
 ## Core systems
 
-- **DisplayQueue**: dual-buffer (ground_truth + target) phase-based animation. Commands progress over N phases before committing. After all commands finish, a one-shot **settle refresh** fires on the next tick using a dedicated `lut_settle` waveform.
+- **DisplayQueue**: dual-buffer (ground_truth + target) phase-based animation. Commands progress over N phases before committing.
 - **Canvas**: z-ordered scene graph with damage-rect redraw. Elements: `CanvasRect`, `CanvasCircle`, `CanvasText`.
 - **Font** (`Font.h`): Static 8×8 bitmap font — `detail::kFont8x8[95][8]`, 95 printable ASCII glyphs (0x20–0x7E). Each glyph = 8 bytes, one byte per row, MSB = leftmost pixel. `draw_char()` / `draw_text()` helpers.
 - **Input**: `ButtonState` carries `current` + `pressed_latch`. Auto-repeat at hardware layer (5ms sample on ESP32). Screens use `is_pressed()`.
