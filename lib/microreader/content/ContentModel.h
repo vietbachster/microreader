@@ -75,12 +75,12 @@ struct Run {
 // ---------------------------------------------------------------------------
 
 struct ImageRef {
-  uint16_t key = 0;  // index into the EPUB's file entries
-  uint16_t width = 0;
-  uint16_t height = 0;
+  uint16_t key = 0;         // index into the EPUB's file entries / MRB image ref table
+  uint16_t attr_width = 0;  // from HTML attributes or MRB image table; 0 = unknown
+  uint16_t attr_height = 0;
 
   ImageRef() = default;
-  ImageRef(uint16_t k, uint16_t w, uint16_t h) : key(k), width(w), height(h) {}
+  ImageRef(uint16_t k, uint16_t w, uint16_t h) : key(k), attr_width(w), attr_height(h) {}
 };
 
 struct TextParagraph {

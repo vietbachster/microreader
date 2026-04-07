@@ -4,9 +4,7 @@
 #include <cctype>
 #include <memory>
 
-#ifndef MICROREADER_NO_IMAGES
 #include "ImageDecoder.h"
-#endif
 #include "XmlReader.h"
 
 #ifdef ESP_PLATFORM
@@ -938,7 +936,7 @@ class BodyParser {
       // No text to merge with — emit as standalone image paragraph
       auto img = *pending_inline_image_;
       pending_inline_image_.reset();
-      emit(Paragraph::make_image(img.key, img.width, img.height));
+      emit(Paragraph::make_image(img.key, img.attr_width, img.attr_height));
     }
   }
 
@@ -1766,45 +1764,44 @@ EpubError Epub::parse_chapter(IZipFile& file, size_t index, Chapter& out) const 
   if (err != EpubError::Ok)
     return err;
 
-#ifndef MICROREADER_NO_IMAGES
-  // Resolve image dimensions: many EPUBs omit width/height attributes on <img>.
-  // Read actual dimensions from the image file header so layout can size them.
-  for (auto& para : out.paragraphs) {
-    if (para.type == ParagraphType::Image && para.image.width == 0 && para.image.height == 0) {
-      if (para.image.key < zip_.entry_count()) {
-        std::vector<uint8_t> img_data;
-        if (zip_.extract(file, zip_.entry(para.image.key), img_data) == ZipError::Ok) {
-          read_image_size(img_data.data(), img_data.size(), para.image.width, para.image.height);
-        }
-      }
-    }
-    // Also resolve inline float image dimensions
-    if (para.type == ParagraphType::Text && para.text.inline_image.has_value()) {
-      auto& img = *para.text.inline_image;
-      if (img.width == 0 && img.height == 0 && img.key < zip_.entry_count()) {
-        std::vector<uint8_t> img_data;
-        if (zip_.extract(file, zip_.entry(img.key), img_data) == ZipError::Ok) {
-          read_image_size(img_data.data(), img_data.size(), img.width, img.height);
-        }
-      }
-    }
-  }
-#endif
-
-  // Promote large inline float images to standalone Image paragraphs.
-  // Large images (wider than 1/3 content width or taller than 4 line heights)
-  // can't be rendered inline — insert them as a separate paragraph before the text.
+  // Promote inline float images to standalone Image paragraphs when they are large.
+  // Use attr_width/attr_height (HTML values) for the threshold when available.
+  // When both are 0 (no HTML attrs), read the actual image dimensions from the ZIP
+  // into local variables purely for the threshold decision — never stored back into attr_.
+  // The promoted paragraph retains attr_width/attr_height = 0; real size is resolved
+  // at layout time via IImageSizeProvider.
   const uint16_t content_w = stylesheet_.config().content_width;
-  for (size_t i = 0; i < out.paragraphs.size(); ++i) {
-    auto& para = out.paragraphs[i];
-    if (para.type == ParagraphType::Text && para.text.inline_image.has_value()) {
-      const auto& img = *para.text.inline_image;
-      if (img.width > content_w / 3 || img.height > 120) {
-        // Extract and insert as standalone image paragraph
-        auto img_para = Paragraph::make_image(img.key, img.width, img.height);
-        para.text.inline_image.reset();
-        out.paragraphs.insert(out.paragraphs.begin() + static_cast<ptrdiff_t>(i), std::move(img_para));
-        ++i;  // skip past the newly inserted image
+  if (images_enabled) {
+    static constexpr size_t kImgWorkSize = ZipEntryInput::kDecompSize + ZipEntryInput::kDictSize + 1024;
+    std::unique_ptr<uint8_t[]> img_work;
+
+    for (size_t i = 0; i < out.paragraphs.size(); ++i) {
+      auto& para = out.paragraphs[i];
+      if (para.type == ParagraphType::Text && para.text.inline_image.has_value()) {
+        const auto& img = *para.text.inline_image;
+        uint16_t check_w = img.attr_width;
+        uint16_t check_h = img.attr_height;
+        if (check_w == 0 && check_h == 0 && img.key < zip_.entry_count()) {
+          if (!img_work)
+            img_work = std::make_unique<uint8_t[]>(kImgWorkSize);
+          ImageSizeStream stream;
+          zip_.extract_streaming(
+              file, zip_.entry(img.key),
+              [](const uint8_t* d, size_t n, void* ud) -> bool {
+                return !static_cast<ImageSizeStream*>(ud)->feed(d, n);
+              },
+              &stream, img_work.get(), kImgWorkSize);
+          if (stream.ok()) {
+            check_w = stream.width();
+            check_h = stream.height();
+          }
+        }
+        if (check_w > content_w / 3 || check_h > 120) {
+          auto img_para = Paragraph::make_image(img.key, img.attr_width, img.attr_height);
+          para.text.inline_image.reset();
+          out.paragraphs.insert(out.paragraphs.begin() + static_cast<ptrdiff_t>(i), std::move(img_para));
+          ++i;  // skip past the newly inserted image
+        }
       }
     }
   }
@@ -1866,29 +1863,28 @@ EpubError Epub::parse_chapter_streaming(IZipFile& file, size_t index, ParagraphS
   int64_t io_us = esp_timer_get_time() - io_t0;
 #endif
 
-  // On ESP32 (MICROREADER_NO_IMAGES), images have no resolved dimensions so
-  // buffering for image resolution/promotion is unnecessary.  Stream paragraphs
-  // directly to the caller's sink to avoid accumulating the entire chapter's
-  // text in memory (~70-80KB for large chapters, more than we can spare).
-#ifdef MICROREADER_NO_IMAGES
-  BodyParser parser;
-  parser.set_sink(sink, sink_ctx);
+  // When images are disabled, stream paragraphs directly to the caller's sink
+  // to avoid buffering the entire chapter in memory.
+  if (!images_enabled) {
+    BodyParser parser;
+    parser.set_sink(sink, sink_ctx);
 
-  EpubError err = parse_xhtml_events(reader, nullptr, &stylesheet_, base_dir, zip_, parser);
-  if (err != EpubError::Ok)
-    return err;
+    EpubError err = parse_xhtml_events(reader, nullptr, &stylesheet_, base_dir, zip_, parser);
+    if (err != EpubError::Ok)
+      return err;
 
 #ifdef ESP_PLATFORM
-  int64_t fin_t0 = esp_timer_get_time();
+    int64_t fin_t0 = esp_timer_get_time();
 #endif
-  parser.finish();
+    parser.finish();
 #ifdef ESP_PLATFORM
-  int64_t fin_us = esp_timer_get_time() - fin_t0;
-  ESP_LOGD("perf", "  io=%ldms finish=%ldms", (long)(io_us / 1000), (long)(fin_us / 1000));
+    int64_t fin_us = esp_timer_get_time() - fin_t0;
+    ESP_LOGD("perf", "  io=%ldms finish=%ldms", (long)(io_us / 1000), (long)(fin_us / 1000));
 #endif
 
-  return EpubError::Ok;
-#else
+    return EpubError::Ok;
+  }
+
   // Buffer paragraphs locally so we can do image resolution + promotion
   // after the ZipEntryInput releases the file handle (can't seek during
   // streaming decompression).
@@ -1906,37 +1902,31 @@ EpubError Epub::parse_chapter_streaming(IZipFile& file, size_t index, ParagraphS
 
   parser.finish();
 
-  // ZipEntryInput is done — file handle is now free for seeking.
-
-  // Resolve image dimensions (same as parse_chapter).
-  for (auto& para : paragraphs) {
-    if (para.type == ParagraphType::Image && para.image.width == 0 && para.image.height == 0) {
-      if (para.image.key < zip_.entry_count()) {
-        std::vector<uint8_t> img_data;
-        if (zip_.extract(file, zip_.entry(para.image.key), img_data) == ZipError::Ok) {
-          read_image_size(img_data.data(), img_data.size(), para.image.width, para.image.height);
-        }
-      }
-    }
-    if (para.type == ParagraphType::Text && para.text.inline_image.has_value()) {
-      auto& img = *para.text.inline_image;
-      if (img.width == 0 && img.height == 0 && img.key < zip_.entry_count()) {
-        std::vector<uint8_t> img_data;
-        if (zip_.extract(file, zip_.entry(img.key), img_data) == ZipError::Ok) {
-          read_image_size(img_data.data(), img_data.size(), img.width, img.height);
-        }
-      }
-    }
-  }
-
-  // Promote large inline images to standalone paragraphs (same as parse_chapter).
+  // ZipEntryInput is done — file handle is now free, work_ptr is available for reuse.
+  // Promote inline float images to standalone Image paragraphs when they are large.
+  // Use attr_width/attr_height (HTML values) for the threshold when available.
+  // When both are 0 (no HTML attrs), read actual image dimensions into locals
+  // purely for the threshold decision — never stored back into attr_.
   const uint16_t content_w = stylesheet_.config().content_width;
   for (size_t i = 0; i < paragraphs.size(); ++i) {
     auto& para = paragraphs[i];
     if (para.type == ParagraphType::Text && para.text.inline_image.has_value()) {
       const auto& img = *para.text.inline_image;
-      if (img.width > content_w / 3 || img.height > 120) {
-        auto img_para = Paragraph::make_image(img.key, img.width, img.height);
+      uint16_t check_w = img.attr_width;
+      uint16_t check_h = img.attr_height;
+      if (check_w == 0 && check_h == 0 && img.key < zip_.entry_count()) {
+        ImageSizeStream stream;
+        zip_.extract_streaming(
+            file, zip_.entry(img.key),
+            [](const uint8_t* d, size_t n, void* ud) -> bool { return !static_cast<ImageSizeStream*>(ud)->feed(d, n); },
+            &stream, work_ptr, kWorkBufSize);
+        if (stream.ok()) {
+          check_w = stream.width();
+          check_h = stream.height();
+        }
+      }
+      if (check_w > content_w / 3 || check_h > 120) {
+        auto img_para = Paragraph::make_image(img.key, img.attr_width, img.attr_height);
         para.text.inline_image.reset();
         paragraphs.insert(paragraphs.begin() + static_cast<ptrdiff_t>(i), std::move(img_para));
         ++i;
@@ -1950,7 +1940,6 @@ EpubError Epub::parse_chapter_streaming(IZipFile& file, size_t index, ParagraphS
   }
 
   return EpubError::Ok;
-#endif
 }
 
 }  // namespace microreader

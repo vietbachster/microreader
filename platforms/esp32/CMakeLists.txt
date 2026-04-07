@@ -33,5 +33,4 @@ idf_component_register(
     INCLUDE_DIRS "." "${CMAKE_CURRENT_LIST_DIR}/../../lib" "${MINIZ_DIR}"
     REQUIRES fatfs driver)
 
-# Skip image decoding on ESP32 (saves RAM – no stb_image)
-target_compile_definitions(${COMPONENT_LIB} PRIVATE MICROREADER_NO_IMAGES)
+

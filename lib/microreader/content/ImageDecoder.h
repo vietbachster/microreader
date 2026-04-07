@@ -54,11 +54,66 @@ ImageFormat guess_format_from_magic(const uint8_t* data, size_t size);
 // Works for JPEG (scans for SOF marker) and PNG (reads IHDR).
 ImageError read_image_size(const uint8_t* data, size_t size, uint16_t& width, uint16_t& height);
 
+// Streaming image size parser — ~32 bytes of state, no heap allocation.
+// Feed decompressed data chunks until feed() returns true, then check ok().
+// Handles JPEG (scans past APPn/EXIF/ICC segments to SOF) and PNG (reads IHDR).
+// PNG needs 24 bytes; JPEG SOF varies (typically 1-25KB with EXIF/ICC profiles).
+struct ImageSizeStream {
+  ImageSizeStream() = default;
+
+  // Feed a data chunk. Returns true when done (success OR unsupported format).
+  // After true: call ok() to check success, width()/height() for dimensions.
+  bool feed(const uint8_t* data, size_t size);
+
+  bool ok() const {
+    return state_ == State::Done;
+  }
+  uint16_t width() const {
+    return w_;
+  }
+  uint16_t height() const {
+    return h_;
+  }
+
+ private:
+  enum class State : uint8_t {
+    Detect,    // inspect first 2 bytes to determine format
+    PngSkip,   // skip bytes 2–15 (sig tail + IHDR length + "IHDR" tag)
+    PngSize,   // read 8 bytes: width[4] height[4]
+    JpegScan,  // scan forward for 0xFF marker byte
+    JpegMark,  // read marker byte following 0xFF
+    JpegLen1,  // read segment length high byte
+    JpegLen2,  // read segment length low byte
+    JpegSkip,  // skip segment payload bytes
+    JpegSof,   // accumulate 7 SOF payload bytes (len16 + prec8 + height16 + width16)
+    Done,
+    Error,
+  };
+
+  State state_ = State::Detect;
+  uint8_t detect_n_ = 0;
+  uint8_t detect_[2] = {};
+  uint8_t skip_left_ = 0;  // PNG: bytes remaining in PngSkip
+  uint8_t size_[8] = {};   // PNG: accumulates width+height bytes
+  uint8_t size_n_ = 0;
+  uint32_t seg_left_ = 0;  // JPEG: bytes remaining to skip in current segment
+  uint8_t sof_[7] = {};    // JPEG: SOF payload buffer
+  uint8_t sof_n_ = 0;
+  uint16_t w_ = 0, h_ = 0;
+};
+
 // Compute aspect-ratio-preserving scaled dimensions.
 // Returns dimensions that fit within max_w × max_h.
 void scaled_size(uint16_t raw_w, uint16_t raw_h, uint16_t max_w, uint16_t max_h, uint16_t& out_w, uint16_t& out_h);
 
-#ifndef MICROREADER_NO_IMAGES
+// Read image dimensions from raw data without full decoding.
+// Uses ImageSizeStream internally. Returns true if successful.
+bool get_image_size(const uint8_t* data, size_t size, uint16_t& out_w, uint16_t& out_h);
+
+// Runtime toggle: when false, image dimension resolution and decoding are skipped.
+// Can be set from UI settings. Defaults to true.
+extern bool images_enabled;
+
 // Decode an image to 1-bit dithered bitmap.
 // Input: raw image data (JPEG or PNG).
 // Output: DecodedImage with packed 1-bit pixels.
@@ -69,6 +124,5 @@ ImageError decode_image(const uint8_t* data, size_t size, uint16_t max_w, uint16
 // grayscale: width*height bytes, 0=black, 255=white.
 // out: pre-allocated packed bitmap, (width+7)/8 * height bytes.
 void floyd_steinberg_dither(const uint8_t* grayscale, int width, int height, uint8_t* out);
-#endif
 
 }  // namespace microreader

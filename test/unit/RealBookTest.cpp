@@ -17,10 +17,12 @@
   } while (0)
 
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <string>
 #include <vector>
 
+#include "TestBooks.h"
 #include "microreader/content/Book.h"
 #include "microreader/content/ContentModel.h"
 #include "microreader/content/EpubParser.h"
@@ -519,4 +521,120 @@ TEST_F(RealBookTest, StressTest_AllBooks) {
   printf("  ===========================\n");
 
   EXPECT_GT(books_tested, 0u) << "No real books found for testing";
+}
+
+// ===========================================================================
+// Image format + size validation — alice-illustrated (many illustrations)
+// ===========================================================================
+
+TEST_F(RealBookTest, AliceIllustrated_ImageSizes) {
+  OPEN_BOOK_OR_SKIP("microreader2/test/books/gutenberg/alice-illustrated.epub");
+
+  size_t images_found = 0;
+  size_t images_resolved = 0;
+  size_t images_unresolved = 0;
+  size_t mismatches = 0;
+
+  printf("  %-8s  %-6s  %s\n", "entry", "format", "dimensions");
+
+  for (size_t i = 0; i < book_.chapter_count(); ++i) {
+    Chapter ch;
+    if (book_.load_chapter(i, ch) != EpubError::Ok)
+      continue;
+
+    for (auto& p : ch.paragraphs) {
+      auto check_image = [&](const ImageRef& img) {
+        ++images_found;
+
+        // Read format + size directly from raw bytes.
+        std::vector<uint8_t> raw;
+        if (book_.extract_entry(img.key, raw) != ZipError::Ok || raw.empty())
+          return;
+
+        auto fmt = guess_format_from_magic(raw.data(), raw.size());
+        const char* fmt_str = (fmt == ImageFormat::Jpeg) ? "JPEG" : (fmt == ImageFormat::Png) ? "PNG" : "unknown";
+        uint16_t w = 0, h = 0;
+        auto sz_err = read_image_size(raw.data(), raw.size(), w, h);
+        if (sz_err != ImageError::Ok) {
+          printf("  entry %3u: %-6s  SIZE READ FAILED (error %d)\n", img.key, fmt_str, (int)sz_err);
+          ++images_unresolved;
+          return;
+        }
+
+        printf("  entry %3u: %-6s  %ux%u\n", img.key, fmt_str, w, h);
+        ++images_resolved;
+
+        // Cross-check: parse_chapter should have resolved the same dimensions.
+        if (img.attr_width > 0 && img.attr_height > 0) {
+          EXPECT_EQ(w, img.attr_width) << "Width mismatch for entry " << img.key;
+          EXPECT_EQ(h, img.attr_height) << "Height mismatch for entry " << img.key;
+          if (w != img.attr_width || h != img.attr_height)
+            ++mismatches;
+        }
+      };
+
+      if (p.type == ParagraphType::Image)
+        check_image(p.image);
+      if (p.type == ParagraphType::Text && p.text.inline_image.has_value())
+        check_image(*p.text.inline_image);
+    }
+  }
+
+  printf("\n  Images found: %zu  resolved: %zu  unresolved: %zu  mismatches: %zu\n", images_found, images_resolved,
+         images_unresolved, mismatches);
+
+  EXPECT_GT(images_found, 0u) << "alice-illustrated should have images";
+  EXPECT_EQ(images_unresolved, 0u) << "All images should have readable dimensions";
+  EXPECT_EQ(mismatches, 0u) << "Direct read_image_size must match chapter-pipeline result";
+}
+
+// ===========================================================================
+// Bulk image size resolution — all curated test books
+// ===========================================================================
+
+TEST_F(RealBookTest, BulkImageSizeResolution) {
+  auto books = test_books::get_curated_books();
+  if (books.empty())
+    GTEST_SKIP() << "No curated test books found";
+
+  printf("\n  %-44s  %6s  %6s  %6s\n", "Book", "images", "ok", "zero");
+  printf("  %s\n", std::string(66, '-').c_str());
+
+  size_t total_found = 0, total_ok = 0, total_zero = 0;
+
+  for (const auto& epub_path : books) {
+    auto stem = std::filesystem::path(epub_path).stem().string();
+    Book b;
+    if (b.open(epub_path.c_str()) != EpubError::Ok)
+      continue;
+
+    size_t found = 0, ok = 0, zero = 0;
+    for (size_t i = 0; i < b.chapter_count(); ++i) {
+      Chapter ch;
+      if (b.load_chapter(i, ch) != EpubError::Ok)
+        continue;
+      for (auto& p : ch.paragraphs) {
+        auto tally = [&](const ImageRef& img) {
+          ++found;
+          if (img.attr_width > 0 && img.attr_height > 0)
+            ++ok;
+          else
+            ++zero;
+        };
+        if (p.type == ParagraphType::Image)
+          tally(p.image);
+        if (p.type == ParagraphType::Text && p.text.inline_image.has_value())
+          tally(*p.text.inline_image);
+      }
+    }
+
+    if (found > 0)
+      printf("  %-44s  %6zu  %6zu  %6zu\n", stem.c_str(), found, ok, zero);
+    total_found += found;
+    total_ok += ok;
+    total_zero += zero;
+  }
+
+  printf("  %s\n", std::string(66, '-').c_str());
+  printf("  %-44s  %6zu  %6zu  %6zu\n", "TOTAL", total_found, total_ok, total_zero);
 }

@@ -18,6 +18,38 @@
 
 namespace microreader {
 
+// ---------------------------------------------------------------------------
+// ReaderScreen — image size resolution
+// ---------------------------------------------------------------------------
+
+bool ReaderScreen::resolve_image_size_(uint16_t key, uint16_t& w, uint16_t& h) {
+  if (key >= static_cast<uint16_t>(img_cache_.size()))
+    return false;
+  auto& [cw, ch] = img_cache_[key];
+  if (cw != 0 || ch != 0) {
+    w = cw;
+    h = ch;
+    return true;
+  }
+  // book_ may be closed (freed after conversion, or never opened on the MRB-already-exists path).
+  // Reopen it lazily for image size lookups.
+  if (!book_.is_open()) {
+    if (book_.open(path_) != EpubError::Ok)
+      return false;
+  }
+  uint16_t ze = mrb_.image_ref(key).zip_entry_index;
+  HEAP_LOG("img_size_before");
+  bool ok = book_.read_image_size(ze, cw, ch);
+  HEAP_LOG("img_size_after");
+  if (!ok)
+    return false;
+  w = cw;
+  h = ch;
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+
 ReaderScreen::ReaderScreen(const char* epub_path) : path_(epub_path) {}
 
 void ReaderScreen::start(Canvas& /*canvas*/, DisplayQueue& queue) {
@@ -85,6 +117,7 @@ void ReaderScreen::start(Canvas& /*canvas*/, DisplayQueue& queue) {
   open_ok_ = true;
   chapter_idx_ = 0;
   page_pos_ = PagePosition{0, 0};
+  img_cache_.assign(mrb_.image_count(), {0, 0});
   load_chapter_(0);
 #ifdef ESP_PLATFORM
   ESP_LOGI("reader", "BOOK_OK: %s", path_);
@@ -141,6 +174,7 @@ show_error:
 
 void ReaderScreen::stop() {
   // Release all heavy resources so the next book can be opened.
+  img_cache_.clear();
   chapter_src_.reset();
   mrb_.close();
   book_.close();
@@ -191,7 +225,8 @@ void ReaderScreen::render_page_(DisplayQueue& queue) {
   FixedFont font(kGlyphW * kScale, kGlyphH * kScale + 4);
   PageOptions opts(static_cast<uint16_t>(W), static_cast<uint16_t>(H), kPadding, kParaSpacing, Alignment::Start);
   opts.padding_top = kPaddingTop;
-  page_ = layout_page(font, opts, *chapter_src_, page_pos_);
+  page_ = layout_page(font, opts, *chapter_src_, page_pos_,
+                      [this](uint16_t key, uint16_t& w, uint16_t& h) { return resolve_image_size_(key, w, h); });
 
   // Build a local copy of the text items for the paint lambda.
   // We need: for each word, its x, y_offset, text, len, and glyph advance.
@@ -316,7 +351,9 @@ bool ReaderScreen::prev_page_() {
                        Alignment::Start);
       opts.padding_top = kPaddingTop;
       auto para_count = static_cast<uint16_t>(chapter_src_->paragraph_count());
-      auto pc = layout_page_backward(font, opts, *chapter_src_, PagePosition{para_count, 0});
+      auto pc = layout_page_backward(
+          font, opts, *chapter_src_, PagePosition{para_count, 0},
+          [this](uint16_t key, uint16_t& w, uint16_t& h) { return resolve_image_size_(key, w, h); });
       page_pos_ = pc.start;
       return true;
     }
@@ -328,7 +365,9 @@ bool ReaderScreen::prev_page_() {
   PageOptions opts(static_cast<uint16_t>(screen_w_), static_cast<uint16_t>(screen_h_), kPadding, kParaSpacing,
                    Alignment::Start);
   opts.padding_top = kPaddingTop;
-  auto pc = layout_page_backward(font, opts, *chapter_src_, page_pos_);
+  auto pc = layout_page_backward(font, opts, *chapter_src_, page_pos_, [this](uint16_t key, uint16_t& w, uint16_t& h) {
+    return resolve_image_size_(key, w, h);
+  });
   page_pos_ = pc.start;
   return true;
 }

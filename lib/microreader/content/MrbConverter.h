@@ -21,6 +21,11 @@ bool convert_epub_to_mrb_streaming(Book& book, const char* output_path, uint8_t*
 // Measures conversion sub-stages individually via serial log output.
 void benchmark_epub_conversion(Book& book, const char* tmp_path, uint8_t* work_buf = nullptr,
                                uint8_t* xml_buf = nullptr);
+
+// Measures image size-read performance: for each image entry in the EPUB,
+// reads the raw bytes from the ZIP and calls read_image_size().
+// Emits a per-image table and summary over ESP_LOGI.
+void benchmark_image_size_read(Book& book, uint8_t* work_buf = nullptr);
 #endif
 
 }  // namespace microreader

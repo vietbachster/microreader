@@ -95,23 +95,32 @@ extern "C" void app_main(void) {
         epd.setCustomLUT(lut_buf);
     }
 
-    // Check for serial "open book" command.
-    const char* open_path = serial_open_take();
-    if (open_path) {
-      app.auto_open_book(open_path, queue);
-    }
-
-    // Check for serial benchmark command.
-    // Runs inline on main task, reusing display queue scratch buffers
-    // (same approach as ReaderScreen — no extra heap or task needed).
-    const char* bench_path = serial_bench_take();
-    if (bench_path) {
-      microreader::Book book;
-      book.open(bench_path);
-      uint8_t* work_buf = queue.scratch_buf1();
-      uint8_t* xml_buf = queue.scratch_buf2();
-      microreader::benchmark_epub_conversion(book, "/sdcard/bench_tmp.mrb", work_buf, xml_buf);
-      queue.reset_buffers();
+    // Dispatch serial path commands (open book, benchmarks).
+    {
+      const char* cmd_path = nullptr;
+      switch (serial_cmd_take(&cmd_path)) {
+        case SerialCmdType::Open:
+          app.auto_open_book(cmd_path, queue);
+          break;
+        case SerialCmdType::Bench: {
+          microreader::Book book;
+          book.open(cmd_path);
+          uint8_t* work_buf = queue.scratch_buf1();
+          uint8_t* xml_buf = queue.scratch_buf2();
+          microreader::benchmark_epub_conversion(book, "/sdcard/bench_tmp.mrb", work_buf, xml_buf);
+          queue.reset_buffers();
+          break;
+        }
+        case SerialCmdType::ImgBench: {
+          microreader::Book book;
+          book.open(cmd_path);
+          microreader::benchmark_image_size_read(book, queue.scratch_buf1());
+          queue.reset_buffers();
+          break;
+        }
+        default:
+          break;
+      }
     }
 
     microreader::run_loop_iteration(app, queue, input, runtime, logger);

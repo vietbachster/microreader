@@ -53,7 +53,7 @@ EPUB file (ZIP on SD card)
 | `ContentModel.h` | Core data structures: `Run` (styled text span), `TextParagraph` (runs + alignment/indent), `Paragraph` (Text/Image/Hr/PageBreak), `Chapter` (title + paragraphs), `SpineItem`, `TocEntry`, `EpubMetadata`. |
 | `TextLayout.h/.cpp` | `IFont` interface for font metrics; `FixedFont` for testing. `layout_paragraph()` → word-wrap runs into `LayoutLine`s. `layout_page()` → fill one page from chapter position → `PageContent` with positioned `PageTextItem`/`PageImageItem`/`PageHrItem`. |
 | `CssParser.h/.cpp` | Minimal CSS parser for EPUB stylesheets. `CssStylesheet` cascades by specificity. |
-| `ImageDecoder.h/.cpp` | JPEG/PNG detection and dimension reading. Skipped on ESP32 (`MICROREADER_NO_IMAGES`). |
+| `ImageDecoder.h/.cpp` | JPEG/PNG detection and dimension reading. `ImageSizeStream` is a streaming header parser (~44 bytes state) used for lazy image size resolution. `images_enabled` runtime flag (default `true`). |
 | `Book.h/.cpp` | High-level wrapper: owns `StdioZipFile` + `Epub`. Methods: `open(path)`, `load_chapter(index, Chapter&)`, `decode_image()`. |
 | `MrbWriter.h/.cpp` | Writes `.mrb` binary files. `BufferedFileWriter` batches into 4KB buffer. Paragraphs are doubly-linked (prev/next offsets). Uses **deferred paragraph writing**: each paragraph is serialized into `pending_para_` buffer, then flushed when the *next* paragraph arrives (so `next_offset` can be filled in without seeking). This eliminates all backward seeks in `end_chapter()`. |
 | `MrbConverter.cpp` | Orchestrates EPUB→MRB conversion: iterates spine chapters, streams paragraphs via `ParagraphSink` callback from `EpubParser` → `MrbWriter`. |
@@ -135,7 +135,6 @@ $env:USERPROFILE\.platformio\penv\Scripts\pio.exe device monitor --baud 115200
 - Upload baud: 921600, monitor baud: 115200
 - Main task stack: 16KB
 - ESP32 sources are **explicitly listed** in `platforms/esp32/CMakeLists.txt` (NOT auto-discovered by PIO LDF). When adding new `.cpp` files, you must add them to the source list.
-- Compile definition: `MICROREADER_NO_IMAGES` (no stb_image on ESP32)
 
 ### Tests
 ```bash

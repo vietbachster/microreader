@@ -311,8 +311,8 @@ struct PageItem {
 // Large images (>= half page width) scale up to full page width.
 // Small images scale down only if wider than content area.
 // All images are capped to page height and clamped to >= 1px.
-static void scale_image(const PageOptions& opts, uint16_t content_width,
-                        uint16_t& img_w, uint16_t& img_h, uint16_t& x_off) {
+static void scale_image(const PageOptions& opts, uint16_t content_width, uint16_t& img_w, uint16_t& img_h,
+                        uint16_t& x_off) {
   const uint16_t full_width = opts.width;
   const uint16_t full_height = opts.height;
 
@@ -363,10 +363,8 @@ static uint16_t compute_line_height(const IFont& font, const LayoutLine& line, u
 
 // Convert collected items (in forward order) to PageContent.
 // Computes y-offsets and paragraph spacing from paragraph transitions.
-static PageContent assemble_page(const PageOptions& opts, const IFont& font,
-                                 IParagraphSource& source,
-                                 std::vector<PageItem>& items,
-                                 PagePosition start, PagePosition end,
+static PageContent assemble_page(const PageOptions& opts, const IFont& font, IParagraphSource& source,
+                                 std::vector<PageItem>& items, PagePosition start, PagePosition end,
                                  bool at_chapter_end, bool center_sparse_text) {
   const uint16_t content_width = opts.width - 2 * opts.padding;
   const uint16_t default_y_advance = font.y_advance();
@@ -388,12 +386,10 @@ static PageContent assemble_page(const PageOptions& opts, const IFont& font,
 
     switch (item.kind) {
       case PageItem::TextLine:
-        page.text_items.push_back(
-            PageTextItem{item.para_idx, item.line_idx, std::move(item.layout_line), y});
+        page.text_items.push_back(PageTextItem{item.para_idx, item.line_idx, std::move(item.layout_line), y});
         break;
       case PageItem::Image:
-        page.image_items.push_back(
-            PageImageItem{item.para_idx, item.img_key, item.img_w, item.img_h, item.img_x, y});
+        page.image_items.push_back(PageImageItem{item.para_idx, item.img_key, item.img_w, item.img_h, item.img_x, y});
         break;
       case PageItem::Hr: {
         uint16_t hr_y = y + default_y_advance / 2;
@@ -413,8 +409,8 @@ static PageContent assemble_page(const PageOptions& opts, const IFont& font,
     page.vertical_offset = (opts.height - y) / 2;
   }
   // Center sparse text on single-page chapters
-  if (center_sparse_text && at_chapter_end && page.vertical_offset == 0 &&
-      !page.text_items.empty() && page.image_items.empty() && y <= page_height / 2) {
+  if (center_sparse_text && at_chapter_end && page.vertical_offset == 0 && !page.text_items.empty() &&
+      page.image_items.empty() && y <= page_height / 2) {
     page.vertical_offset = (page_height - y) / 2;
   }
 
@@ -425,7 +421,8 @@ static PageContent assemble_page(const PageOptions& opts, const IFont& font,
 // layout_page() — fill a page with paragraphs from a chapter
 // ---------------------------------------------------------------------------
 
-PageContent layout_page(const IFont& font, const PageOptions& opts, IParagraphSource& source, PagePosition start) {
+PageContent layout_page(const IFont& font, const PageOptions& opts, IParagraphSource& source, PagePosition start,
+                        const ImageSizeQuery& size_provider) {
   const uint16_t content_width = opts.width - 2 * opts.padding;
   const uint16_t default_y_advance = font.y_advance();
   const uint16_t page_height = opts.height - opts.effective_padding_top() - opts.padding;
@@ -473,9 +470,13 @@ PageContent layout_page(const IFont& font, const PageOptions& opts, IParagraphSo
         bool has_inline_img = false;
         if (skip == 0 && para.text.inline_image.has_value()) {
           const auto& img = *para.text.inline_image;
-          if (img.width > 0 && img.height > 0) {
-            inline_img_w = img.width;
-            inline_img_h = img.height;
+          if (img.attr_width > 0 && img.attr_height > 0) {
+            inline_img_w = img.attr_width;
+            inline_img_h = img.attr_height;
+          } else if (size_provider) {
+            size_provider(img.key, inline_img_w, inline_img_h);
+          }
+          if (inline_img_w > 0 && inline_img_h > 0) {
             has_inline_img = true;
             lo.first_line_extra_indent = inline_img_w + 4;
           }
@@ -515,8 +516,8 @@ PageContent layout_page(const IFont& font, const PageOptions& opts, IParagraphSo
           }
 
           y += above + line_h;
-          items.push_back(PageItem{PageItem::TextLine, static_cast<uint16_t>(pi),
-                                   static_cast<uint16_t>(li), std::move(lines[li]), line_h});
+          items.push_back(PageItem{PageItem::TextLine, static_cast<uint16_t>(pi), static_cast<uint16_t>(li),
+                                   std::move(lines[li]), line_h});
           has_content = true;
           has_text_or_image = true;
           placed_any_line = true;
@@ -532,8 +533,11 @@ PageContent layout_page(const IFont& font, const PageOptions& opts, IParagraphSo
       }
 
       case ParagraphType::Image: {
-        uint16_t img_w = para.image.width;
-        uint16_t img_h = para.image.height;
+        uint16_t img_w = para.image.attr_width;
+        uint16_t img_h = para.image.attr_height;
+
+        if ((img_w == 0 || img_h == 0) && size_provider)
+          size_provider(para.image.key, img_w, img_h);
 
         if (img_w == 0 || img_h == 0) {
           end_pos = {static_cast<uint16_t>(pi + 1), 0};
@@ -549,8 +553,8 @@ PageContent layout_page(const IFont& font, const PageOptions& opts, IParagraphSo
         }
 
         y += spacing + img_h;
-        items.push_back(PageItem{PageItem::Image, static_cast<uint16_t>(pi), 0, {}, img_h,
-                                 para.image.key, img_w, img_h, x_off});
+        items.push_back(
+            PageItem{PageItem::Image, static_cast<uint16_t>(pi), 0, {}, img_h, para.image.key, img_w, img_h, x_off});
         has_content = true;
         has_text_or_image = true;
         end_pos = {static_cast<uint16_t>(pi + 1), 0};
@@ -606,8 +610,7 @@ assemble: {
       if (ti.paragraph_index == pii.para_idx) {
         uint16_t baseline_y = ti.y_offset + font.baseline();
         uint16_t img_y = (baseline_y >= pii.height) ? (baseline_y - pii.height) : 0;
-        page.image_items.push_back(
-            PageImageItem{pii.para_idx, pii.key, pii.width, pii.height, opts.padding, img_y});
+        page.image_items.push_back(PageImageItem{pii.para_idx, pii.key, pii.width, pii.height, opts.padding, img_y});
         break;
       }
     }
@@ -626,8 +629,8 @@ assemble: {
 // Word-wrapping is identical because we call layout_paragraph() on each
 // text paragraph and then pick lines from the end.
 
-PageContent layout_page_backward(const IFont& font, const PageOptions& opts, IParagraphSource& source,
-                                 PagePosition end) {
+PageContent layout_page_backward(const IFont& font, const PageOptions& opts, IParagraphSource& source, PagePosition end,
+                                 const ImageSizeQuery& size_provider) {
   const uint16_t content_width = opts.width - 2 * opts.padding;
   const uint16_t default_y_advance = font.y_advance();
   const uint16_t page_height = opts.height - opts.effective_padding_top() - opts.padding;
@@ -709,19 +712,23 @@ PageContent layout_page_backward(const IFont& font, const PageOptions& opts, IPa
           }
 
           total_height += line_h + sp;
-          items.push_back(PageItem{PageItem::TextLine, static_cast<uint16_t>(pi),
-                                   static_cast<uint16_t>(li), std::move(lines[li]), line_h});
+          items.push_back(PageItem{PageItem::TextLine, static_cast<uint16_t>(pi), static_cast<uint16_t>(li),
+                                   std::move(lines[li]), line_h});
           first_item_of_para = false;
         }
         break;
       }
 
       case ParagraphType::Image: {
-        if (para.image.width == 0 || para.image.height == 0)
+        uint16_t img_w = para.image.attr_width;
+        uint16_t img_h = para.image.attr_height;
+
+        if ((img_w == 0 || img_h == 0) && size_provider)
+          size_provider(para.image.key, img_w, img_h);
+
+        if (img_w == 0 || img_h == 0)
           break;
 
-        uint16_t img_w = para.image.width;
-        uint16_t img_h = para.image.height;
         uint16_t x_off;
         scale_image(opts, content_width, img_w, img_h, x_off);
 
@@ -731,8 +738,8 @@ PageContent layout_page_backward(const IFont& font, const PageOptions& opts, IPa
         }
 
         total_height += img_h + inter_spacing;
-        items.push_back(PageItem{PageItem::Image, static_cast<uint16_t>(pi), 0, {}, img_h,
-                                 para.image.key, img_w, img_h, x_off});
+        items.push_back(
+            PageItem{PageItem::Image, static_cast<uint16_t>(pi), 0, {}, img_h, para.image.key, img_w, img_h, x_off});
         break;
       }
 

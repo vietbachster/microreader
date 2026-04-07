@@ -57,8 +57,8 @@ class MrbFormatTest : public ::testing::Test {
       EXPECT_EQ(a.text.inline_image.has_value(), b.text.inline_image.has_value()) << ctx;
       if (a.text.inline_image.has_value() && b.text.inline_image.has_value()) {
         EXPECT_EQ(a.text.inline_image->key, b.text.inline_image->key) << ctx;
-        EXPECT_EQ(a.text.inline_image->width, b.text.inline_image->width) << ctx;
-        EXPECT_EQ(a.text.inline_image->height, b.text.inline_image->height) << ctx;
+        EXPECT_EQ(a.text.inline_image->attr_width, b.text.inline_image->attr_width) << ctx;
+        EXPECT_EQ(a.text.inline_image->attr_height, b.text.inline_image->attr_height) << ctx;
       }
       ASSERT_EQ(a.text.runs.size(), b.text.runs.size()) << ctx;
       for (size_t i = 0; i < a.text.runs.size(); ++i) {
@@ -272,8 +272,8 @@ TEST_F(MrbFormatTest, RoundTrip_InlineImage) {
   ASSERT_TRUE(load_chapter_para(reader, 0, 0, out));
   ASSERT_TRUE(out.text.inline_image.has_value());
   EXPECT_EQ(out.text.inline_image->key, 5);
-  EXPECT_EQ(out.text.inline_image->width, 100);
-  EXPECT_EQ(out.text.inline_image->height, 80);
+  EXPECT_EQ(out.text.inline_image->attr_width, 100);
+  EXPECT_EQ(out.text.inline_image->attr_height, 80);
 }
 
 TEST_F(MrbFormatTest, RoundTrip_Metadata) {

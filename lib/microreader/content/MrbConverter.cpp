@@ -24,8 +24,9 @@ struct ImageMapping {
 
 uint16_t get_or_add_image(MrbWriter& writer, std::vector<ImageMapping>& image_map, uint16_t zip_key, uint16_t w,
                           uint16_t h) {
+  bool caller_has_size = (w != 0 || h != 0);
   for (const auto& m : image_map) {
-    if (m.zip_key == zip_key)
+    if (m.zip_key == zip_key && writer.image_size_known(m.mrb_idx) == caller_has_size)
       return m.mrb_idx;
   }
   uint16_t idx = writer.add_image_ref(zip_key, w, h);
@@ -35,11 +36,11 @@ uint16_t get_or_add_image(MrbWriter& writer, std::vector<ImageMapping>& image_ma
 
 void remap_paragraph_images(Paragraph& para, MrbWriter& writer, std::vector<ImageMapping>& image_map) {
   if (para.type == ParagraphType::Image) {
-    para.image.key = get_or_add_image(writer, image_map, para.image.key, para.image.width, para.image.height);
+    para.image.key = get_or_add_image(writer, image_map, para.image.key, para.image.attr_width, para.image.attr_height);
   }
   if (para.type == ParagraphType::Text && para.text.inline_image.has_value()) {
     auto& img = *para.text.inline_image;
-    img.key = get_or_add_image(writer, image_map, img.key, img.width, img.height);
+    img.key = get_or_add_image(writer, image_map, img.key, img.attr_width, img.attr_height);
   }
 }
 
@@ -269,6 +270,77 @@ void benchmark_epub_conversion(Book& book, const char* tmp_path, uint8_t* work_b
 
   ESP_LOGI(TAG, "=== BENCHMARK DONE: CONV=%ldms SEEK=%ldms DECOMP=%ldms BUILD=%ldms WRITE=%ldms ===", t_conv, t_seek,
            t_decomp, t_build, t_write);
+}
+
+// ---------------------------------------------------------------------------
+// benchmark_image_size_read
+// ---------------------------------------------------------------------------
+
+void benchmark_image_size_read(Book& book, uint8_t* work_buf) {
+  static constexpr const char* TAG = "img_bench";
+
+  IZipFile& file = book.file();
+  const ZipReader& zip = book.epub().zip();
+
+  ESP_LOGI(TAG, "=== IMAGE SIZE BENCHMARK START ===");
+  ESP_LOGI(TAG, "zip_entries=%u  free=%lu largest=%lu", (unsigned)zip.entry_count(),
+           (unsigned long)esp_get_free_heap_size(), (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+
+  // Work buffer for tinfl decompressor + LZ dictionary (~44 KB).
+  // Caller should pass queue.scratch_buf1() (48 KB) to avoid heap allocation.
+  static constexpr size_t kWorkBufSize = ZipEntryInput::kDecompSize + ZipEntryInput::kDictSize + 1024;
+  std::unique_ptr<uint8_t[]> local_work;
+  if (!work_buf) {
+    local_work = std::make_unique<uint8_t[]>(kWorkBufSize);
+    work_buf = local_work.get();
+    if (!work_buf) {
+      ESP_LOGE(TAG, "OOM: no work buffer");
+      return;
+    }
+  }
+
+  unsigned total = 0, ok = 0, fail = 0;
+  int64_t t_total = 0;
+
+  for (unsigned i = 0; i < zip.entry_count(); ++i) {
+    const ZipEntry& entry = zip.entry(i);
+
+    // Filter by file extension — skip XHTML/CSS/NCX without any I/O.
+    auto name = entry.name;
+    auto dot = name.rfind('.');
+    if (dot == std::string_view::npos)
+      continue;
+    auto ext = name.substr(dot + 1);
+    if (ext != "jpg" && ext != "jpeg" && ext != "png" && ext != "JPG" && ext != "JPEG" && ext != "PNG")
+      continue;
+
+    ++total;
+
+    // Stream-decompress only until we have the image dimensions, then stop.
+    // ImageSizeStream state is ~32 bytes; no heap allocation for image data.
+    // PNG needs 24 bytes; JPEG SOF is past all APP/EXIF/ICC segments (may be 20+ KB).
+    ImageSizeStream stream;
+    int64_t t0 = esp_timer_get_time();
+    zip.extract_streaming(
+        file, entry,
+        [](const uint8_t* d, size_t n, void* ud) -> bool { return !static_cast<ImageSizeStream*>(ud)->feed(d, n); },
+        &stream, work_buf, kWorkBufSize);
+    int64_t us = esp_timer_get_time() - t0;
+    t_total += us;
+
+    const char* fmt_str = (ext == "png" || ext == "PNG") ? "PNG " : "JPEG";
+    if (stream.ok()) {
+      ++ok;
+      ESP_LOGI(TAG, "  entry %3u %-4s  %5ux%-5u  %4ldus", i, fmt_str, stream.width(), stream.height(), (long)us);
+    } else {
+      ++fail;
+      ESP_LOGI(TAG, "  entry %3u %-4s  ERR (no SOF found)", i, fmt_str);
+    }
+  }
+
+  long avg_us = total > 0 ? (long)(t_total / total) : 0;
+  ESP_LOGI(TAG, "=== IMAGE SIZE BENCH DONE: images=%u ok=%u fail=%u total=%ldms avg=%ldus ===", total, ok, fail,
+           (long)(t_total / 1000), avg_us);
 }
 #endif
 

@@ -178,18 +178,15 @@ TEST(HtmlExport, RegressionTestEpub) {
 TEST(HtmlExport, AllOwnBooks) {
   fs::path workspace = fs::path(TEST_FIXTURES_DIR).parent_path().parent_path().parent_path();
 
-  // Own book directories (not gutenberg)
-  std::vector<std::string> own_dirs = {
-      "microreader2/test/books/other",
-      "microreader/resources/books",
-      "TrustyReader/sd",
-  };
+  // All book directories (own + gutenberg)
+  std::vector<std::string> book_dirs = {"microreader2/test/books/other", "microreader2/test/books/gutenberg"};
 
   HtmlExportOptions opts;  // all chapters, all pages
 
   int exported = 0, skipped = 0, failed = 0;
+  std::set<std::string> seen_filenames;  // deduplicate by output name
 
-  for (const auto& dir_rel : own_dirs) {
+  for (const auto& dir_rel : book_dirs) {
     fs::path dir = workspace / dir_rel;
     if (!fs::exists(dir))
       continue;
@@ -208,6 +205,12 @@ TEST(HtmlExport, AllOwnBooks) {
 
       std::string filename =
           sanitize(book.metadata().title.empty() ? entry.path().stem().string() : book.metadata().title) + ".html";
+
+      if (!seen_filenames.insert(filename).second) {
+        printf("  SKIP (duplicate): %s\n", entry.path().filename().string().c_str());
+        ++skipped;
+        continue;
+      }
 
       fs::path out_path = output_dir() / filename;
 

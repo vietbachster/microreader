@@ -167,13 +167,13 @@ void assert_paragraph_equal(const Paragraph& a, const Paragraph& b, const std::s
     EXPECT_EQ(a.text.inline_image.has_value(), b.text.inline_image.has_value()) << ctx << " inline_image presence";
     if (a.text.inline_image.has_value() && b.text.inline_image.has_value()) {
       EXPECT_EQ(a.text.inline_image->key, b.text.inline_image->key) << ctx << " inline_image key";
-      EXPECT_EQ(a.text.inline_image->width, b.text.inline_image->width) << ctx << " inline_image width";
-      EXPECT_EQ(a.text.inline_image->height, b.text.inline_image->height) << ctx << " inline_image height";
+      EXPECT_EQ(a.text.inline_image->attr_width, b.text.inline_image->attr_width) << ctx << " inline_image width";
+      EXPECT_EQ(a.text.inline_image->attr_height, b.text.inline_image->attr_height) << ctx << " inline_image height";
     }
   } else if (a.type == ParagraphType::Image) {
     EXPECT_EQ(a.image.key, b.image.key) << ctx << " image key";
-    EXPECT_EQ(a.image.width, b.image.width) << ctx << " image width";
-    EXPECT_EQ(a.image.height, b.image.height) << ctx << " image height";
+    EXPECT_EQ(a.image.attr_width, b.image.attr_width) << ctx << " image width";
+    EXPECT_EQ(a.image.attr_height, b.image.attr_height) << ctx << " image height";
   }
   // Hr and PageBreak have no additional data.
 

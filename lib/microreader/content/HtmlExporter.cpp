@@ -7,9 +7,42 @@
 #include <filesystem>
 #include <map>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
+#include "ImageDecoder.h"
+
 namespace microreader {
+
+// Resolves and caches image dimensions from an open Book.
+// Callable as a function: provider(key, w, h).
+struct BookImageSizeProvider {
+  explicit BookImageSizeProvider(Book& book) : book_(book) {}
+
+  bool operator()(uint16_t key, uint16_t& w, uint16_t& h) {
+    auto it = cache_.find(key);
+    if (it != cache_.end()) {
+      w = it->second.first;
+      h = it->second.second;
+      return w != 0 || h != 0;
+    }
+    std::vector<uint8_t> raw;
+    if (book_.extract_entry(key, raw) != ZipError::Ok) {
+      cache_[key] = {0, 0};
+      return false;
+    }
+    uint16_t rw = 0, rh = 0;
+    bool ok = get_image_size(raw.data(), raw.size(), rw, rh);
+    cache_[key] = {rw, rh};
+    w = rw;
+    h = rh;
+    return ok;
+  }
+
+ private:
+  Book& book_;
+  std::unordered_map<uint16_t, std::pair<uint16_t, uint16_t>> cache_;
+};
 
 // ---------------------------------------------------------------------------
 // HTML escaping
@@ -343,8 +376,9 @@ bool export_to_html(Book& book, const IFont& font, const HtmlExportOptions& opts
 
     write(f, "<div class=\"pages\">\n");
 
+    BookImageSizeProvider size_prov(book);
     while (true) {
-      auto page = layout_page(font, page_opts, ch, pos);
+      auto page = layout_page(font, page_opts, ch, pos, std::ref(size_prov));
       ++page_num;
       ++total_pages;
 

@@ -228,6 +228,13 @@ uint16_t MrbWriter::add_image_ref(uint16_t zip_entry_index, uint16_t width, uint
   return idx;
 }
 
+void MrbWriter::update_image_size(uint16_t idx, uint16_t width, uint16_t height) {
+  if (idx < images_.size()) {
+    images_[idx].width = width;
+    images_[idx].height = height;
+  }
+}
+
 bool MrbWriter::finish(const EpubMetadata& meta, const TableOfContents& toc) {
   if (!bw_.is_open())
     return false;
@@ -339,9 +346,9 @@ void MrbWriter::serialize_text(const TextParagraph& text, uint16_t spacing) {
   if (text.inline_image.has_value()) {
     mrb_write_u16(p, text.inline_image->key);
     p += 2;
-    mrb_write_u16(p, text.inline_image->width);
+    mrb_write_u16(p, text.inline_image->attr_width);
     p += 2;
-    mrb_write_u16(p, text.inline_image->height);
+    mrb_write_u16(p, text.inline_image->attr_height);
     p += 2;
   } else {
     mrb_write_u16(p, kMrbNoImage);

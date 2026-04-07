@@ -5,9 +5,7 @@
 
 #include "ContentModel.h"
 #include "EpubParser.h"
-#ifndef MICROREADER_NO_IMAGES
 #include "ImageDecoder.h"
-#endif
 #include "ZipReader.h"
 
 namespace microreader {
@@ -53,15 +51,19 @@ class Book {
   EpubError load_chapter_streaming(size_t index, ParagraphSink sink, void* sink_ctx, uint8_t* work_buf = nullptr,
                                    uint8_t* xml_buf = nullptr);
 
-#ifndef MICROREADER_NO_IMAGES
   // Extract and decode an image from the EPUB (by zip entry index).
   // Returns the 1-bit dithered bitmap. The caller owns the memory.
   // max_w/max_h: maximum output dimensions (0 = no limit).
+  // Returns UnsupportedFormat if images_enabled is false.
   ImageError decode_image(uint16_t entry_index, DecodedImage& out, uint16_t max_w = 0, uint16_t max_h = 0);
-#endif
 
   // Extract raw image data (for format detection, etc).
   ZipError extract_entry(uint16_t entry_index, std::vector<uint8_t>& out);
+
+  // Read only the image dimensions (width/height) without decoding.
+  // Uses the Book's already-open ZIP file — no new allocations beyond a ~33KB work buffer.
+  // Returns false if the entry is invalid or the format is unrecognised.
+  bool read_image_size(uint16_t entry_index, uint16_t& w, uint16_t& h);
 
   // Access the underlying EPUB for advanced queries.
   const Epub& epub() const {

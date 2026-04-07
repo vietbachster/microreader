@@ -7,8 +7,11 @@
 #define HEAP_LOG(tag)                                                                       \
   ESP_LOGI("mem", "%s: free=%lu largest=%lu", tag, (unsigned long)esp_get_free_heap_size(), \
            (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT))
+#define IMG_LOG(...) ESP_LOGI("book", __VA_ARGS__)
 #else
+#include <cstdio>
 #define HEAP_LOG(tag) ((void)0)
+#define IMG_LOG(...) printf("[book] " __VA_ARGS__), printf("\n")
 #endif
 
 namespace microreader {
@@ -40,8 +43,9 @@ EpubError Book::load_chapter_streaming(size_t index, ParagraphSink sink, void* s
   return epub_.parse_chapter_streaming(file_, index, sink, sink_ctx, work_buf, xml_buf);
 }
 
-#ifndef MICROREADER_NO_IMAGES
 ImageError Book::decode_image(uint16_t entry_index, DecodedImage& out, uint16_t max_w, uint16_t max_h) {
+  if (!images_enabled)
+    return ImageError::UnsupportedFormat;
   if (entry_index >= epub_.zip().entry_count())
     return ImageError::UnsupportedFormat;
 
@@ -53,13 +57,34 @@ ImageError Book::decode_image(uint16_t entry_index, DecodedImage& out, uint16_t 
 
   return microreader::decode_image(data.data(), data.size(), max_w, max_h, out);
 }
-#endif
 
 ZipError Book::extract_entry(uint16_t entry_index, std::vector<uint8_t>& out) {
   if (entry_index >= epub_.zip().entry_count())
     return ZipError::InvalidData;
   auto& entry = epub_.zip().entry(entry_index);
   return epub_.zip().extract(file_, entry, out);
+}
+
+bool Book::read_image_size(uint16_t entry_index, uint16_t& w, uint16_t& h) {
+  if (entry_index >= epub_.zip().entry_count()) {
+    IMG_LOG("read_image_size: entry %u out of range (count=%u)", entry_index, (unsigned)epub_.zip().entry_count());
+    return false;
+  }
+  static constexpr size_t kWorkSize = ZipEntryInput::kDecompSize + ZipEntryInput::kDictSize + 1024;
+  auto work_buf = std::make_unique<uint8_t[]>(kWorkSize);
+  ImageSizeStream stream;
+  epub_.zip().extract_streaming(
+      file_, epub_.zip().entry(entry_index),
+      [](const uint8_t* d, size_t n, void* ud) -> bool { return !static_cast<ImageSizeStream*>(ud)->feed(d, n); },
+      &stream, work_buf.get(), kWorkSize);
+  if (!stream.ok()) {
+    IMG_LOG("read_image_size: entry %u stream failed", entry_index);
+    return false;
+  }
+  w = stream.width();
+  h = stream.height();
+  IMG_LOG("read_image_size: entry %u -> %ux%u", entry_index, w, h);
+  return true;
 }
 
 }  // namespace microreader

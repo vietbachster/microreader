@@ -75,6 +75,15 @@ class MrbWriter {
   // Returns the image index to use in paragraph image refs.
   uint16_t add_image_ref(uint16_t zip_entry_index, uint16_t width, uint16_t height);
 
+  // Update the size of an existing image ref (used by MRB converter after
+  // lazy resolution).  No-op if idx is out of range.
+  void update_image_size(uint16_t idx, uint16_t width, uint16_t height);
+
+  // Returns true if the image ref at idx has non-zero dimensions.
+  bool image_size_known(uint16_t idx) const {
+    return idx < images_.size() && (images_[idx].width != 0 || images_[idx].height != 0);
+  }
+
   // Finalize: write index tables, metadata, TOC, and fix up header.
   bool finish(const EpubMetadata& meta, const TableOfContents& toc);
 

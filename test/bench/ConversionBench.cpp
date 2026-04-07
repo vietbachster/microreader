@@ -1,5 +1,6 @@
 #include <benchmark/benchmark.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <filesystem>
 #include <string>
@@ -7,7 +8,10 @@
 
 #include "../unit/TestBooks.h"
 #include "microreader/content/Book.h"
+#include "microreader/content/ContentModel.h"
+#include "microreader/content/ImageDecoder.h"
 #include "microreader/content/MrbConverter.h"
+#include "microreader/content/ZipReader.h"
 
 namespace fs = std::filesystem;
 using namespace microreader;
@@ -139,10 +143,73 @@ static void RegisterAllIndividualBenchmarks() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Image size reading benchmark: extract raw image bytes + read_image_size()
+// ---------------------------------------------------------------------------
+
+static void BM_ImageSizeRead(benchmark::State& state, const std::string& epub_path) {
+  Book book;
+  if (book.open(epub_path.c_str()) != EpubError::Ok) {
+    state.SkipWithError("Cannot open book");
+    return;
+  }
+
+  // Collect unique image entry keys across all chapters (outside the timed loop).
+  std::vector<uint16_t> image_keys;
+  for (size_t i = 0; i < book.chapter_count(); ++i) {
+    Chapter ch;
+    if (book.load_chapter(i, ch) != EpubError::Ok)
+      continue;
+    for (auto& p : ch.paragraphs) {
+      if (p.type == ParagraphType::Image)
+        image_keys.push_back(p.image.key);
+      if (p.type == ParagraphType::Text && p.text.inline_image.has_value())
+        image_keys.push_back(p.text.inline_image->key);
+    }
+  }
+  std::sort(image_keys.begin(), image_keys.end());
+  image_keys.erase(std::unique(image_keys.begin(), image_keys.end()), image_keys.end());
+
+  if (image_keys.empty()) {
+    state.SkipWithError("No images in book");
+    return;
+  }
+
+  for (auto _ : state) {
+    for (uint16_t key : image_keys) {
+      std::vector<uint8_t> raw;
+      if (book.extract_entry(key, raw) == ZipError::Ok && !raw.empty()) {
+        uint16_t w = 0, h = 0;
+        auto err = read_image_size(raw.data(), raw.size(), w, h);
+        benchmark::DoNotOptimize(err);
+        benchmark::DoNotOptimize(w);
+      }
+    }
+  }
+
+  state.counters["images"] = static_cast<double>(image_keys.size());
+  state.counters["images_per_sec"] =
+      benchmark::Counter(static_cast<double>(image_keys.size()), benchmark::Counter::kIsRate);
+}
+
 int main(int argc, char** argv) {
   RegisterBookBenchmarks();
   RegisterAllIndividualBenchmarks();
   benchmark::RegisterBenchmark("ConvertAllBooks", BM_ConvertAllBooks)->Unit(benchmark::kMillisecond)->Iterations(1);
+
+  // Image size reading benchmarks (books known to have images).
+  static const NamedBook kImageBooks[] = {
+      {"AliceIllustrated", "alice-illustrated"},
+      {"PridePrejudice",   "pride-prejudice"  },
+      {"MobyDick",         "moby-dick"        },
+  };
+  for (const auto& [label, needle] : kImageBooks) {
+    const std::string* path = find_book(needle);
+    if (path)
+      benchmark::RegisterBenchmark(std::string("ImageSizeRead/") + label, BM_ImageSizeRead, *path)
+          ->Unit(benchmark::kMillisecond)
+          ->Iterations(5);
+  }
 
   benchmark::Initialize(&argc, argv);
   benchmark::RunSpecifiedBenchmarks();

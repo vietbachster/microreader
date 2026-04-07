@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -224,26 +225,33 @@ struct PageOptions {
   }
 };
 
+// Optional callback for resolving image dimensions lazily at layout time.
+// Called when attr_width or attr_height is 0. Returns true if size was resolved.
+using ImageSizeQuery = std::function<bool(uint16_t key, uint16_t& w, uint16_t& h)>;
+
 // Layout one page worth of content starting at `start`.
 // The paragraph source provides paragraphs on demand.
-PageContent layout_page(const IFont& font, const PageOptions& opts, IParagraphSource& source, PagePosition start);
+// size_fn is called lazily when an image has attr_width/height == 0.
+PageContent layout_page(const IFont& font, const PageOptions& opts, IParagraphSource& source, PagePosition start,
+                        const ImageSizeQuery& size_fn = {});
 
 // Layout one page worth of content ending at `end` (exclusive).
 // Fills the page bottom-to-top. Used for backward navigation.
 // `end` is one-past-end: {paragraph_count, 0} means chapter end.
-PageContent layout_page_backward(const IFont& font, const PageOptions& opts, IParagraphSource& source,
-                                 PagePosition end);
+PageContent layout_page_backward(const IFont& font, const PageOptions& opts, IParagraphSource& source, PagePosition end,
+                                 const ImageSizeQuery& size_fn = {});
 
 // Convenience overload: pass a Chapter directly (wraps in ChapterParagraphSource).
-inline PageContent layout_page(const IFont& font, const PageOptions& opts, const Chapter& chapter, PagePosition start) {
+inline PageContent layout_page(const IFont& font, const PageOptions& opts, const Chapter& chapter, PagePosition start,
+                               const ImageSizeQuery& size_fn = {}) {
   ChapterParagraphSource src(chapter);
-  return layout_page(font, opts, src, start);
+  return layout_page(font, opts, src, start, size_fn);
 }
 
 inline PageContent layout_page_backward(const IFont& font, const PageOptions& opts, const Chapter& chapter,
-                                        PagePosition end) {
+                                        PagePosition end, const ImageSizeQuery& size_fn = {}) {
   ChapterParagraphSource src(chapter);
-  return layout_page_backward(font, opts, src, end);
+  return layout_page_backward(font, opts, src, end, size_fn);
 }
 
 }  // namespace microreader

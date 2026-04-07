@@ -10,6 +10,9 @@ Capture mode (non-interactive, saves output to file):
 Benchmark mode (non-interactive, sends bench command and saves output):
     python serial_cmd.py --bench ohler.epub [--capture bench.log] [--timeout 300]
 
+Image-size benchmark all books (non-interactive):
+    python serial_cmd.py --imgbench-all [--timeout 120]
+
 Interactive commands:
     btn <N>           Press button N (0=back, 1=select, 2=down/next, 3=up/prev, 4=up, 5=down, 6=power)
     back              Alias for btn 0
@@ -26,6 +29,8 @@ Interactive commands:
                       filter narrows to books whose filename contains the string.
     clear             Delete all .mrb files on the device
     upload <file>     Upload an EPUB file to the device
+    bench <book>      Run full EPUB conversion benchmark for a book
+    imgsize <book>    Run image format+size benchmark for a book
     help              Show this help
     quit / exit       Exit
 """
@@ -65,6 +70,12 @@ def send_open(ser: serial.Serial, path: str) -> str:
 def send_bench(ser: serial.Serial, path: str) -> str:
     path_bytes = path.encode("utf-8")
     ser.write(MAGIC + b"X" + struct.pack("<H", len(path_bytes)) + path_bytes)
+    return read_response(ser, timeout=10.0)
+
+
+def send_imgbench(ser: serial.Serial, path: str) -> str:
+    path_bytes = path.encode("utf-8")
+    ser.write(MAGIC + b"I" + struct.pack("<H", len(path_bytes)) + path_bytes)
     return read_response(ser, timeout=10.0)
 
 
@@ -382,6 +393,18 @@ def main():
         default=None,
         help="Non-interactive: send bench command for BOOK (filename or full path), stream output until done",
     )
+    parser.add_argument(
+        "--imgbench",
+        metavar="BOOK",
+        default=None,
+        help="Non-interactive: send image-size benchmark for BOOK, stream output until done",
+    )
+    parser.add_argument(
+        "--imgbench-all",
+        action="store_true",
+        default=False,
+        help="Non-interactive: run image-size benchmark on every .epub on the device",
+    )
     args = parser.parse_args()
 
     try:
@@ -435,6 +458,79 @@ def main():
             if out_f:
                 out_f.close()
                 print(f"Saved to {capture_file}")
+        ser.close()
+        return
+
+    if args.imgbench_all:
+        # --- Image-size benchmark for all books ---
+        books = send_list_books_raw(ser)
+        epubs = sorted(b for b in books if b.endswith(".epub"))
+        if not epubs:
+            print("No .epub files found on device.")
+            ser.close()
+            sys.exit(1)
+        print(f"Found {len(epubs)} epub(s): {', '.join(epubs)}\n")
+        for epub in epubs:
+            path = f"/sdcard/books/{epub}"
+            print(f"--- imgbench: {epub} ---")
+            drain(ser)
+            resp = send_imgbench(ser, path)
+            print(resp)
+            if not resp.startswith("OK") and not resp.endswith("OK"):
+                print(f"SKIP (no OK response)")
+                continue
+            done_marker = "IMAGE SIZE BENCH DONE"
+            t0 = time.time()
+            while time.time() - t0 < args.timeout:
+                line = ser.readline().decode("utf-8", errors="replace").rstrip("\r\n")
+                if not line:
+                    continue
+                print(line)
+                sys.stdout.flush()
+                if done_marker in line:
+                    break
+            else:
+                print("--- Timeout ---")
+            print()
+        ser.close()
+        return
+
+    if args.imgbench:
+        # --- Image-size benchmark mode ---
+        path = args.imgbench
+        if not path.startswith("/"):
+            path = f"/sdcard/books/{path}"
+        capture_file = args.capture
+        timeout = args.timeout
+        done_marker = "IMAGE SIZE BENCH DONE"
+        print(f"Sending imgbench for {path} (timeout={timeout}s)")
+        resp = send_imgbench(ser, path)
+        print(resp)
+        if not resp.startswith("OK") and not resp.endswith("OK"):
+            ser.close()
+            sys.exit(1)
+        out_f = open(capture_file, "w", encoding="utf-8") if capture_file else None
+        try:
+            t0 = time.time()
+            while time.time() - t0 < timeout:
+                line = ser.readline().decode("utf-8", errors="replace").rstrip("\r\n")
+                if not line:
+                    continue
+                print(line)
+                sys.stdout.flush()
+                if out_f:
+                    out_f.write(line + "\n")
+                    out_f.flush()
+                if done_marker in line:
+                    print("--- Done ---")
+                    break
+            else:
+                print("--- Timeout ---")
+        finally:
+            if out_f:
+                out_f.close()
+                if capture_file:
+                    print(f"Saved to {capture_file}")
         ser.close()
         return
 
@@ -558,6 +654,21 @@ def main():
                         "Benchmark running — watch serial output for BENCH1..BENCH5 results."
                     )
                     print("(Use --capture to save logs, or just watch the terminal.)")
+            elif verb == "imgsize":
+                if not arg:
+                    print("Usage: imgsize <path_or_filename>")
+                    continue
+                path = arg
+                if not path.startswith("/"):
+                    path = f"/sdcard/books/{path}"
+                print(f"Sending image-size benchmark request for {path} ...")
+                resp = send_imgbench(ser, path)
+                print(resp)
+                if resp.startswith("OK"):
+                    print(
+                        "Image-size benchmark running — watch serial output for results."
+                    )
+                    print("Done when: '=== IMAGE SIZE BENCH DONE' appears in the log.")
             else:
                 print(f"Unknown command: {verb!r}. Type 'help' for commands.")
     except KeyboardInterrupt:

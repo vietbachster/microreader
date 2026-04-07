@@ -6,9 +6,8 @@
 #include <cstring>
 #include <memory>
 
-#ifndef MICROREADER_NO_IMAGES
-// We use stb_image for JPEG/PNG decoding on desktop.
-// On embedded (ESP32), this would be replaced with a streaming decoder.
+#ifndef ESP_PLATFORM
+// stb_image for JPEG/PNG decoding.
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_JPEG
 #define STBI_ONLY_PNG
@@ -19,6 +18,8 @@
 #endif
 
 namespace microreader {
+
+bool images_enabled = true;
 
 // ---------------------------------------------------------------------------
 // Format detection
@@ -143,6 +144,141 @@ ImageError read_image_size(const uint8_t* data, size_t size, uint16_t& width, ui
 }
 
 // ---------------------------------------------------------------------------
+// ImageSizeStream — streaming header parser, no heap allocation
+// ---------------------------------------------------------------------------
+
+bool ImageSizeStream::feed(const uint8_t* data, size_t size) {
+  const uint8_t* end = data + size;
+  while (data < end) {
+    // Batch fast-path: skip large JPEG segments or PNG header tail without
+    // looping byte-by-byte.
+    if (state_ == State::JpegSkip && seg_left_ > 0) {
+      size_t avail = static_cast<size_t>(end - data);
+      if (static_cast<uint32_t>(avail) <= seg_left_) {
+        seg_left_ -= static_cast<uint32_t>(avail);
+        if (seg_left_ == 0)
+          state_ = State::JpegScan;
+        return false;
+      }
+      data += seg_left_;
+      seg_left_ = 0;
+      state_ = State::JpegScan;
+      continue;
+    }
+    if (state_ == State::PngSkip && skip_left_ > 0) {
+      size_t avail = static_cast<size_t>(end - data);
+      if (avail <= static_cast<size_t>(skip_left_)) {
+        skip_left_ -= static_cast<uint8_t>(avail);
+        if (skip_left_ == 0)
+          state_ = State::PngSize;
+        return false;
+      }
+      data += skip_left_;
+      skip_left_ = 0;
+      state_ = State::PngSize;
+      continue;
+    }
+
+    uint8_t b = *data++;
+    switch (state_) {
+      case State::Detect:
+        detect_[detect_n_++] = b;
+        if (detect_n_ < 2)
+          break;
+        if (detect_[0] == 0xFF && detect_[1] == 0xD8) {
+          state_ = State::JpegScan;
+        } else if (detect_[0] == 0x89 && detect_[1] == 0x50) {
+          // PNG: skip bytes 2–15 (6 bytes sig tail + 4 IHDR length + 4 "IHDR")
+          skip_left_ = 14;
+          state_ = State::PngSkip;
+        } else {
+          state_ = State::Error;
+          return true;
+        }
+        break;
+
+      case State::PngSize:
+        size_[size_n_++] = b;
+        if (size_n_ < 8)
+          break;
+        {
+          uint32_t pw = (uint32_t(size_[0]) << 24) | (uint32_t(size_[1]) << 16) | (uint32_t(size_[2]) << 8) | size_[3];
+          uint32_t ph = (uint32_t(size_[4]) << 24) | (uint32_t(size_[5]) << 16) | (uint32_t(size_[6]) << 8) | size_[7];
+          if (pw == 0 || ph == 0 || pw > 0xFFFF || ph > 0xFFFF) {
+            state_ = State::Error;
+            return true;
+          }
+          w_ = static_cast<uint16_t>(pw);
+          h_ = static_cast<uint16_t>(ph);
+          state_ = State::Done;
+          return true;
+        }
+
+      case State::JpegScan:
+        if (b == 0xFF)
+          state_ = State::JpegMark;
+        break;
+
+      case State::JpegMark:
+        if (b == 0xFF)
+          break;  // padding FFs
+        if (b == 0x00) {
+          state_ = State::JpegScan;
+          break;
+        }
+        // SOI/EOI/RST* — standalone markers, no length/payload
+        if (b == 0xD8 || b == 0xD9 || (b >= 0xD0 && b <= 0xD7)) {
+          state_ = State::JpegScan;
+          break;
+        }
+        // SOF markers: 0xC0–0xCF except DHT(0xC4) and DAC(0xCC)
+        if (b >= 0xC0 && b <= 0xCF && b != 0xC4 && b != 0xCC) {
+          sof_n_ = 0;
+          state_ = State::JpegSof;
+        } else {
+          state_ = State::JpegLen1;
+        }
+        break;
+
+      case State::JpegLen1:
+        seg_left_ = uint32_t(b) << 8;
+        state_ = State::JpegLen2;
+        break;
+
+      case State::JpegLen2:
+        seg_left_ |= b;
+        // Length field includes its own 2 bytes
+        if (seg_left_ >= 2)
+          seg_left_ -= 2;
+        state_ = (seg_left_ > 0) ? State::JpegSkip : State::JpegScan;
+        break;
+
+      case State::JpegSof:
+        // SOF payload layout: len_hi(1) len_lo(1) precision(1) height_hi(1) height_lo(1) width_hi(1) width_lo(1) ...
+        sof_[sof_n_++] = b;
+        if (sof_n_ < 7)
+          break;
+        h_ = (uint16_t(sof_[3]) << 8) | sof_[4];
+        w_ = (uint16_t(sof_[5]) << 8) | sof_[6];
+        if (w_ == 0 || h_ == 0) {
+          state_ = State::Error;
+          return true;
+        }
+        state_ = State::Done;
+        return true;
+
+      case State::Done:
+      case State::Error:
+        return true;
+
+      default:
+        break;
+    }
+  }
+  return state_ == State::Done || state_ == State::Error;
+}
+
+// ---------------------------------------------------------------------------
 // Scaling
 // ---------------------------------------------------------------------------
 
@@ -176,7 +312,18 @@ void scaled_size(uint16_t raw_w, uint16_t raw_h, uint16_t max_w, uint16_t max_h,
     out_h = 1;
 }
 
-#ifndef MICROREADER_NO_IMAGES
+bool get_image_size(const uint8_t* data, size_t size, uint16_t& out_w, uint16_t& out_h) {
+  ImageSizeStream stream;
+  stream.feed(data, size);
+  if (stream.ok()) {
+    out_w = stream.width();
+    out_h = stream.height();
+    return true;
+  }
+  return false;
+}
+
+#ifndef ESP_PLATFORM
 // ---------------------------------------------------------------------------
 // Floyd-Steinberg dithering
 // ---------------------------------------------------------------------------
@@ -280,6 +427,19 @@ ImageError decode_image(const uint8_t* data, size_t size, uint16_t max_w, uint16
   return ImageError::Ok;
 }
 
-#endif  // MICROREADER_NO_IMAGES
+#else  // ESP_PLATFORM
+// ---------------------------------------------------------------------------
+// ESP32 image decoding stub
+// TODO: Replace with a real streaming JPEG/PNG decoder for ESP32.
+// ---------------------------------------------------------------------------
+
+void floyd_steinberg_dither(const uint8_t* /*grayscale*/, int /*width*/, int /*height*/, uint8_t* /*out*/) {}
+
+ImageError decode_image(const uint8_t* /*data*/, size_t /*size*/, uint16_t /*max_w*/, uint16_t /*max_h*/,
+                        DecodedImage& /*out*/) {
+  return ImageError::UnsupportedFormat;
+}
+
+#endif  // ESP_PLATFORM
 
 }  // namespace microreader

@@ -49,20 +49,19 @@ static constexpr uint8_t kCmdMagic[4] = {'C', 'M', 'N', 'D'};
 static constexpr uint32_t kMaxPayload = 256;
 static constexpr uint32_t kLutSize = 112;
 
-// Shared between the receiver task and the main loop.
+// LUT state: shared between receiver task and main loop.
 static uint8_t g_lut_buf[kLutSize];
 static volatile bool g_lut_pending = false;
 
-// Serial command: button injection (OR'd into next poll_buttons).
+// Button injection: OR'd into next poll_buttons before clearing.
 volatile uint8_t g_serial_buttons = 0;
 
-// Serial command: open a book by path (set by serial task, consumed by main loop).
-static char g_serial_open_path[256] = {};
-static volatile bool g_serial_open_pending = false;
-
-// Serial command: benchmark a book (set by serial task, consumed by main loop).
-static char g_serial_bench_path[256] = {};
-static volatile bool g_serial_bench_pending = false;
+// Single-slot command queue: only one path command can be pending at a time.
+// The serial receiver task writes path then sets type as the commit signal.
+// The main loop reads type, dispatches, then clears to None.
+enum class SerialCmdType : uint8_t { None = 0, Open, Bench, ImgBench };
+static char g_cmd_path[256];
+static volatile SerialCmdType g_cmd_type = SerialCmdType::None;
 
 // Call from the main loop. Returns true (and copies into `out`) when a fresh
 // LUT has been received since the last call.
@@ -74,20 +73,17 @@ inline bool serial_lut_take(uint8_t* out) {
   return true;
 }
 
-// Call from the main loop. Returns the path if a serial "open book" was requested.
-inline const char* serial_open_take() {
-  if (!g_serial_open_pending)
-    return nullptr;
-  g_serial_open_pending = false;
-  return g_serial_open_path;
-}
-
-// Call from the main loop. Returns the path if a serial benchmark was requested.
-inline const char* serial_bench_take() {
-  if (!g_serial_bench_pending)
-    return nullptr;
-  g_serial_bench_pending = false;
-  return g_serial_bench_path;
+// Call from the main loop. Returns the command type and sets *path_out to the
+// path string. Returns None (and leaves *path_out unchanged) if nothing pending.
+// Clears the pending state before returning.
+inline SerialCmdType serial_cmd_take(const char** path_out) {
+  SerialCmdType t = g_cmd_type;
+  if (t == SerialCmdType::None)
+    return SerialCmdType::None;
+  if (path_out)
+    *path_out = g_cmd_path;
+  g_cmd_type = SerialCmdType::None;
+  return t;
 }
 
 // Read exactly `n` bytes with a timeout. Returns true on success.
@@ -253,6 +249,28 @@ static void handle_epub_upload() {
 // ---------------------------------------------------------------------------
 static constexpr const char* kCmdTag = "cmd";
 
+// Read a 2-byte LE path length followed by the path bytes into g_cmd_path.
+// Sends an ERR: response and returns false on any failure.
+static bool read_cmd_path(const char* log_label) {
+  uint8_t len_buf[2];
+  if (!serial_read_exact(len_buf, 2, 1000)) {
+    serial_write("ERR:path_len\n");
+    return false;
+  }
+  uint16_t path_len = len_buf[0] | (len_buf[1] << 8);
+  if (path_len == 0 || path_len >= sizeof(g_cmd_path)) {
+    serial_write("ERR:path_too_long\n");
+    return false;
+  }
+  if (!serial_read_exact((uint8_t*)g_cmd_path, path_len, 2000)) {
+    serial_write("ERR:path_read\n");
+    return false;
+  }
+  g_cmd_path[path_len] = '\0';
+  ESP_LOGI(kCmdTag, "%s: %s", log_label, g_cmd_path);
+  return true;
+}
+
 static void handle_serial_cmd() {
   uint8_t sub;
   if (!serial_read_exact(&sub, 1, 1000)) {
@@ -273,23 +291,9 @@ static void handle_serial_cmd() {
       break;
     }
     case 'O': {
-      uint8_t len_buf[2];
-      if (!serial_read_exact(len_buf, 2, 1000)) {
-        serial_write("ERR:open_len\n");
+      if (!read_cmd_path("open"))
         return;
-      }
-      uint16_t path_len = len_buf[0] | (len_buf[1] << 8);
-      if (path_len == 0 || path_len >= sizeof(g_serial_open_path)) {
-        serial_write("ERR:open_path_len\n");
-        return;
-      }
-      if (!serial_read_exact((uint8_t*)g_serial_open_path, path_len, 2000)) {
-        serial_write("ERR:open_path_read\n");
-        return;
-      }
-      g_serial_open_path[path_len] = '\0';
-      g_serial_open_pending = true;
-      ESP_LOGI(kCmdTag, "open book: %s", g_serial_open_path);
+      g_cmd_type = SerialCmdType::Open;
       serial_write("OK\n");
       break;
     }
@@ -346,24 +350,16 @@ static void handle_serial_cmd() {
       break;
     }
     case 'X': {
-      // Benchmark: read path length + path, then trigger benchmark in main loop.
-      uint8_t len_buf[2];
-      if (!serial_read_exact(len_buf, 2, 1000)) {
-        serial_write("ERR:bench_len\n");
+      if (!read_cmd_path("bench"))
         return;
-      }
-      uint16_t path_len = len_buf[0] | (len_buf[1] << 8);
-      if (path_len == 0 || path_len >= sizeof(g_serial_bench_path)) {
-        serial_write("ERR:bench_path_len\n");
+      g_cmd_type = SerialCmdType::Bench;
+      serial_write("OK\n");
+      break;
+    }
+    case 'I': {
+      if (!read_cmd_path("imgbench"))
         return;
-      }
-      if (!serial_read_exact((uint8_t*)g_serial_bench_path, path_len, 2000)) {
-        serial_write("ERR:bench_path_read\n");
-        return;
-      }
-      g_serial_bench_path[path_len] = '\0';
-      g_serial_bench_pending = true;
-      ESP_LOGI(kCmdTag, "bench book: %s", g_serial_bench_path);
+      g_cmd_type = SerialCmdType::ImgBench;
       serial_write("OK\n");
       break;
     }
@@ -436,5 +432,5 @@ inline void serial_start() {
   usb_serial_jtag_driver_install(&cfg);
   esp_vfs_dev_usb_serial_jtag_register();
 
-  xTaskCreate(serial_receiver_task, "serial_rx", 4096, nullptr, 3, nullptr);
+  xTaskCreate(serial_receiver_task, "serial_rx", 8192, nullptr, 3, nullptr);
 }
