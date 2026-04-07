@@ -197,7 +197,6 @@ class EInkDisplay : public microreader::IDisplay {
       setRamArea(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
       writeRamBuffer(CMD_WRITE_RAM_RED, ground_truth, BUFFER_SIZE);
     }
-    ESP_LOGI("epd", "tick: upload=%lums", millis() - t0);
 
     if (pingPongMode) {
       pingPongMode = false;

@@ -12,12 +12,9 @@
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_timer.h"
-#define HEAP_LOG(tag)                                                                       \
-  ESP_LOGI("mem", "%s: free=%lu largest=%lu", tag, (unsigned long)esp_get_free_heap_size(), \
-           (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT))
-#else
-#define HEAP_LOG(tag) ((void)0)
 #endif
+
+#include "../HeapLog.h"
 
 namespace microreader {
 
@@ -231,7 +228,6 @@ EpubError Epub::parse_opf(IZipFile& file, const std::string& opf_path) {
   // Allocated in a unique_ptr so we can free it between phases.
   static constexpr size_t kWorkBufSize = ZipEntryInput::kDecompSize + ZipEntryInput::kDictSize + 1024;
   static constexpr size_t kXmlBufSize = 4096;
-  HEAP_LOG("parse_opf: before alloc work_buf");
   auto mem = std::make_unique<uint8_t[]>(kWorkBufSize + kXmlBufSize);
   uint8_t* work_buf = mem.get();
   uint8_t* xml_buf = mem.get() + kWorkBufSize;
@@ -385,7 +381,6 @@ EpubError Epub::parse_opf(IZipFile& file, const std::string& opf_path) {
   for (size_t ci = 0; ci < css_idxs.size(); ++ci) {
     auto& css_entry = zip_.entry(css_idxs[ci]);
     std::vector<uint8_t> css_data;
-    HEAP_LOG("parse_opf: before CSS extract");
     if (zip_.extract(file, css_entry, css_data, work_buf, kWorkBufSize) == ZipError::Ok) {
       stylesheet_.extend_from_sheet(reinterpret_cast<const char*>(css_data.data()), css_data.size());
     }
@@ -400,7 +395,6 @@ EpubError Epub::parse_opf(IZipFile& file, const std::string& opf_path) {
     HEAP_LOG("parse_opf: after NCX parse");
   }
 
-  HEAP_LOG("parse_opf: done");
   return EpubError::Ok;
 }
 
@@ -421,7 +415,6 @@ void Epub::close() {
 }
 
 EpubError Epub::open(IZipFile& file) {
-  HEAP_LOG("epub.open: start");
   close();  // release previous data
   if (zip_.open(file) != ZipError::Ok)
     return EpubError::ZipError;

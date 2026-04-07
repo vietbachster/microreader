@@ -23,7 +23,6 @@ tools/                    ← Python scripts (LUT editor, upload, etc.)
 | `IDisplay`     | `DesktopEmulatorDisplay`    | `EInkDisplay`             |
 | `IRuntime`     | `DesktopRuntime`            | `Esp32Runtime`            |
 | `IInputSource` | `DesktopInputSource`        | `Esp32InputSource` (ADC)  |
-| `ILogger`      | `DesktopLogger` (stdout)    | `Esp32Logger` (ESP_LOG)   |
 
 ## Key distinction: Desktop vs ESP32
 
@@ -114,6 +113,7 @@ Button3 = up / prev page
 - **Font** (`Font.h`): Static 8×8 bitmap font — `detail::kFont8x8[95][8]`, 95 printable ASCII glyphs (0x20–0x7E). Each glyph = 8 bytes, one byte per row, MSB = leftmost pixel. `draw_char()` / `draw_text()` helpers.
 - **Input**: `ButtonState` carries `current` + `pressed_latch`. Auto-repeat at hardware layer (5ms sample on ESP32). Screens use `is_pressed()`.
 - **Loop**: `run_loop()` polls input → app.update() → queue.tick() → wait_next_frame().
+- **Logging** (`HeapLog.h`): `MR_LOGI(tag, fmt, ...)` maps to `ESP_LOGI` on device and `printf("[tag] fmt\n")` on desktop. `HEAP_LOG(tag)` logs free heap + largest block (ESP32-only, no-op on desktop). No `ILogger` abstraction — use these macros directly.
 
 ## Build commands
 

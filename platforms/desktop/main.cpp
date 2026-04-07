@@ -3,7 +3,6 @@
 
 #include "display.h"
 #include "input.h"
-#include "logger.h"
 #include "microreader/Application.h"
 #include "microreader/Loop.h"
 #include "microreader/display/DisplayQueue.h"
@@ -11,7 +10,6 @@
 
 int main() {
   try {
-    DesktopLogger logger;
     DesktopRuntime runtime(16);
     DesktopInputSource input(runtime);
     DesktopEmulatorDisplay display(runtime);
@@ -25,8 +23,8 @@ int main() {
     std::filesystem::create_directories(books_path);
     app.set_books_dir(books_path.c_str());
 
-    app.start(logger, queue);
-    microreader::run_loop(app, queue, input, runtime, logger);
+    app.start(queue);
+    microreader::run_loop(app, queue, input, runtime);
   } catch (const std::exception& e) {
     std::cerr << "Fatal: " << e.what() << std::endl;
     return 1;

@@ -6,8 +6,8 @@
 #include "esp_sleep.h"
 #include "hal/usb_serial_jtag_ll.h"
 #include "input.h"
-#include "logger.h"
 #include "microreader/Application.h"
+#include "microreader/HeapLog.h"
 #include "microreader/Loop.h"
 #include "microreader/content/Book.h"
 #include "microreader/content/mrb/MrbConverter.h"
@@ -33,7 +33,6 @@ bool g_lut_target_settle = false;  // kept for MenuDemo extern
 extern "C" void app_main(void) {
   verify_ota();
 
-  static Esp32Logger logger;
   static Esp32InputSource input;
   static EInkDisplay epd;
   static Esp32Runtime runtime(50);
@@ -49,7 +48,7 @@ extern "C" void app_main(void) {
   ESP_LOGI("mem", "after static init (DisplayQueue+App etc): free=%lu largest=%lu",
            (unsigned long)esp_get_free_heap_size(), (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
 
-  logger.log(microreader::LogLevel::Info, "Booting up...");
+  MR_LOGI("app", "Booting up...");
 
   epd.begin();
 
@@ -58,7 +57,7 @@ extern "C" void app_main(void) {
 
   // Mount SD card (shares SPI bus with display).
   if (sd_init()) {
-    logger.log(microreader::LogLevel::Info, "SD card ready");
+    MR_LOGI("app", "SD card ready");
 
     ESP_LOGI("mem", "after sd_init: free=%lu largest=%lu", (unsigned long)esp_get_free_heap_size(),
              (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
@@ -69,7 +68,7 @@ extern "C" void app_main(void) {
     // Register the books directory for the selection screen.
     app.set_books_dir("/sdcard/books");
   } else {
-    logger.log(microreader::LogLevel::Warning, "SD card not available");
+    MR_LOGI("app", "SD card not available");
   }
 
   serial_start();
@@ -79,7 +78,7 @@ extern "C" void app_main(void) {
 
   static uint8_t lut_buf[kLutSize];
 
-  app.start(logger, queue);
+  app.start(queue);
 
   ESP_LOGI("mem", "after app.start: free=%lu largest=%lu", (unsigned long)esp_get_free_heap_size(),
            (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
@@ -123,10 +122,10 @@ extern "C" void app_main(void) {
       }
     }
 
-    microreader::run_loop_iteration(app, queue, input, runtime, logger);
+    microreader::run_loop_iteration(app, queue, input, runtime);
   }
 
-  logger.log(microreader::LogLevel::Info, "Shutting down, entering deep sleep...");
+  MR_LOGI("app", "Shutting down, entering deep sleep...");
 
   // Enter deep sleep; wake on power button press (active LOW, GPIO 3).
   constexpr gpio_num_t kPowerPin = GPIO_NUM_3;

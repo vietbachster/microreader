@@ -9,12 +9,9 @@
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_timer.h"
-#define HEAP_LOG(tag)                                                                       \
-  ESP_LOGI("mem", "%s: free=%lu largest=%lu", tag, (unsigned long)esp_get_free_heap_size(), \
-           (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT))
-#else
-#define HEAP_LOG(tag) ((void)0)
 #endif
+
+#include "../HeapLog.h"
 
 namespace microreader {
 
@@ -75,13 +72,11 @@ void ReaderScreen::start(Canvas& /*canvas*/, DisplayQueue& queue) {
     long open_ms = (long)((esp_timer_get_time() - open_start) / 1000);
     ESP_LOGI("perf", "Book::open: %ldms", open_ms);
 #endif
-    HEAP_LOG("after book_.open");
     if (err != EpubError::Ok || book_.chapter_count() == 0) {
       open_ok_ = false;
       goto show_error;
     }
 
-    HEAP_LOG("before streaming convert");
 #ifdef ESP_PLATFORM
     int64_t conv_start = esp_timer_get_time();
 #endif

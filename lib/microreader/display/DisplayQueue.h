@@ -2,11 +2,11 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <cstdio>
 #include <cstring>
 #include <type_traits>
 #include <vector>
 
+#include "../HeapLog.h"
 #include "Display.h"
 
 namespace microreader {
@@ -103,7 +103,6 @@ class DisplayQueue {
     commands_.push_back({px, py, pw, ph, next_ts_, 0});
     fill_rect_(target_, px, py, pw, ph, white);
     target_dirty_ = true;
-    std::printf("[DQ] submit rect (%d,%d %dx%d) white=%d ts=%u\n", px, py, pw, ph, white, (unsigned)next_ts_);
     return next_ts_++;
   }
 
@@ -151,7 +150,6 @@ class DisplayQueue {
 
     commands_.push_back({px, py, pw, ph, next_ts_, 0});
     target_dirty_ = true;
-    std::printf("[DQ] submit paint (%d,%d %dx%d) ts=%u\n", px, py, pw, ph, (unsigned)next_ts_);
     return next_ts_++;
   }
 
@@ -160,7 +158,7 @@ class DisplayQueue {
     if (needs_settle_ && commands_.empty()) {
       needs_settle_ = false;
       if (settle_enabled) {
-        std::printf("[DQ] tick -> settle_refresh\n");
+        MR_LOGI("DQ", "tick -> settle_refresh");
         display_.settle_refresh(target_);
       }
       if (!force)
@@ -191,18 +189,14 @@ class DisplayQueue {
     // since ground_truth now matches target (no visible pixel changes).
     if (commands_.empty()) {
       if (settle_enabled) {
-        std::printf("[DQ] tick -> queue idle, arming settle\n");
         needs_settle_ = true;
       }
-      std::printf("[DQ] tick -> display_.tick upload-only (finished=%d)\n", static_cast<int>(finished.size()));
       display_.tick(ground_truth_, ground_truth_dirty_, target_, target_dirty_, /*refresh=*/false);
       ground_truth_dirty_ = false;
       target_dirty_ = false;
       return;
     }
 
-    std::printf("[DQ] tick -> display_.tick (cmds=%d, finished=%d)\n", static_cast<int>(commands_.size()),
-                static_cast<int>(finished.size()));
     display_.tick(ground_truth_, ground_truth_dirty_, target_, target_dirty_);
     ground_truth_dirty_ = false;
     target_dirty_ = false;
@@ -218,7 +212,7 @@ class DisplayQueue {
   // Tick until all pending commands have finished.
   void flush() {
     if (!idle())
-      std::printf("[DQ] flush: draining %d commands\n", pending_count());
+      MR_LOGI("DQ", "flush: draining %d commands", pending_count());
     while (!idle())
       tick();
   }
@@ -229,7 +223,7 @@ class DisplayQueue {
   }
 
   void full_refresh(RefreshMode mode = RefreshMode::Half) {
-    std::printf("[DQ] full_refresh\n");
+    MR_LOGI("DQ", "full_refresh");
     commands_.clear();
     needs_settle_ = false;
     memcpy(ground_truth_, target_, DisplayFrame::kPixelBytes);
@@ -242,7 +236,7 @@ class DisplayQueue {
   // target_), then send ground_truth (old image) and target (new image) to the
   // display for a fast differential refresh.
   void partial_refresh() {
-    std::printf("[DQ] partial_refresh (pending=%d, settle_enabled=%d)\n", pending_count(), settle_enabled);
+    MR_LOGI("DQ", "partial_refresh (pending=%d, settle_enabled=%d)", pending_count(), settle_enabled);
     commands_.clear();
     needs_settle_ = settle_enabled;
     display_.partial_refresh(ground_truth_, target_);

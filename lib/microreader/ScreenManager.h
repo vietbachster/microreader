@@ -18,42 +18,26 @@ class ScreenManager {
   void push(IScreen* screen, Canvas& canvas, DisplayQueue& queue) {
     if (depth_ >= kMaxDepth)
       return;
-    std::printf("[SM] push '%s' (depth %d -> %d)\n", screen->name(), depth_, depth_ + 1);
+
     if (depth_ > 0) {
-      std::printf("[SM]   stopping '%s'\n", stack_[depth_ - 1]->name());
       stack_[depth_ - 1]->stop();
       canvas.clear();
-      std::printf("[SM]   flushing queue\n");
       queue.flush();
     }
     stack_[depth_++] = screen;
-    std::printf("[SM]   starting '%s'\n", screen->name());
     screen->start(canvas, queue);
-    // if (depth_ > 1) {
-    //   std::printf("[SM]   partial_refresh for transition\n");
-    //   queue.partial_refresh();
-    //   queue.cancel_settle();
-    // }
-    std::printf("[SM] push done\n");
   }
 
   // Pop the top screen. Stops it, then restarts the one below.
   void pop(Canvas& canvas, DisplayQueue& queue) {
     if (depth_ == 0)
       return;
-    std::printf("[SM] pop '%s' (depth %d -> %d)\n", stack_[depth_ - 1]->name(), depth_, depth_ - 1);
     stack_[--depth_]->stop();
     canvas.clear();
-    std::printf("[SM]   flushing queue\n");
     queue.flush();
     if (depth_ > 0) {
-      std::printf("[SM]   starting '%s'\n", stack_[depth_ - 1]->name());
       stack_[depth_ - 1]->start(canvas, queue);
-      // std::printf("[SM]   partial_refresh for transition\n");
-      // queue.partial_refresh();
-      // queue.cancel_settle();
     }
-    std::printf("[SM] pop done\n");
   }
 
   // Restart the top screen (stop + clear + start).

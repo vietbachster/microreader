@@ -3,7 +3,6 @@
 #include <cstdint>
 
 #include "Input.h"
-#include "Log.h"
 #include "Runtime.h"
 #include "ScreenManager.h"
 #include "display/Canvas.h"
@@ -23,10 +22,10 @@ class Application {
   void set_books_dir(const char* dir) {
     menu_.set_books_dir(dir);
   }
-  void start(ILogger& logger, DisplayQueue& queue);
+  void start(DisplayQueue& queue);
   // Auto-open a book by path (skips menu, for debugging).
   void auto_open_book(const char* epub_path, DisplayQueue& queue);
-  void update(const ButtonState& buttons, uint32_t dt_ms, DisplayQueue& queue, ILogger& logger, IRuntime& runtime);
+  void update(const ButtonState& buttons, uint32_t dt_ms, DisplayQueue& queue, IRuntime& runtime);
   bool running() const;
   uint64_t tick_count() const;
   uint32_t uptime_ms() const;

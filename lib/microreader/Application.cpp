@@ -4,6 +4,8 @@
 #include <cstdlib>
 #include <ctime>
 
+#include "HeapLog.h"
+
 #ifdef ESP_PLATFORM
 #include "esp_random.h"
 #endif
@@ -14,13 +16,13 @@ const char* Application::build_info() const {
   return "microreader";
 }
 
-void Application::start(ILogger& logger, DisplayQueue& queue) {
+void Application::start(DisplayQueue& queue) {
   ticks_ = 0;
   uptime_ms_ = 0;
   buttons_ = ButtonState{};
   started_ = true;
   running_ = true;
-  logger.log(LogLevel::Info, build_info());
+  MR_LOGI("app", "%s", build_info());
 #ifdef ESP_PLATFORM
   std::srand(esp_random());
 #else
@@ -36,10 +38,9 @@ void Application::auto_open_book(const char* epub_path, DisplayQueue& queue) {
   screen_mgr_.push(&auto_reader_, canvas_, queue);
 }
 
-void Application::update(const ButtonState& buttons, uint32_t dt_ms, DisplayQueue& queue, ILogger& logger,
-                         IRuntime& runtime) {
+void Application::update(const ButtonState& buttons, uint32_t dt_ms, DisplayQueue& queue, IRuntime& runtime) {
   if (!started_)
-    start(logger, queue);
+    start(queue);
   if (!running_)
     return;
 

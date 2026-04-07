@@ -1,23 +1,10 @@
 #include "Book.h"
 
-#ifdef ESP_PLATFORM
-#include "esp_heap_caps.h"
-#include "esp_log.h"
-#include "esp_system.h"
-#define HEAP_LOG(tag)                                                                       \
-  ESP_LOGI("mem", "%s: free=%lu largest=%lu", tag, (unsigned long)esp_get_free_heap_size(), \
-           (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT))
-#define IMG_LOG(...) ESP_LOGI("book", __VA_ARGS__)
-#else
-#include <cstdio>
-#define HEAP_LOG(tag) ((void)0)
-#define IMG_LOG(...) printf("[book] " __VA_ARGS__), printf("\n")
-#endif
+#include "../HeapLog.h"
 
 namespace microreader {
 
 EpubError Book::open(const char* path) {
-  HEAP_LOG("book.open: start");
   close();  // release previous resources
   if (!file_.open(path))
     return EpubError::ZipError;
@@ -67,7 +54,8 @@ ZipError Book::extract_entry(uint16_t entry_index, std::vector<uint8_t>& out) {
 
 bool Book::read_image_size(uint16_t entry_index, uint16_t& w, uint16_t& h) {
   if (entry_index >= epub_.zip().entry_count()) {
-    IMG_LOG("read_image_size: entry %u out of range (count=%u)", entry_index, (unsigned)epub_.zip().entry_count());
+    MR_LOGI("book", "read_image_size: entry %u out of range (count=%u)", entry_index,
+            (unsigned)epub_.zip().entry_count());
     return false;
   }
   static constexpr size_t kWorkSize = ZipEntryInput::kDecompSize + ZipEntryInput::kDictSize + 1024;
@@ -78,12 +66,12 @@ bool Book::read_image_size(uint16_t entry_index, uint16_t& w, uint16_t& h) {
       [](const uint8_t* d, size_t n, void* ud) -> bool { return !static_cast<ImageSizeStream*>(ud)->feed(d, n); },
       &stream, work_buf.get(), kWorkSize);
   if (!stream.ok()) {
-    IMG_LOG("read_image_size: entry %u stream failed", entry_index);
+    MR_LOGI("book", "read_image_size: entry %u stream failed", entry_index);
     return false;
   }
   w = stream.width();
   h = stream.height();
-  IMG_LOG("read_image_size: entry %u -> %ux%u", entry_index, w, h);
+  MR_LOGI("book", "read_image_size: entry %u -> %ux%u", entry_index, w, h);
   return true;
 }
 
