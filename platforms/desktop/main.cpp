@@ -5,8 +5,8 @@
 #include "input.h"
 #include "logger.h"
 #include "microreader/Application.h"
-#include "microreader/DisplayQueue.h"
 #include "microreader/Loop.h"
+#include "microreader/display/DisplayQueue.h"
 #include "runtime.h"
 
 int main() {

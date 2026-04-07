@@ -3,10 +3,10 @@
 #include <array>
 #include <cstdlib>
 
-#include "../Canvas.h"
-#include "../Display.h"
-#include "../DisplayQueue.h"
 #include "../Input.h"
+#include "../display/Canvas.h"
+#include "../display/Display.h"
+#include "../display/DisplayQueue.h"
 #include "IScreen.h"
 
 namespace microreader {

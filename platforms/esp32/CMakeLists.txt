@@ -7,21 +7,19 @@ set(LIB ${CMAKE_CURRENT_LIST_DIR}/../../lib/microreader)
 set(lib_sources
     ${LIB}/Application.cpp
     ${LIB}/Loop.cpp
-    ${LIB}/demos/BouncingBallDemo.cpp
-    ${LIB}/demos/MenuDemo.cpp
-    ${LIB}/demos/TextShowcaseDemo.cpp
-    ${LIB}/demos/PatternDemo.cpp
-    ${LIB}/demos/ReaderScreen.cpp
-    ${LIB}/demos/BookSelectScreen.cpp
+    ${LIB}/screens/BouncingBallDemo.cpp
+    ${LIB}/screens/MenuDemo.cpp
+    ${LIB}/screens/ReaderScreen.cpp
+    ${LIB}/screens/BookSelectScreen.cpp
     ${LIB}/content/ZipReader.cpp
     ${LIB}/content/XmlReader.cpp
     ${LIB}/content/CssParser.cpp
     ${LIB}/content/EpubParser.cpp
     ${LIB}/content/TextLayout.cpp
     ${LIB}/content/Book.cpp
-    ${LIB}/content/MrbWriter.cpp
-    ${LIB}/content/MrbReader.cpp
-    ${LIB}/content/MrbConverter.cpp
+    ${LIB}/content/mrb/MrbWriter.cpp
+    ${LIB}/content/mrb/MrbReader.cpp
+    ${LIB}/content/mrb/MrbConverter.cpp
     ${LIB}/content/ImageDecoder.cpp)
 
 # miniz: use the copy cached by the test build (FetchContent).

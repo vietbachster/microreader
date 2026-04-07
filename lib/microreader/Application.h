@@ -2,16 +2,16 @@
 
 #include <cstdint>
 
-#include "Canvas.h"
-#include "Display.h"
-#include "DisplayQueue.h"
 #include "Input.h"
 #include "Log.h"
 #include "Runtime.h"
 #include "ScreenManager.h"
-#include "demos/IScreen.h"
-#include "demos/MenuDemo.h"
-#include "demos/ReaderScreen.h"
+#include "display/Canvas.h"
+#include "display/Display.h"
+#include "display/DisplayQueue.h"
+#include "screens/IScreen.h"
+#include "screens/MenuDemo.h"
+#include "screens/ReaderScreen.h"
 
 namespace microreader {
 

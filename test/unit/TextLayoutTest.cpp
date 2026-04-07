@@ -2,8 +2,8 @@
 
 #include <algorithm>
 
-#include "microreader/Font.h"
 #include "microreader/content/TextLayout.h"
+#include "microreader/display/Font.h"
 
 using namespace microreader;
 

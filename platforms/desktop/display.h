@@ -4,7 +4,7 @@
 
 #include <vector>
 
-#include "microreader/Display.h"
+#include "microreader/display/Display.h"
 #include "runtime.h"
 
 // Simulates e-ink pixel physics for the desktop emulator.

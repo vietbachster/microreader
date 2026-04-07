@@ -43,9 +43,9 @@ add_library(microreader_content STATIC
     ${CONTENT_DIR}/Book.cpp
     ${CONTENT_DIR}/TextLayout.cpp
     ${CONTENT_DIR}/HtmlExporter.cpp
-    ${CONTENT_DIR}/MrbWriter.cpp
-    ${CONTENT_DIR}/MrbReader.cpp
-    ${CONTENT_DIR}/MrbConverter.cpp
+    ${CONTENT_DIR}/mrb/MrbWriter.cpp
+    ${CONTENT_DIR}/mrb/MrbReader.cpp
+    ${CONTENT_DIR}/mrb/MrbConverter.cpp
 )
 target_include_directories(microreader_content PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/../../lib
@@ -58,12 +58,10 @@ target_link_libraries(microreader_content PUBLIC miniz)
 add_library(microreader_core STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/microreader/Application.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/microreader/Loop.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/microreader/demos/BouncingBallDemo.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/microreader/demos/MenuDemo.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/microreader/demos/TextShowcaseDemo.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/microreader/demos/PatternDemo.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/microreader/demos/ReaderScreen.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/microreader/demos/BookSelectScreen.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/microreader/screens/BouncingBallDemo.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/microreader/screens/MenuDemo.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/microreader/screens/ReaderScreen.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/microreader/screens/BookSelectScreen.cpp
 )
 target_include_directories(microreader_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/../../lib

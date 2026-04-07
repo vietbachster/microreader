@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-#include "ContentModel.h"
+#include "../ContentModel.h"
 #include "MrbFormat.h"
 
 namespace microreader {

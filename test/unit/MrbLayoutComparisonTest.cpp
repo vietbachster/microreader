@@ -8,9 +8,9 @@
 
 #include "TestBooks.h"
 #include "microreader/content/Book.h"
-#include "microreader/content/MrbConverter.h"
-#include "microreader/content/MrbReader.h"
 #include "microreader/content/TextLayout.h"
+#include "microreader/content/mrb/MrbConverter.h"
+#include "microreader/content/mrb/MrbReader.h"
 
 namespace fs = std::filesystem;
 using namespace microreader;

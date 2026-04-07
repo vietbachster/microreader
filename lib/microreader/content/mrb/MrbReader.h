@@ -4,9 +4,9 @@
 #include <string>
 #include <vector>
 
-#include "ContentModel.h"
+#include "../ContentModel.h"
+#include "../TextLayout.h"
 #include "MrbFormat.h"
-#include "TextLayout.h"
 
 namespace microreader {
 

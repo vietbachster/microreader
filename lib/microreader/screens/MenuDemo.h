@@ -2,15 +2,13 @@
 
 #include <array>
 
-#include "../Canvas.h"
-#include "../Display.h"
-#include "../DisplayQueue.h"
 #include "../Input.h"
+#include "../display/Canvas.h"
+#include "../display/Display.h"
+#include "../display/DisplayQueue.h"
 #include "BookSelectScreen.h"
 #include "BouncingBallDemo.h"
 #include "IScreen.h"
-#include "PatternDemo.h"
-#include "TextShowcaseDemo.h"
 
 namespace microreader {
 
@@ -59,8 +57,6 @@ class MenuDemo final : public IScreen {
 
   // Demo screens owned by the menu.
   BouncingBallDemo bouncing_ball_;
-  TextShowcaseDemo text_showcase_;
-  PatternDemo pattern_;
   BookSelectScreen book_select_;
 
   // Full item list (screens + built-in actions), rebuilt in build_items_().

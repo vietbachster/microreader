@@ -1,9 +1,9 @@
 #pragma once
 
-#include "../Canvas.h"
-#include "../DisplayQueue.h"
 #include "../Input.h"
 #include "../Runtime.h"
+#include "../display/Canvas.h"
+#include "../display/DisplayQueue.h"
 
 namespace microreader {
 

@@ -1,10 +1,10 @@
 #pragma once
 
 #include "microreader/Application.h"
-#include "microreader/DisplayQueue.h"
 #include "microreader/Input.h"
 #include "microreader/Log.h"
 #include "microreader/Runtime.h"
+#include "microreader/display/DisplayQueue.h"
 
 namespace microreader {
 

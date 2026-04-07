@@ -9,7 +9,7 @@
 #include "freertos/FreeRTOS.h"
 #include "microreader/Input.h"
 
-// Defined in serial_lut.h — serial command button injection.
+// Defined in serial_communication.h — serial command button injection.
 extern volatile uint8_t g_serial_buttons;
 
 // ---- Button hardware configuration ----

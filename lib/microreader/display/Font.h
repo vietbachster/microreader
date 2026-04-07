@@ -8,7 +8,7 @@
 
 #include <cstdint>
 
-#include "microreader/Display.h"
+#include "Display.h"
 
 namespace microreader {
 namespace detail {

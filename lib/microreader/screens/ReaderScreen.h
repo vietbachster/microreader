@@ -2,14 +2,14 @@
 
 #include <memory>
 
-#include "../Canvas.h"
-#include "../DisplayQueue.h"
-#include "../Font.h"
 #include "../Input.h"
 #include "../content/Book.h"
-#include "../content/MrbConverter.h"
-#include "../content/MrbReader.h"
 #include "../content/TextLayout.h"
+#include "../content/mrb/MrbConverter.h"
+#include "../content/mrb/MrbReader.h"
+#include "../display/Canvas.h"
+#include "../display/DisplayQueue.h"
+#include "../display/Font.h"
 #include "IScreen.h"
 
 namespace microreader {

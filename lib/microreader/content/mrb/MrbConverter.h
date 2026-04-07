@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Book.h"
+#include "../Book.h"
 #include "MrbWriter.h"
 
 namespace microreader {

@@ -7,7 +7,9 @@ E-ink ebook reader targeting **ESP32-C3 + SSD1677 e-paper** (800×480 physical, 
 ```
 lib/microreader/          ← shared core (platform-agnostic C++17)
   content/                ← EPUB parsing & layout pipeline
-  demos/                  ← IScreen implementations (UI screens)
+    mrb/                  ← MRB binary format (MrbFormat, MrbReader, MrbWriter, MrbConverter)
+  display/                ← Canvas, DisplayQueue, Font, Display interface
+  screens/                ← IScreen implementations (UI screens)
 platforms/desktop/        ← SDL2 desktop emulator
 platforms/esp32/          ← real hardware (ESP-IDF + PlatformIO)
 test/                     ← Google Test suite (unit + integration)
@@ -47,7 +49,7 @@ EPUB file (ZIP on SD card)
 | File | Purpose |
 |------|---------|
 | `ZipReader.h/.cpp` | ZIP central directory reader. `ZipEntry` stores `std::string_view name` + offsets (no data); all names live in a single contiguous `name_blob_` vector inside `ZipReader` (two-pass: count total name bytes, then bulk-allocate). `ZipEntryInput` streams decompression with ~33KB constant memory (32KB LZ dict + 1KB input buffer). `extract()` decompresses fully into `std::vector<uint8_t>`. |
-| `MrbReader.h/.cpp` | Reads `.mrb` (pre-processed binary) files. Loads chapter table + image refs into RAM on `open()`, but the paragraph index is **not loaded into RAM** — each entry (8 bytes) is seeked on demand in `load_paragraph()`. This avoids allocating `paragraph_count * 8` bytes (e.g. ~136KB for War and Peace). `MrbChapterSource` wraps `MrbReader` as an `IParagraphSource` with lazy paragraph caching per chapter. |
+| `MrbReader.h/.cpp` | Reads `.mrb` (pre-processed binary) files. Loads chapter table + image refs into RAM on `open()`, but the paragraph index is **not loaded into RAM** — each entry (8 bytes) is seeked on demand in `load_paragraph()` to avoid ~136KB allocation for large books. `MrbChapterSource` wraps `MrbReader` as an `IParagraphSource` with lazy paragraph caching per chapter. |
 | `XmlReader.h/.cpp` | Streaming XML SAX parser with configurable buffer (typically 4–8KB). Emits `StartElement`, `EndElement`, `Text`, `CData` events. Pluggable `IXmlInput` for data source. |
 | `EpubParser.h/.cpp` | `Epub` class: `open()` streams OPF via `ZipEntryInput` → `XmlReader` (never loads full OPF into RAM). Builds compact manifest (FNV-1a hashes, ~6 bytes/entry). `parse_chapter()` extracts full XHTML into memory then parses to `Chapter`. Also resolves image dimensions by extracting image files. |
 | `ContentModel.h` | Core data structures: `Run` (styled text span), `TextParagraph` (runs + alignment/indent), `Paragraph` (Text/Image/Hr/PageBreak), `Chapter` (title + paragraphs), `SpineItem`, `TocEntry`, `EpubMetadata`. |
@@ -55,8 +57,10 @@ EPUB file (ZIP on SD card)
 | `CssParser.h/.cpp` | Minimal CSS parser for EPUB stylesheets. `CssStylesheet` cascades by specificity. |
 | `ImageDecoder.h/.cpp` | JPEG/PNG detection and dimension reading. `ImageSizeStream` is a streaming header parser (~44 bytes state) used for lazy image size resolution. `images_enabled` runtime flag (default `true`). |
 | `Book.h/.cpp` | High-level wrapper: owns `StdioZipFile` + `Epub`. Methods: `open(path)`, `load_chapter(index, Chapter&)`, `decode_image()`. |
+| `MrbFormat.h` | MRB binary format constants and on-disk structs: `MrbHeader` (32 bytes), `MrbChapterEntry` (16 bytes), paragraph record layout. Shared between `MrbReader` and `MrbWriter`. |
 | `MrbWriter.h/.cpp` | Writes `.mrb` binary files. `BufferedFileWriter` batches into 4KB buffer. Paragraphs are doubly-linked (prev/next offsets). Uses **deferred paragraph writing**: each paragraph is serialized into `pending_para_` buffer, then flushed when the *next* paragraph arrives (so `next_offset` can be filled in without seeking). This eliminates all backward seeks in `end_chapter()`. |
-| `MrbConverter.cpp` | Orchestrates EPUB→MRB conversion: iterates spine chapters, streams paragraphs via `ParagraphSink` callback from `EpubParser` → `MrbWriter`. |
+| `MrbConverter.h/.cpp` | Orchestrates EPUB→MRB conversion: iterates spine chapters, streams paragraphs via `ParagraphSink` callback from `EpubParser` → `MrbWriter`. Exposes `convert_epub_to_mrb()` and `convert_epub_to_mrb_streaming()`. |
+| `HtmlExporter.h/.cpp` | Exports a `Book` to a self-contained HTML file using the `TextLayout` engine to paginate content exactly as the reader would. Used by `HtmlExportTest`. Options control page size, padding, chapter limit, and debug output. |
 
 ### Memory constraints (critical for ESP32-C3)
 
@@ -65,7 +69,7 @@ The ESP32-C3 has **~320KB total RAM**, of which **~155KB is free after SD card i
 | Component | Typical Cost | Notes |
 |-----------|-------------|-------|
 | `Book::open()` metadata | 30–45KB | ZIP entries × ~60 bytes each (struct + string_view into contiguous name blob — 2 allocations total) + spine + TOC + stylesheet. War and Peace (377 entries) verified on device: 126KB free after open. |
-| `MrbReader::open()` | 3–5KB | Chapter table (368 × 8 = ~3KB) + image refs + metadata/TOC. Paragraph index is NOT loaded (seeked on demand). Previously loaded full index (~136KB for War and Peace), causing OOM. |
+| `MrbReader::open()` | 3–5KB | Chapter table (368 × 8 = ~3KB) + image refs + metadata/TOC. Paragraph index is NOT loaded into RAM — seeked on demand. |
 | `parse_chapter()` XHTML extract | up to 218KB | Full chapter XHTML decompressed into `std::vector<uint8_t>` + 33KB work buffer |
 | `parse_chapter()` image dim resolve | up to 200KB | Extracts each image file to read JPEG/PNG headers |
 | `Chapter` in memory | up to 250KB+ | 268 paragraphs × 684 runs × `std::string` text (177KB text alone for largest chapter) |
@@ -73,9 +77,11 @@ The ESP32-C3 has **~320KB total RAM**, of which **~155KB is free after SD card i
 
 **Known crash**: ohler.epub ("Der totale Rausch") has 487 spine items mapping to only ~10 XHTML files, the largest being 218KB. The current `parse_chapter()` approach of extracting the full XHTML + resolving image dimensions exceeds available heap. **This needs to be fixed** — likely by pre-processing EPUBs into a compact on-device format or by streaming the XHTML parsing.
 
+**`convert_epub_to_mrb_streaming()`** in `MrbConverter.h` uses ~37KB of working memory per chapter (vs. full XHTML extract) and is safe for ESP32's limited RAM. Optional `work_buf`/`xml_buf` parameters let callers pass pre-allocated split buffers to avoid heap fragmentation from a single large allocation.
+
 ## Screens (IScreen implementations)
 
-All inherit from `IScreen` (`lib/microreader/demos/IScreen.h`): `name()`, `start()`, `stop()`, `update()`.
+All inherit from `IScreen` (`lib/microreader/screens/IScreen.h`): `name()`, `start()`, `stop()`, `update()`.
 
 | Screen | File | Description |
 |--------|------|-------------|
@@ -83,8 +89,7 @@ All inherit from `IScreen` (`lib/microreader/demos/IScreen.h`): `name()`, `start
 | `BookSelectScreen` | `BookSelectScreen.h/.cpp` | Lists `.epub`/`.mrb` files from a directory. Up/down navigation (no scroll — flat list via Canvas). Owns a `ReaderScreen`. |
 | `ReaderScreen` | `ReaderScreen.h/.cpp` | EPUB page viewer. 2×-scaled 8×8 bitmap font (16×16 glyphs). Next/prev page, chapter transitions. |
 | `BouncingBallDemo` | `BouncingBallDemo.h/.cpp` | Bouncing ball + random shapes. |
-| `TextShowcaseDemo` | `TextShowcaseDemo.h/.cpp` | Typography demo at multiple scales. |
-| `PatternDemo` | `PatternDemo.h/.cpp` | Scrolling checkerboard pattern. |
+
 
 ### Screen navigation flow
 
@@ -94,9 +99,7 @@ Application
        └─ MenuDemo (always at bottom)
             ├─ "Select Book" → push BookSelectScreen
             │     └─ user picks → push ReaderScreen (via Application chain)
-            ├─ "Bouncing Ball" → push BouncingBallDemo
-            ├─ "Text Showcase" → push TextShowcaseDemo
-            └─ "Pattern Demo" → push PatternDemo
+            └─ "Bouncing Ball" → push BouncingBallDemo
 
 Button0 = back (screen returns false → pop)
 Button1 = select
@@ -156,7 +159,7 @@ Two test binaries:
 - `unit_tests`: ZipReader, XmlReader, CssParser, EpubParser, ImageDecoder, TextLayout tests
 - `microreader_tests`: above + RealBookTest, BulkBookTest, DebugOhlerTest, HtmlExportTest
 
-Test fixtures in `test/fixtures/` (synthetic EPUBs). Real books in `microreader/resources/books/`.
+Test fixtures in `test/fixtures/` (synthetic EPUBs). Real books in `test/books/`.
 
 ## ESP32 hardware
 
@@ -173,28 +176,32 @@ Test fixtures in `test/fixtures/` (synthetic EPUBs). Real books in `microreader/
 - **CMake exit code 1**: PIO/CMake may return exit code 1 from miniz deprecation warnings on stderr. This is not an actual error — build succeeds.
 - **Desktop CMake policy warning**: Use `-DCMAKE_POLICY_VERSION_MINIMUM:STRING=3.5` to silence.
 - **COM4 port busy**: Kill any running monitor terminal before uploading firmware.
-- **ohler.epub OOM**: 487 spine items, XHTML files up to 218KB, causes heap exhaustion on ESP32 during `parse_chapter()`. See "Memory constraints" section. (Note: `Book::open()` itself no longer OOMs thanks to ZipReader name_blob_ optimization.)
-- **Heap fragmentation on ESP32**: After `Book::open()`, the largest contiguous block can be much smaller than total free heap (e.g. 59KB largest with 133KB total free). Large single allocations (>50KB) should be split into smaller ones. The `parse_chapter_streaming()` work+XML buffer was split for this reason.
-- **SD card seek performance**: Random seeks on SPI SD card cost ~2ms each. Writing a doubly-linked paragraph list (prev/next offsets) *then* seeking back to patch `next_offset` fields caused 42% of total conversion time to be spent on seeks alone (e.g. 267 paragraphs × 2 seeks × ~2ms = ~1s per chapter). Fix: defer each paragraph write until the next one arrives, so `next_offset` is known before writing. This eliminated all backward seeks and cut conversion time 31–67% across all test books.
+- **ohler.epub OOM**: 487 spine items, XHTML files up to 218KB, causes heap exhaustion on ESP32 during `parse_chapter()`. See "Memory constraints" section.
+- **Heap fragmentation on ESP32**: After `Book::open()`, the largest contiguous block can be much smaller than total free heap (e.g. 59KB largest with 133KB total free). Large single allocations (>50KB) should be split into smaller ones.
 
 ## Device testing
 
 To verify changes on real hardware:
-1. Upload test books via `python tools/upload_epub.py --port COM4 <path>.epub`
+1. Upload test books via `python tools/serial_cmd.py --port COM4 --upload <path>.epub`
 2. Build + flash: `& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run -t upload`
 3. Monitor serial: `& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" device monitor --baud 115200`
 4. Use `python tools/serial_cmd.py --port COM4` for interactive control (see below).
 
 ### Serial command protocol (`tools/serial_cmd.py`)
 
-The device accepts binary commands over USB serial using the `CMND` magic prefix. Available commands:
+Serial communication is handled by `serial_communication.h`. It runs a FreeRTOS `serial_receiver_task` that multiplexes three magic-prefixed protocols: LUT frames (`0xDEADBEEF`), EPUB uploads (`EPUB`), and control commands (`CMND`).
 
-| Command | Binary format | Description |
-|---------|--------------|-------------|
-| Button press | `CMND` + `B` + 1-byte mask | Inject button press (mask = `1 << button_index`) |
-| Open book | `CMND` + `O` + 2-byte LE path_len + path | Push ReaderScreen for the given book path |
-| Status | `CMND` + `S` | Query heap info (responds `STATUS:free=N,largest=N`) |
-| List books | `CMND` + `L` | List `.epub`/`.mrb` files (responds `BOOKS:\n...\nEND\n`) |
+Device commands (sent via `serial_cmd.py` — see interactive commands below):
+
+| Command | Description |
+|---------|-------------|
+| Button press | Inject button press by index |
+| Open book | Push ReaderScreen for a book path |
+| Status | Query heap info (`STATUS:free=N,largest=N`) |
+| List books | List `.epub`/`.mrb` files on SD card |
+| Clear `.mrb` | Delete all `.mrb` files (`CLEARED:N`) |
+| Bench | Run EPUB conversion benchmark for a book |
+| Image bench | Run image size-read benchmark for a book |
 
 Interactive commands in `serial_cmd.py`:
 ```
@@ -206,6 +213,18 @@ Interactive commands in `serial_cmd.py`:
 > down          # alias for btn 2
 > up            # alias for btn 3
 > open alice.epub  # open book (auto-prepends /sdcard/books/)
+> upload alice.epub  # upload EPUB file to the device
+> clear         # delete all .mrb files on the device
+> bench alice.epub   # run EPUB conversion benchmark
+> imgsize alice.epub # run image size-read benchmark
+> test [filter] [--clean] [-v]  # open each book and watch for BOOK_OK/BOOK_FAIL
+```
+
+Non-interactive CLI flags:
+```bash
+python tools/serial_cmd.py --upload <path>.epub   # upload then exit
+python tools/serial_cmd.py --bench ohler.epub [--capture bench.log] [--timeout 300]
+python tools/serial_cmd.py --imgbench-all [--timeout 120]
 ```
 
 Capture mode (non-interactive, saves all output to file):
@@ -225,5 +244,6 @@ ESP_LOGI("test", "Free heap: %lu largest=%lu",
 
 ## Agent rules
 
-- **Keep this file up to date.** When you add, rename, or restructure files, interfaces, or systems, update this summary to reflect the change. This file is the single source of truth for new chat sessions.
-- **Record useful discoveries.** When you learn something non-obvious about the codebase (e.g. hardware quirks, tricky build steps, important constraints, or gotchas), add it to the relevant section above so future sessions benefit.
+- **Keep this file up to date after every change.** When you add, rename, or restructure files, interfaces, systems, or tools — update the relevant section immediately. This file is the single source of truth for new chat sessions.
+- **Record useful discoveries.** When you learn something non-obvious (hardware quirks, tricky build steps, constraints, or gotchas), add it to the relevant section so future sessions benefit.
+- **Remove stale information.** When a known issue is fixed or a design is superseded, remove or update the entry rather than leaving outdated history.

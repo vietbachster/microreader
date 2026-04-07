@@ -23,7 +23,7 @@ void MenuDemo::build_items_(DisplayQueue& queue) {
       items_[count_++] = {"Select Book", &book_select_, nullptr};
   }
   // Demo screens.
-  IScreen* screens[] = {&bouncing_ball_, &text_showcase_, &pattern_};
+  IScreen* screens[] = {&bouncing_ball_};
   for (auto* s : screens) {
     if (count_ < kMaxItems)
       items_[count_++] = {s->name(), s, nullptr};

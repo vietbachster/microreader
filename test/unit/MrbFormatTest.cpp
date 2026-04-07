@@ -4,9 +4,9 @@
 #include <filesystem>
 #include <string>
 
-#include "microreader/content/MrbConverter.h"
-#include "microreader/content/MrbReader.h"
-#include "microreader/content/MrbWriter.h"
+#include "microreader/content/mrb/MrbConverter.h"
+#include "microreader/content/mrb/MrbReader.h"
+#include "microreader/content/mrb/MrbWriter.h"
 
 namespace fs = std::filesystem;
 using namespace microreader;

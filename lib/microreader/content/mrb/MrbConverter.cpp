@@ -1,7 +1,7 @@
 #include "MrbConverter.h"
 
-#include "EpubParser.h"
-#include "ZipReader.h"
+#include "../EpubParser.h"
+#include "../ZipReader.h"
 
 #ifdef ESP_PLATFORM
 #include "esp_heap_caps.h"

@@ -10,8 +10,8 @@
 #include "microreader/content/Book.h"
 #include "microreader/content/ContentModel.h"
 #include "microreader/content/ImageDecoder.h"
-#include "microreader/content/MrbConverter.h"
 #include "microreader/content/ZipReader.h"
+#include "microreader/content/mrb/MrbConverter.h"
 
 namespace fs = std::filesystem;
 using namespace microreader;

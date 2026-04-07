@@ -8,13 +8,13 @@
 #include "input.h"
 #include "logger.h"
 #include "microreader/Application.h"
-#include "microreader/DisplayQueue.h"
 #include "microreader/Loop.h"
 #include "microreader/content/Book.h"
-#include "microreader/content/MrbConverter.h"
+#include "microreader/content/mrb/MrbConverter.h"
+#include "microreader/display/DisplayQueue.h"
 #include "runtime.h"
 #include "sdcard.h"
-#include "serial_lut.h"
+#include "serial_communication.h"
 
 static void verify_ota() {
   const esp_partition_t* running = esp_ota_get_running_partition();

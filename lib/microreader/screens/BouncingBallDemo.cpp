@@ -4,7 +4,7 @@
 #include <cstdlib>
 #include <cstring>
 
-#include "../Font.h"
+#include "../display/Font.h"
 
 namespace microreader {
 

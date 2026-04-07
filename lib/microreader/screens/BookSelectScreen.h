@@ -2,9 +2,9 @@
 
 #include <cstring>
 
-#include "../Canvas.h"
-#include "../DisplayQueue.h"
 #include "../Input.h"
+#include "../display/Canvas.h"
+#include "../display/DisplayQueue.h"
 #include "IScreen.h"
 #include "ReaderScreen.h"
 

@@ -2,9 +2,9 @@
 
 #include <cstdio>
 
-#include "Canvas.h"
-#include "DisplayQueue.h"
-#include "demos/IScreen.h"
+#include "display/Canvas.h"
+#include "display/DisplayQueue.h"
+#include "screens/IScreen.h"
 
 namespace microreader {
 
