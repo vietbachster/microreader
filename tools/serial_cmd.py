@@ -489,6 +489,8 @@ def main():
         # --- Conversion benchmark for all books ---
         import re
 
+        # Give device time to boot if port open triggered a reset.
+        time.sleep(4)
         books = send_list_books_raw(ser)
         epubs = sorted(b for b in books if b.endswith(".epub"))
         if not epubs:
@@ -497,7 +499,7 @@ def main():
             sys.exit(1)
         print(f"Found {len(epubs)} epub(s), benchmarking each...\n")
 
-        # Collect summary rows: (name, conv, seek, decomp, build, write)
+        # Collect summary rows: (name, open, conv, seek, decomp, build, write)
         summary = []
         done_marker = "BENCHMARK DONE"
         for epub in epubs:
@@ -508,10 +510,10 @@ def main():
             print(f"  {resp}")
             if not resp.startswith("OK") and not resp.endswith("OK"):
                 print(f"  SKIP (no OK response)")
-                summary.append((epub, "SKIP", "", "", "", ""))
+                summary.append((epub, "SKIP", "", "", "", "", ""))
                 continue
             # Collect output until done marker
-            conv = seek = decomp = build = write = ""
+            opn = conv = seek = decomp = build = write = ""
             t0 = time.time()
             while time.time() - t0 < args.timeout:
                 line = ser.readline().decode("utf-8", errors="replace").rstrip("\r\n")
@@ -520,6 +522,9 @@ def main():
                 print(f"  {line}")
                 sys.stdout.flush()
                 # Parse BENCH_ lines
+                m = re.search(r"BENCH_OPEN: (\d+)ms", line)
+                if m:
+                    opn = m.group(1)
                 m = re.search(r"BENCH_CONV: (\d+)ms", line)
                 if m:
                     conv = m.group(1)
@@ -539,20 +544,24 @@ def main():
                     break
             else:
                 print("  --- Timeout ---")
-            summary.append((epub, conv, seek, decomp, build, write))
+            summary.append((epub, opn, conv, seek, decomp, build, write))
             print()
 
         # Print summary table
-        print("=" * 100)
+        print("=" * 110)
         print("SUMMARY")
-        print("=" * 100)
-        hdr = f"{'Book':<35} {'Conv':>8} {'Seek':>8} {'Decomp':>8} {'Build':>8} {'Write':>8}"
+        print("=" * 110)
+        hdr = f"{'Book':<35} {'Open':>8} {'Conv':>8} {'Seek':>8} {'Decomp':>8} {'Build':>8} {'Write':>8}"
         print(hdr)
         print("-" * len(hdr))
-        for name, conv, seek, decomp, build, write in summary:
+        for name, opn, conv, seek, decomp, build, write in summary:
+
             def fmt(v):
                 return f"{v}ms" if v and v != "SKIP" else v
-            print(f"{name:<35} {fmt(conv):>8} {fmt(seek):>8} {fmt(decomp):>8} {fmt(build):>8} {fmt(write):>8}")
+
+            print(
+                f"{name:<35} {fmt(opn):>8} {fmt(conv):>8} {fmt(seek):>8} {fmt(decomp):>8} {fmt(build):>8} {fmt(write):>8}"
+            )
         print()
         ser.close()
         return

@@ -19,7 +19,8 @@ bool convert_epub_to_mrb_streaming(Book& book, const char* output_path, uint8_t*
 
 #ifdef ESP_PLATFORM
 // Measures conversion sub-stages individually via serial log output.
-void benchmark_epub_conversion(Book& book, const char* tmp_path, uint8_t* work_buf = nullptr,
+// open_ms: time already spent in Book::open() (ZIP + OPF + CSS + NCX), reported as BENCH_OPEN.
+void benchmark_epub_conversion(Book& book, const char* tmp_path, long open_ms = 0, uint8_t* work_buf = nullptr,
                                uint8_t* xml_buf = nullptr);
 
 // Measures image size-read performance: for each image entry in the EPUB,

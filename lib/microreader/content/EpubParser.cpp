@@ -372,13 +372,16 @@ EpubError Epub::parse_opf(IZipFile& file, const std::string& opf_path, uint8_t* 
 
   // --- Phase 2: Extract CSS ---
   // Reuse work_buf for CSS extraction (already done with OPF streaming).
-  for (size_t ci = 0; ci < css_idxs.size(); ++ci) {
-    auto& css_entry = zip_.entry(css_idxs[ci]);
+  {
     std::vector<uint8_t> css_data;
-    if (zip_.extract(file, css_entry, css_data, work_buf, kWorkBufSize) == ZipError::Ok) {
-      stylesheet_.extend_from_sheet(reinterpret_cast<const char*>(css_data.data()), css_data.size());
+    for (size_t ci = 0; ci < css_idxs.size(); ++ci) {
+      auto& css_entry = zip_.entry(css_idxs[ci]);
+      css_data.clear();
+      if (zip_.extract(file, css_entry, css_data, work_buf, kWorkBufSize) == ZipError::Ok) {
+        stylesheet_.extend_from_sheet(reinterpret_cast<const char*>(css_data.data()), css_data.size());
+      }
+      HEAP_LOG("parse_opf: after CSS extract+parse");
     }
-    HEAP_LOG("parse_opf: after CSS extract+parse");
   }
 
   // --- Phase 3: Parse NCX (reuses same work buffer and xml buffer) ---
@@ -1780,7 +1783,7 @@ EpubError Epub::parse_chapter_streaming(IZipFile& file, size_t index, ParagraphS
     base_dir = entry.name.substr(0, slash + 1);
   }
 
-  static constexpr size_t kWorkBufSize = ZipEntryInput::kDecompSize + ZipEntryInput::kDictSize + 1024;
+  static constexpr size_t kWorkBufSize = ZipEntryInput::kDecompSize + ZipEntryInput::kDictSize + 2048;
   static constexpr size_t kXmlBufSize = 16384;
 
   uint8_t* work_ptr = work_buf;

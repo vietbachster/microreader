@@ -84,7 +84,7 @@ bool convert_epub_to_mrb_streaming(Book& book, const char* output_path, uint8_t*
 
   // On ESP32, caller always passes pre-allocated buffers. On desktop (tests etc.)
   // allocate here so the leaf parse_chapter_streaming never has to.
-  static constexpr size_t kWorkBufSize = ZipEntryInput::kDecompSize + ZipEntryInput::kDictSize + 1024;
+  static constexpr size_t kWorkBufSize = ZipEntryInput::kDecompSize + ZipEntryInput::kDictSize + 2048;
   static constexpr size_t kXmlBufSize = 16384;
   std::unique_ptr<uint8_t[]> owned_work;
   std::unique_ptr<uint8_t[]> owned_xml;
@@ -189,10 +189,10 @@ bool convert_epub_to_mrb_streaming(Book& book, const char* output_path, uint8_t*
 }
 
 #ifdef ESP_PLATFORM
-void benchmark_epub_conversion(Book& book, const char* tmp_path, uint8_t* work_buf, uint8_t* xml_buf) {
+void benchmark_epub_conversion(Book& book, const char* tmp_path, long open_ms, uint8_t* work_buf, uint8_t* xml_buf) {
   static constexpr const char* TAG = "bench";
-  static constexpr size_t kWorkBufSize = ZipEntryInput::kMinWorkBufSize;
-  static constexpr size_t kXmlBufSize = 4096;
+  static constexpr size_t kWorkBufSize = ZipEntryInput::kDecompSize + ZipEntryInput::kDictSize + 2048;
+  static constexpr size_t kXmlBufSize = 16384;
 
   std::unique_ptr<uint8_t[]> owned_work, owned_xml;
   if (!work_buf) {
@@ -212,6 +212,7 @@ void benchmark_epub_conversion(Book& book, const char* tmp_path, uint8_t* work_b
   ESP_LOGI(TAG, "=== EPUB BENCHMARK START ===");
   ESP_LOGI(TAG, "chapters=%u  free=%lu largest=%lu", nch, (unsigned long)esp_get_free_heap_size(),
            (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+  ESP_LOGI(TAG, "BENCH_OPEN: %ldms", open_ms);
 
   auto discard_cb = [](const uint8_t*, size_t, void*) -> bool { return true; };
 
@@ -289,8 +290,9 @@ void benchmark_epub_conversion(Book& book, const char* tmp_path, uint8_t* work_b
     }
   }
 
-  ESP_LOGI(TAG, "=== BENCHMARK DONE: CONV=%ldms SEEK=%ldms DECOMP=%ldms BUILD=%ldms WRITE=%ldms ===", t_conv, t_seek,
-           t_decomp, t_build, t_write);
+  ESP_LOGI(TAG,
+           "=== BENCHMARK DONE: OPEN=%ldms CONV=%ldms SEEK=%ldms DECOMP=%ldms BUILD=%ldms WRITE=%ldms ===", open_ms,
+           t_conv, t_seek, t_decomp, t_build, t_write);
 }
 
 // ---------------------------------------------------------------------------

@@ -193,7 +193,7 @@ TEST_P(ChapterStreamingTest, ParagraphsMatch) {
   if (err != EpubError::Ok)
     GTEST_SKIP() << "Cannot open " << filename;
 
-  static constexpr size_t kWorkBufSize = ZipEntryInput::kDecompSize + ZipEntryInput::kDictSize + 1024;
+  static constexpr size_t kWorkBufSize = ZipEntryInput::kDecompSize + ZipEntryInput::kDictSize + 2048;
   static constexpr size_t kXmlBufSize = 16384;
   std::vector<uint8_t> work_buf(kWorkBufSize);
   std::vector<uint8_t> xml_buf(kXmlBufSize);

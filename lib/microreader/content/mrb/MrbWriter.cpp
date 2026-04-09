@@ -13,8 +13,9 @@ bool BufferedFileWriter::open(const char* path) {
   f_ = fopen(path, "wb");
   if (!f_)
     return false;
-  // Keep a modest stdio buffer for the underlying fwrite calls.
-  setvbuf(f_, nullptr, _IOFBF, 4096);
+  // Larger stdio buffer coalesces fwrite→SD card writes, reducing SPI transactions.
+  // 16KB aligns with FAT allocation unit for optimal SD write granularity.
+  setvbuf(f_, nullptr, _IOFBF, 16384);
   pos_ = 0;
   used_ = 0;
   return true;

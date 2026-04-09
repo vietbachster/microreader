@@ -236,6 +236,8 @@ Test fixtures in `test/fixtures/` (synthetic EPUBs). Real books in `test/books/`
 - **COM4 port busy**: Kill any running monitor terminal before uploading firmware.
 - **ohler.epub OOM**: 487 spine items, XHTML files up to 218KB, causes heap exhaustion on ESP32 during `parse_chapter()`. See "Memory constraints" section.
 - **Heap fragmentation on ESP32**: After `Book::open()`, the largest contiguous block can be much smaller than total free heap (e.g. 59KB largest with 133KB total free). Large single allocations (>50KB) should be split into smaller ones.
+- **SD SPI max 20 MHz**: The SD card on the prototype board fails at 40 MHz (`ESP_ERR_INVALID_RESPONSE` during `sdmmc_enable_hs_mode_and_check`). Keep `max_freq_khz = 20000`.
+- **Do NOT add `setvbuf` to `StdioZipFile`**: Adding a read buffer to the EPUB input `FILE*` causes wasteful 4 KB read-ahead after every seek, making SEEK 3× slower and DECOMP ~12% slower. The `ZipEntryInput` already manages its own efficient input buffering.
 
 ## Device testing
 
@@ -282,6 +284,7 @@ Non-interactive CLI flags:
 ```bash
 python tools/serial_cmd.py --upload <path>.epub   # upload then exit
 python tools/serial_cmd.py --bench ohler.epub [--capture bench.log] [--timeout 300]
+python tools/serial_cmd.py --bench-all [--timeout 180]  # bench every .epub on device
 python tools/serial_cmd.py --imgbench-all [--timeout 120]
 ```
 
