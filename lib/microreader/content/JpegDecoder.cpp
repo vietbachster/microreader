@@ -41,7 +41,12 @@ static constexpr uint8_t M_RST0 = 0xD0;
 static constexpr uint8_t M_RST7 = 0xD7;
 
 static constexpr int MAX_COMP = 4;
-static constexpr uint32_t MAX_PIXELS = 2048u * 2048u;
+// Sanity limit on source image total pixels.  With the streaming
+// ImageRowSink approach, we never hold the full decoded bitmap — the
+// real memory bottleneck is the y_row buffer (row_w * mcu_h), which
+// has its own OOM check.  Keep this high enough for common ebook
+// covers (up to ~3000×5000 = 15M pixels).
+static constexpr uint32_t MAX_PIXELS = 8192u * 8192u;
 
 // ---------------------------------------------------------------------------
 // Zigzag scan order (zigzag index → natural 8×8 block position)

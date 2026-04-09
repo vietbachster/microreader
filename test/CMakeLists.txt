@@ -87,6 +87,7 @@ add_executable(unit_tests
     unit/MrbFormatTest.cpp
     unit/MrbLayoutComparisonTest.cpp
     unit/StreamingPipelineTest.cpp
+    unit/NavigationTest.cpp
 )
 target_link_libraries(unit_tests PRIVATE
     microreader_content
@@ -114,6 +115,7 @@ add_executable(microreader_tests
     unit/MrbFormatTest.cpp
     unit/MrbLayoutComparisonTest.cpp
     unit/StreamingPipelineTest.cpp
+    unit/NavigationTest.cpp
 )
 target_link_libraries(microreader_tests PRIVATE
     microreader_content

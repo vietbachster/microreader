@@ -45,7 +45,10 @@ static constexpr uint8_t kFilterUp = 2;
 static constexpr uint8_t kFilterAverage = 3;
 static constexpr uint8_t kFilterPaeth = 4;
 
-static constexpr uint32_t kMaxPixels = 800u * 800u;
+// With streaming ImageRowSink, we never hold the full decoded bitmap.
+// The real memory cost is scanline buffers (proportional to width only).
+// Keep this high enough for common ebook covers.
+static constexpr uint32_t kMaxPixels = 8192u * 8192u;
 static constexpr size_t kIDAT_BufSize = 4096;
 static constexpr size_t kLZDictSize = 32768;  // must equal TINFL_LZ_DICT_SIZE
 

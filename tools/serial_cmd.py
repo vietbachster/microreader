@@ -419,6 +419,12 @@ def main():
         default=False,
         help="Non-interactive: run image-size benchmark on every .epub on the device",
     )
+    parser.add_argument(
+        "--bench-all",
+        action="store_true",
+        default=False,
+        help="Non-interactive: run conversion benchmark on every .epub on the device",
+    )
     args = parser.parse_args()
 
     try:
@@ -476,6 +482,78 @@ def main():
             if out_f:
                 out_f.close()
                 print(f"Saved to {capture_file}")
+        ser.close()
+        return
+
+    if args.bench_all:
+        # --- Conversion benchmark for all books ---
+        import re
+
+        books = send_list_books_raw(ser)
+        epubs = sorted(b for b in books if b.endswith(".epub"))
+        if not epubs:
+            print("No .epub files found on device.")
+            ser.close()
+            sys.exit(1)
+        print(f"Found {len(epubs)} epub(s), benchmarking each...\n")
+
+        # Collect summary rows: (name, conv, seek, decomp, build, write)
+        summary = []
+        done_marker = "BENCHMARK DONE"
+        for epub in epubs:
+            path = f"/sdcard/books/{epub}"
+            print(f"=== {epub} ===")
+            drain(ser)
+            resp = send_bench(ser, path)
+            print(f"  {resp}")
+            if not resp.startswith("OK") and not resp.endswith("OK"):
+                print(f"  SKIP (no OK response)")
+                summary.append((epub, "SKIP", "", "", "", ""))
+                continue
+            # Collect output until done marker
+            conv = seek = decomp = build = write = ""
+            t0 = time.time()
+            while time.time() - t0 < args.timeout:
+                line = ser.readline().decode("utf-8", errors="replace").rstrip("\r\n")
+                if not line:
+                    continue
+                print(f"  {line}")
+                sys.stdout.flush()
+                # Parse BENCH_ lines
+                m = re.search(r"BENCH_CONV: (\d+)ms", line)
+                if m:
+                    conv = m.group(1)
+                m = re.search(r"BENCH_SEEK: (\d+)ms", line)
+                if m:
+                    seek = m.group(1)
+                m = re.search(r"BENCH_DECOMP: (\d+)ms", line)
+                if m:
+                    decomp = m.group(1)
+                m = re.search(r"BENCH_BUILD: (\d+)ms", line)
+                if m:
+                    build = m.group(1)
+                m = re.search(r"BENCH_WRITE: (\d+)ms", line)
+                if m:
+                    write = m.group(1)
+                if done_marker in line:
+                    break
+            else:
+                print("  --- Timeout ---")
+            summary.append((epub, conv, seek, decomp, build, write))
+            print()
+
+        # Print summary table
+        print("=" * 100)
+        print("SUMMARY")
+        print("=" * 100)
+        hdr = f"{'Book':<35} {'Conv':>8} {'Seek':>8} {'Decomp':>8} {'Build':>8} {'Write':>8}"
+        print(hdr)
+        print("-" * len(hdr))
+        for name, conv, seek, decomp, build, write in summary:
+            def fmt(v):
+                return f"{v}ms" if v and v != "SKIP" else v
+            print(f"{name:<35} {fmt(conv):>8} {fmt(seek):>8} {fmt(decomp):>8} {fmt(build):>8} {fmt(write):>8}")
+        print()
         ser.close()
         return
 
