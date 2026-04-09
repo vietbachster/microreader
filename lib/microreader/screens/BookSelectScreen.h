@@ -3,22 +3,20 @@
 #include <cstring>
 
 #include "../Input.h"
-#include "../display/Canvas.h"
-#include "../display/DisplayQueue.h"
+#include "../display/DrawBuffer.h"
 #include "IScreen.h"
 #include "ReaderScreen.h"
 
 namespace microreader {
 
 // Book selection screen — lists EPUB files from a directory.
-// Button3/Button2 to navigate up/down, Button1 to open, Button0 to go back.
+// Button3/Button2 = navigate up/down, Button1 = open, Button0 = go back.
 class BookSelectScreen final : public IScreen {
  public:
   static constexpr int kMaxBooks = 16;
 
   BookSelectScreen() = default;
 
-  // Set the directory to scan for .epub files (call before start).
   void set_books_dir(const char* dir) {
     books_dir_ = dir;
   }
@@ -33,28 +31,24 @@ class BookSelectScreen final : public IScreen {
     return "Select Book";
   }
 
-  // After returning false, this is the screen to push next (or nullptr).
   IScreen* chosen() const {
     return chosen_;
   }
 
-  void start(Canvas& canvas, DisplayQueue& queue) override;
+  void start(DrawBuffer& buf) override;
   void stop() override;
-  bool update(const ButtonState& buttons, Canvas& canvas, DisplayQueue& queue, IRuntime& runtime) override;
+  bool update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& runtime) override;
 
  private:
   static constexpr int kScale = 2;
-  static constexpr int kGlyphH = CanvasText::kGlyphH * kScale;
-  static constexpr int kGlyphW = CanvasText::kGlyphW * kScale;
+  static constexpr int kGlyphW = 8 * kScale;
+  static constexpr int kGlyphH = 8 * kScale;
   static constexpr int kLineHeight = kGlyphH + 8;
   static constexpr int kPadding = 16;
-
-  // Max displayable characters per label (filename truncated to fit screen).
   static constexpr int kMaxLabelLen = 28;
 
   const char* books_dir_ = nullptr;
 
-  // Book entries: store full path + display label.
   struct BookEntry {
     char path[280];
     char label[kMaxLabelLen + 1];
@@ -66,11 +60,8 @@ class BookSelectScreen final : public IScreen {
   IScreen* chosen_ = nullptr;
   ReaderScreen reader_;
 
-  CanvasText title_{0, 0, "Select Book:", true, kScale};
-  CanvasText labels_[kMaxBooks];
-
   void scan_directory_();
-  void update_cursor_();
+  void draw_all_(DrawBuffer& buf) const;
 };
 
 }  // namespace microreader

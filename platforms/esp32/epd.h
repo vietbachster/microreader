@@ -11,7 +11,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "microreader/display/Display.h"
+#include "microreader/display/DrawBuffer.h"
 
 // ---- Pin assignments ----
 #define EPD_SCLK GPIO_NUM_8
@@ -34,57 +34,18 @@
 #define CMD_SET_RAM_Y_COUNTER 0x4F
 #define CMD_WRITE_RAM_BW 0x24
 #define CMD_WRITE_RAM_RED 0x26
-#define CMD_DISPLAY_OPTIONS 0x37
-#define CMD_AUTO_WRITE_BW_RAM 0x46
-#define CMD_AUTO_WRITE_RED_RAM 0x47
 #define CMD_DISPLAY_UPDATE_CTRL1 0x21
 #define CMD_DISPLAY_UPDATE_CTRL2 0x22
 #define CMD_MASTER_ACTIVATION 0x20
 #define CTRL1_NORMAL 0x00
 #define CTRL1_BYPASS_RED 0x40
-#define CMD_WRITE_LUT 0x32
-#define CMD_GATE_VOLTAGE 0x03
-#define CMD_SOURCE_VOLTAGE 0x04
-#define CMD_WRITE_VCOM 0x2C
-#define CMD_WRITE_TEMP 0x1A
+#define CMD_AUTO_WRITE_BW_RAM 0x46
+#define CMD_AUTO_WRITE_RED_RAM 0x47
 #define CMD_DEEP_SLEEP 0x10
+#define CMD_WRITE_TEMP 0x1A
 
-// ---- Refresh modes ----
-enum RefreshMode { FULL_REFRESH, HALF_REFRESH, FAST_REFRESH, CUSTOM_LUT_REFRESH };
-
-static const uint8_t lut_fast[] = {
-    // VS L0–L3 (voltage patterns per transition)
-    // Black → Black: [VSS → VSS → VSS → VSS]
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    // Black → White: [VSH1 → VSL → VSL → VSL → VSL → VSH1 → VSL → VSL]
-    0x6A, 0x9A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    // White → Black: [VSS → VSH1 → VSL → VSH1 → VSH1 → VSL → VSH1 → VSH1]
-    0x19, 0x65, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    // White → White: [VSS → VSS → VSS → VSS]
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    // L4 VCOM: [VSS → VSS → VSS → VSS]
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-
-    // TP/RP groups
-    0x01, 0x01, 0x01, 0x01, 0x00,  // G0: A=1 B=1 C=1 D=1 RP=0 (4 frames)
-    0x01, 0x01, 0x01, 0x01, 0x02,  // G1: A=1 B=1 C=1 D=1 RP=2 (12 frames)
-    0x00, 0x00, 0x00, 0x00, 0x00,  // G2: A=0 B=0 C=0 D=0 RP=0
-    0x00, 0x00, 0x00, 0x00, 0x00,  // G3: A=0 B=0 C=0 D=0 RP=0
-    0x00, 0x00, 0x00, 0x00, 0x00,  // G4: A=0 B=0 C=0 D=0 RP=0
-    0x00, 0x00, 0x00, 0x00, 0x00,  // G5: A=0 B=0 C=0 D=0 RP=0
-    0x00, 0x00, 0x00, 0x00, 0x00,  // G6: A=0 B=0 C=0 D=0 RP=0
-    0x00, 0x00, 0x00, 0x00, 0x00,  // G7: A=0 B=0 C=0 D=0 RP=0
-    0x00, 0x00, 0x00, 0x00, 0x00,  // G8: A=0 B=0 C=0 D=0 RP=0
-    0x00, 0x00, 0x00, 0x00, 0x00,  // G9: A=0 B=0 C=0 D=0 RP=0
-
-    // Frame rate
-    0x86, 0x86, 0x86, 0x86, 0x86,
-
-    // Voltages (VGH, VSH1, VSH2, VSL, VCOM)
-    0x17, 0x41, 0xB2, 0x2E, 0x30,
-
-    // Reserved
-    0x00, 0x00};
+// ---- Refresh modes (internal) ----
+enum EpdRefreshMode { EPD_FULL_REFRESH, EPD_HALF_REFRESH, EPD_FAST_REFRESH };
 
 class EInkDisplay : public microreader::IDisplay {
  public:
@@ -94,15 +55,9 @@ class EInkDisplay : public microreader::IDisplay {
   static const uint32_t BUFFER_SIZE = DISPLAY_WIDTH_BYTES * DISPLAY_HEIGHT;
 
   bool isScreenOn = false;
-  bool pingPongMode = true;
   bool inDeepSleep_ = false;
 
   spi_device_handle_t spi_;
-  uint8_t activeLut_[110];  // current LUT programmed to hardware; defaults to lut_fast
-
-  EInkDisplay() {
-    memcpy(activeLut_, lut_fast, sizeof(activeLut_));
-  }
 
   void begin() {
     // GPIO outputs: CS, DC, RST
@@ -147,40 +102,6 @@ class EInkDisplay : public microreader::IDisplay {
   }
 
   // ---- microreader::IDisplay ----
-  void tick(const uint8_t* ground_truth, bool gt_dirty, const uint8_t* target, bool target_dirty,
-            bool refresh = true) override {
-    wakeIfNeeded();
-    waitWhileBusy();
-
-    const uint32_t t0 = millis();
-    if (target_dirty) {
-      setRamArea(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
-      writeRamBuffer(CMD_WRITE_RAM_BW, target, BUFFER_SIZE);
-    }
-    if (gt_dirty) {
-      setRamArea(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
-      writeRamBuffer(CMD_WRITE_RAM_RED, ground_truth, BUFFER_SIZE);
-    }
-
-    if (pingPongMode) {
-      pingPongMode = false;
-
-      // disable ram ping poing
-      // the problem is that this seems to affect the mode selection somehow so we need to keep track and softreset the
-      // screen to allow for full refreshes afterwards
-      sendCommand(CMD_DISPLAY_OPTIONS);
-      sendData(0x00);
-      for (size_t i = 0; i < 9; i++) {
-        sendData(0x00);
-      }
-    }
-
-    if (!refresh)
-      return;
-
-    applyLUT();
-    refreshDisplay(isScreenOn ? CUSTOM_LUT_REFRESH : HALF_REFRESH);
-  }
 
   void full_refresh(const uint8_t* pixels, microreader::RefreshMode mode) override {
     wakeIfNeeded();
@@ -188,97 +109,16 @@ class EInkDisplay : public microreader::IDisplay {
     setRamArea(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
     writeRamBuffer(CMD_WRITE_RAM_BW, pixels, BUFFER_SIZE);
     writeRamBuffer(CMD_WRITE_RAM_RED, pixels, BUFFER_SIZE);
-    refreshDisplay(mode == microreader::RefreshMode::Half ? HALF_REFRESH : FULL_REFRESH);
+    refreshDisplay(mode == microreader::RefreshMode::Half ? EPD_HALF_REFRESH : EPD_FULL_REFRESH);
   }
 
   void partial_refresh(const uint8_t* old_pixels, const uint8_t* new_pixels) override {
     wakeIfNeeded();
     waitWhileBusy();
-
-    // no idea what I am doing here but we need to do this to be able to use the default lut
-    // otherwise the custom lut is used
-    if (!pingPongMode) {
-      pingPongMode = true;
-      sendCommand(CMD_DISPLAY_OPTIONS);
-      sendData(0x00);
-      for (size_t i = 0; i < 9; i++) {
-        sendData(0xFF);
-      }
-    }
-
     setRamArea(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
     writeRamBuffer(CMD_WRITE_RAM_BW, new_pixels, BUFFER_SIZE);
     writeRamBuffer(CMD_WRITE_RAM_RED, old_pixels, BUFFER_SIZE);
-    refreshDisplay(FAST_REFRESH);
-  }
-
-  void refreshDisplay(RefreshMode mode) {
-    if ((mode == FULL_REFRESH || mode == HALF_REFRESH) && !pingPongMode) {
-      isScreenOn = false;
-      pingPongMode = true;
-      initDisplayController(false);
-    }
-
-    sendCommand(CMD_DISPLAY_UPDATE_CTRL1);
-    sendData((mode == FAST_REFRESH || mode == CUSTOM_LUT_REFRESH) ? CTRL1_NORMAL : CTRL1_BYPASS_RED);
-
-    // best guess at display mode bits:
-    // bit | hex | name                    | effect
-    // ----+-----+--------------------------+-------------------------------------------
-    // 7   | 80  | CLOCK_ON                | Start internal oscillator
-    // 6   | 40  | ANALOG_ON               | Enable analog power rails (VGH/VGL drivers)
-    // 5   | 20  | TEMP_LOAD               | Load temperature (internal or I2C)
-    // 4   | 10  | LUT_LOAD                | Load waveform LUT
-    // 3   | 08  | MODE_SELECT             | Mode 1/2
-    // 2   | 04  | DISPLAY_START           | Run display
-    // 1   | 02  | ANALOG_OFF_PHASE        | Shutdown step 1 (undocumented)
-    // 0   | 01  | CLOCK_OFF               | Disable internal oscillator
-
-    uint8_t displayMode = 0x00;
-    if (!isScreenOn) {
-      isScreenOn = true;
-      displayMode |= 0xC0;
-    }
-
-    switch (mode) {
-      case FULL_REFRESH:
-        displayMode |= 0x34;
-        break;
-      case HALF_REFRESH:
-        sendCommand(CMD_WRITE_TEMP);
-        sendData(0x5A);
-        displayMode |= 0xD4;
-        break;
-      case FAST_REFRESH:
-        displayMode |= 0x1C;
-        break;
-      case CUSTOM_LUT_REFRESH:
-        displayMode |= 0x0C;
-        break;
-    }
-
-    sendCommand(CMD_DISPLAY_UPDATE_CTRL2);
-    sendData(displayMode);
-    sendCommand(CMD_MASTER_ACTIVATION);
-
-    const uint32_t t0_r = millis();
-    if (mode == FULL_REFRESH || mode == HALF_REFRESH || mode == FAST_REFRESH) {
-      waitWhileBusy();
-    }
-
-    ESP_LOGI("epd", "refreshDisplay: mode=%s displayMode=0x%02X duration=%lums",
-             mode == FULL_REFRESH         ? "FULL"
-             : mode == HALF_REFRESH       ? "HALF"
-             : mode == CUSTOM_LUT_REFRESH ? "CUSTOM"
-                                          : "FAST",
-             displayMode, millis() - t0_r);
-  }
-
-  // Override the active LUT with a custom one and immediately program it.
-  // The new LUT persists across FULL/HALF refreshes — it is re-applied
-  // automatically whenever the controller reloads OTP.
-  void setCustomLUT(const uint8_t* lutData) {
-    memcpy(activeLut_, lutData, sizeof(activeLut_));
+    refreshDisplay(EPD_FAST_REFRESH);
   }
 
   void deep_sleep() override {
@@ -290,8 +130,6 @@ class EInkDisplay : public microreader::IDisplay {
 
  private:
   // Exit deep sleep via hardware reset + controller re-init.
-  // Deep sleep mode 0x03 fully powers off internal circuits;
-  // a longer reset pulse and settling time are needed.
   void wakeIfNeeded() {
     if (!inDeepSleep_)
       return;
@@ -305,22 +143,6 @@ class EInkDisplay : public microreader::IDisplay {
     waitWhileBusy("post-HWRESET");
     initDisplayController(false);
     inDeepSleep_ = false;
-  }
-
-  // Program activeLut_ into the controller registers.
-  // Called from begin(), setCustomLUT(), and after any refresh that sets LUT_LOAD.
-  void applyLUT() {
-    sendCommand(CMD_WRITE_LUT);
-    for (uint16_t i = 0; i < 105; i++)
-      sendData(activeLut_[i]);
-    sendCommand(CMD_GATE_VOLTAGE);
-    sendData(activeLut_[105]);
-    sendCommand(CMD_SOURCE_VOLTAGE);
-    sendData(activeLut_[106]);
-    sendData(activeLut_[107]);
-    sendData(activeLut_[108]);
-    sendCommand(CMD_WRITE_VCOM);
-    sendData(activeLut_[109]);
   }
 
   static uint32_t millis() {
@@ -389,6 +211,43 @@ class EInkDisplay : public microreader::IDisplay {
     delay(2);
     gpio_set_level(EPD_RST, 1);
     delay(20);
+  }
+
+  void refreshDisplay(EpdRefreshMode mode) {
+    sendCommand(CMD_DISPLAY_UPDATE_CTRL1);
+    sendData(mode == EPD_FAST_REFRESH ? CTRL1_NORMAL : CTRL1_BYPASS_RED);
+
+    uint8_t displayMode = 0x00;
+    if (!isScreenOn) {
+      isScreenOn = true;
+      displayMode |= 0xC0;  // CLOCK_ON + ANALOG_ON (power up for first refresh)
+    }
+
+    switch (mode) {
+      case EPD_FULL_REFRESH:
+        displayMode |= 0x34;
+        break;
+      case EPD_HALF_REFRESH:
+        sendCommand(CMD_WRITE_TEMP);
+        sendData(0x5A);
+        displayMode |= 0xD4;
+        break;
+      case EPD_FAST_REFRESH:
+        displayMode |= 0x1C;
+        break;
+    }
+
+    sendCommand(CMD_DISPLAY_UPDATE_CTRL2);
+    sendData(displayMode);
+    sendCommand(CMD_MASTER_ACTIVATION);
+
+    const uint32_t t0 = millis();
+    waitWhileBusy();
+    ESP_LOGI("epd", "refreshDisplay: mode=%s displayMode=0x%02X duration=%lums",
+             mode == EPD_FULL_REFRESH   ? "FULL"
+             : mode == EPD_HALF_REFRESH ? "HALF"
+                                        : "FAST",
+             displayMode, millis() - t0);
   }
 
   void initDisplayController(bool clearBuffer) {

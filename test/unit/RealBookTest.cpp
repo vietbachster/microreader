@@ -638,3 +638,117 @@ TEST_F(RealBookTest, BulkImageSizeResolution) {
   printf("  %s\n", std::string(66, '-').c_str());
   printf("  %-44s  %6zu  %6zu  %6zu\n", "TOTAL", total_found, total_ok, total_zero);
 }
+
+// ===========================================================================
+// MRB image decode via read_local_entry + sink — mirrors ReaderScreen pipeline
+// ===========================================================================
+
+#include "microreader/content/mrb/MrbConverter.h"
+#include "microreader/content/mrb/MrbReader.h"
+
+TEST_F(RealBookTest, AliceIllustrated_MrbImageDecode_SinkPath) {
+  // This test exercises the exact path ReaderScreen uses to decode images:
+  // MRB open → get image_ref → read_local_entry from EPUB → decode with sink.
+  OPEN_BOOK_OR_SKIP("microreader2/test/books/gutenberg/alice-illustrated.epub");
+
+  // Convert to MRB if needed.
+  std::string mrb_path = path_;
+  auto dot = mrb_path.rfind('.');
+  if (dot != std::string::npos)
+    mrb_path = mrb_path.substr(0, dot);
+  mrb_path += ".test_sink.mrb";
+
+  // Always generate fresh MRB for the test.
+  ASSERT_TRUE(convert_epub_to_mrb_streaming(book_, mrb_path.c_str())) << "MRB conversion failed";
+
+  MrbReader mrb;
+  ASSERT_TRUE(mrb.open(mrb_path.c_str())) << "MRB open failed";
+
+  printf("  MRB images: %u\n", mrb.image_count());
+  ASSERT_GT(mrb.image_count(), 0u) << "alice-illustrated should have images";
+
+  size_t decoded_ok = 0;
+  size_t decoded_fail = 0;
+  size_t total_white = 0;
+  size_t total_black = 0;
+
+  for (uint16_t key = 0; key < mrb.image_count(); ++key) {
+    const auto& ref = mrb.image_ref(key);
+
+    // Open the EPUB and read the local entry (no filename — mimics ReaderScreen)
+    StdioZipFile file;
+    ASSERT_TRUE(file.open(path_.c_str()));
+    ZipEntry local_entry;
+    auto zerr = ZipReader::read_local_entry(file, ref.local_header_offset, local_entry);
+    ASSERT_EQ(zerr, ZipError::Ok) << "read_local_entry failed for image " << key;
+
+    // Collect rows via sink
+    struct SinkData {
+      std::vector<uint8_t> rows;
+      uint16_t width = 0;
+      uint16_t height = 0;
+    } sink_data;
+
+    ImageRowSink sink;
+    sink.ctx = &sink_data;
+    sink.emit_row = [](void* ctx, uint16_t y, const uint8_t* data, uint16_t width) {
+      auto* sd = static_cast<SinkData*>(ctx);
+      if (sd->width == 0)
+        sd->width = width;
+      size_t stride = (width + 7) / 8;
+      size_t needed = static_cast<size_t>(y + 1) * stride;
+      if (sd->rows.size() < needed)
+        sd->rows.resize(needed, 0);
+      std::memcpy(sd->rows.data() + static_cast<size_t>(y) * stride, data, stride);
+      if (y + 1 > sd->height)
+        sd->height = y + 1;
+    };
+
+    DecodedImage dims;
+    auto err = decode_image_from_entry(file, local_entry, 440, 700, dims, nullptr, 0, true, &sink);
+    if (err != ImageError::Ok) {
+      decoded_fail++;
+      printf("    image %u: DECODE FAILED (error %d)\n", key, (int)err);
+      continue;
+    }
+    decoded_ok++;
+
+    EXPECT_GT(dims.width, 0) << "image " << key << " decoded to zero width";
+    EXPECT_GT(dims.height, 0) << "image " << key << " decoded to zero height";
+
+    // Count white vs black pixels to detect all-black images
+    size_t white = 0, black = 0;
+    size_t stride = (sink_data.width + 7) / 8;
+    for (uint16_t y = 0; y < sink_data.height; ++y) {
+      for (uint16_t x = 0; x < sink_data.width; ++x) {
+        bool is_white = (sink_data.rows[y * stride + x / 8] >> (7 - (x & 7))) & 1;
+        if (is_white)
+          white++;
+        else
+          black++;
+      }
+    }
+    total_white += white;
+    total_black += black;
+
+    size_t total = white + black;
+    float white_pct = total > 0 ? 100.0f * white / total : 0;
+    printf("    image %u: %ux%u  white=%.1f%%\n", key, dims.width, dims.height, white_pct);
+
+    // A natural image should not be 100% black (that's the bug symptom).
+    EXPECT_GT(white, 0u) << "image " << key << " is completely black — black squares bug!";
+  }
+
+  printf("\n  Decoded: %zu ok, %zu failed\n", decoded_ok, decoded_fail);
+  EXPECT_GT(decoded_ok, 0u) << "Expected at least some images to decode";
+  EXPECT_EQ(decoded_fail, 0u) << "All image decodes should succeed";
+
+  // Overall: the book's illustrations should have meaningful white content.
+  float overall_white = (total_white + total_black) > 0 ? 100.0f * total_white / (total_white + total_black) : 0;
+  printf("  Overall white pixel ratio: %.1f%%\n", overall_white);
+  EXPECT_GT(overall_white, 10.0f) << "Images are too dark — possible black squares bug";
+
+  // Clean up test MRB
+  std::remove(mrb_path.c_str());
+  mrb.close();
+}

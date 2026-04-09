@@ -859,8 +859,8 @@ static void dither_row(const uint8_t* row, uint32_t x_step, int out_w, int16_t* 
 // Baseline decode
 // ---------------------------------------------------------------------------
 
-static const char* decode_baseline(const JpegState& st, BitReader& r, uint16_t max_w, uint16_t max_h,
-                                   DecodedImage& out) {
+static const char* decode_baseline(const JpegState& st, BitReader& r, uint16_t max_w, uint16_t max_h, DecodedImage& out,
+                                   bool scale_to_fill, ImageRowSink* sink) {
   int w = st.width, h = st.height;
   if (!w || !h)
     return "jpeg: zero dimensions";
@@ -873,7 +873,11 @@ static const char* decode_baseline(const JpegState& st, BitReader& r, uint16_t m
     max_w = static_cast<uint16_t>(w);
   if (max_h == 0)
     max_h = static_cast<uint16_t>(h);
-  if (w <= max_w && h <= max_h) {
+  if (scale_to_fill) {
+    // Caller already computed correct aspect-ratio-preserving target.
+    out_w = max_w;
+    out_h = max_h;
+  } else if (w <= max_w && h <= max_h) {
     out_w = w;
     out_h = h;
   } else if (static_cast<uint32_t>(w) * max_h > static_cast<uint32_t>(h) * max_w) {
@@ -902,10 +906,12 @@ static const char* decode_baseline(const JpegState& st, BitReader& r, uint16_t m
   if (!y_row)
     return "jpeg: OOM for y_row";
 
-  out.data.resize(static_cast<size_t>(out_stride) * static_cast<size_t>(out_h));
-  std::fill(out.data.begin(), out.data.end(), uint8_t(0));
   out.width = static_cast<uint16_t>(out_w);
   out.height = static_cast<uint16_t>(out_h);
+  if (!sink) {
+    out.data.resize(static_cast<size_t>(out_stride) * static_cast<size_t>(out_h));
+    std::fill(out.data.begin(), out.data.end(), uint8_t(0));
+  }
 
   auto err_cur = std::unique_ptr<int16_t[]>(new (std::nothrow) int16_t[out_w + 2]());
   auto err_nxt = std::unique_ptr<int16_t[]>(new (std::nothrow) int16_t[out_w + 2]());
@@ -976,16 +982,24 @@ static const char* decode_baseline(const JpegState& st, BitReader& r, uint16_t m
       int src_y = mcu_row * mcu_h + py;
       if (src_y >= h || out_y >= out_h)
         break;
-      int target_src_y = static_cast<int>((static_cast<uint32_t>(out_y) * y_step) >> 16);
-      if (src_y != target_src_y)
-        continue;
-
-      uint8_t* out_row = out.data.data() + out_y * out_stride;
-      std::memset(out_row, 0, out_stride);
-      dither_row(y_row.get() + py * row_w, x_step, out_w, err_cur.get(), err_nxt.get(), out_row);
-      ++out_y;
-      std::swap(err_cur, err_nxt);
-      std::fill(err_nxt.get(), err_nxt.get() + out_w + 2, int16_t(0));
+      // Emit all output rows that map to this source row (handles upscaling too).
+      while (out_y < out_h) {
+        int target_src_y = static_cast<int>((static_cast<uint32_t>(out_y) * y_step) >> 16);
+        if (target_src_y != src_y)
+          break;
+        if (sink) {
+          uint8_t temp_row[128] = {};  // max 1024/8 = 128 bytes
+          dither_row(y_row.get() + py * row_w, x_step, out_w, err_cur.get(), err_nxt.get(), temp_row);
+          sink->emit_row(sink->ctx, static_cast<uint16_t>(out_y), temp_row, static_cast<uint16_t>(out_w));
+        } else {
+          uint8_t* out_row = out.data.data() + out_y * out_stride;
+          std::memset(out_row, 0, out_stride);
+          dither_row(y_row.get() + py * row_w, x_step, out_w, err_cur.get(), err_nxt.get(), out_row);
+        }
+        ++out_y;
+        std::swap(err_cur, err_nxt);
+        std::fill(err_nxt.get(), err_nxt.get() + out_w + 2, int16_t(0));
+      }
     }
   }
 
@@ -998,7 +1012,8 @@ static const char* decode_baseline(const JpegState& st, BitReader& r, uint16_t m
 // ---------------------------------------------------------------------------
 
 ImageError decode_jpeg_from_entry(IZipFile& file, const ZipEntry& entry, uint16_t max_w, uint16_t max_h,
-                                  DecodedImage& out, uint8_t* work_buf, size_t work_buf_size) {
+                                  DecodedImage& out, uint8_t* work_buf, size_t work_buf_size, bool scale_to_fill,
+                                  ImageRowSink* sink) {
   // If no work_buf provided, allocate one here.
   std::unique_ptr<uint8_t[]> owned_work;
   if (!work_buf || work_buf_size < ZipEntryInput::kMinWorkBufSize) {
@@ -1030,7 +1045,7 @@ ImageError decode_jpeg_from_entry(IZipFile& file, const ZipEntry& entry, uint16_
   }
 
   BitReader r(inp);
-  err = decode_baseline(*st, r, max_w, max_h, out);
+  err = decode_baseline(*st, r, max_w, max_h, out, scale_to_fill, sink);
   if (err) {
     MR_LOGI("jpeg", "%s", err);
     return ImageError::InvalidData;

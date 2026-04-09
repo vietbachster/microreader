@@ -41,6 +41,7 @@ import sys
 import time
 import zlib
 from pathlib import Path
+from typing import Optional
 
 import serial
 
@@ -243,7 +244,7 @@ def send_clear_mrb(ser: serial.Serial) -> str:
 
 def wait_for_book_result(
     ser: serial.Serial, timeout: float, verbose: bool = False
-) -> str | None:
+) -> "Optional[str]":
     """Watch serial output for BOOK_OK or BOOK_FAIL."""
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -421,7 +422,11 @@ def main():
     args = parser.parse_args()
 
     try:
-        ser = serial.Serial(args.port, args.baud, timeout=1)
+        if "://" in args.port:
+            # URL-form: socket://localhost:4444 (QEMU raw TCP) or rfc2217://host:port
+            ser = serial.serial_for_url(args.port, baudrate=args.baud, timeout=1)
+        else:
+            ser = serial.Serial(args.port, args.baud, timeout=1)
     except serial.SerialException as e:
         print(f"Cannot open {args.port}: {e}", file=sys.stderr)
         sys.exit(1)

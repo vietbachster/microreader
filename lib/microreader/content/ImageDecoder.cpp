@@ -448,7 +448,8 @@ ImageError decode_image(const uint8_t* /*data*/, size_t /*size*/, uint16_t /*max
 // ---------------------------------------------------------------------------
 
 ImageError decode_image_from_entry(IZipFile& file, const ZipEntry& entry, uint16_t max_w, uint16_t max_h,
-                                   DecodedImage& out, uint8_t* work_buf, size_t work_buf_size) {
+                                   DecodedImage& out, uint8_t* work_buf, size_t work_buf_size, bool scale_to_fill,
+                                   ImageRowSink* sink) {
   if (!images_enabled)
     return ImageError::UnsupportedFormat;
 
@@ -456,19 +457,22 @@ ImageError decode_image_from_entry(IZipFile& file, const ZipEntry& entry, uint16
   auto fmt = guess_format(std::string(entry.name).c_str());
   if (fmt == ImageFormat::Unknown) {
     // Fall back to magic-byte detection via a small ZipEntryInput peek.
-    // Use a temporary small buffer for stored entries; for deflate we need
-    // the full work_buf — if that's not available, give up gracefully.
+    // For deflated entries we need a large work buffer; if unavailable,
+    // allocate kMinWorkBufSize so the peek works for any compression type.
     std::unique_ptr<uint8_t[]> tmp_buf;
     uint8_t* peek_buf = work_buf;
     size_t peek_buf_size = work_buf_size;
     if (!peek_buf || peek_buf_size < ZipEntryInput::kMinWorkBufSize) {
-      // Allocate just enough for a stored-entry peek (256 bytes)
-      static constexpr size_t kPeekSize = 256;
-      tmp_buf = std::unique_ptr<uint8_t[]>(new (std::nothrow) uint8_t[kPeekSize]);
-      if (!tmp_buf)
-        return ImageError::ReadError;
+      tmp_buf = std::unique_ptr<uint8_t[]>(new (std::nothrow) uint8_t[ZipEntryInput::kMinWorkBufSize]);
+      if (!tmp_buf) {
+        // Last resort: try JPEG (most common image format in EPUBs).
+        auto err = decode_jpeg_from_entry(file, entry, max_w, max_h, out, work_buf, work_buf_size, scale_to_fill, sink);
+        if (err == ImageError::Ok)
+          return err;
+        return decode_png_from_entry(file, entry, max_w, max_h, out, work_buf, work_buf_size, scale_to_fill, sink);
+      }
       peek_buf = tmp_buf.get();
-      peek_buf_size = kPeekSize;
+      peek_buf_size = ZipEntryInput::kMinWorkBufSize;
     }
     ZipEntryInput peek_inp;
     if (peek_inp.open(file, entry, peek_buf, peek_buf_size) != ZipError::Ok)
@@ -487,9 +491,9 @@ ImageError decode_image_from_entry(IZipFile& file, const ZipEntry& entry, uint16
   }
 
   if (fmt == ImageFormat::Jpeg)
-    return decode_jpeg_from_entry(file, entry, max_w, max_h, out, work_buf, work_buf_size);
+    return decode_jpeg_from_entry(file, entry, max_w, max_h, out, work_buf, work_buf_size, scale_to_fill, sink);
   if (fmt == ImageFormat::Png)
-    return decode_png_from_entry(file, entry, max_w, max_h, out, work_buf, work_buf_size);
+    return decode_png_from_entry(file, entry, max_w, max_h, out, work_buf, work_buf_size, scale_to_fill, sink);
 
   return ImageError::UnsupportedFormat;
 }

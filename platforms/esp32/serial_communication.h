@@ -34,10 +34,15 @@
 #include <cstdio>
 #include <cstring>
 
+#ifdef QEMU_BUILD
+#include "driver/uart.h"
+#include "driver/uart_vfs.h"
+#else
 #include "driver/usb_serial_jtag.h"
+#include "esp_vfs_usb_serial_jtag.h"
+#endif
 #include "esp_log.h"
 #include "esp_rom_crc.h"
-#include "esp_vfs_usb_serial_jtag.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -94,7 +99,11 @@ static bool serial_read_exact(uint8_t* buf, size_t n, uint32_t timeout_ms) {
     const TickType_t now = xTaskGetTickCount();
     if ((int32_t)(deadline - now) <= 0)
       return false;
+#ifdef QEMU_BUILD
+    const int r = uart_read_bytes(UART_NUM_0, buf + received, n - received, deadline - now);
+#else
     const int r = usb_serial_jtag_read_bytes(buf + received, n - received, deadline - now);
+#endif
     if (r > 0)
       received += r;
   }
@@ -102,7 +111,19 @@ static bool serial_read_exact(uint8_t* buf, size_t n, uint32_t timeout_ms) {
 }
 
 static void serial_write(const char* msg) {
+#ifdef QEMU_BUILD
+  uart_write_bytes(UART_NUM_0, msg, strlen(msg));
+#else
   usb_serial_jtag_write_bytes((const uint8_t*)msg, strlen(msg), pdMS_TO_TICKS(1000));
+#endif
+}
+
+static void serial_write_raw(const uint8_t* buf, size_t n) {
+#ifdef QEMU_BUILD
+  uart_write_bytes(UART_NUM_0, buf, n);
+#else
+  usb_serial_jtag_write_bytes(buf, n, pdMS_TO_TICKS(1000));
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -215,7 +236,7 @@ static void handle_epub_upload() {
     crc = esp_rom_crc32_le(crc, chunk, want);
     remaining -= want;
     // Flow-control ACK — tell host to send next chunk.
-    usb_serial_jtag_write_bytes(&kAck, 1, pdMS_TO_TICKS(1000));
+    serial_write_raw(&kAck, 1);
   }
   fclose(f);
 
@@ -386,7 +407,11 @@ static void serial_receiver_task(void* /*arg*/) {
 
   while (true) {
     uint8_t byte;
+#ifdef QEMU_BUILD
+    if (uart_read_bytes(UART_NUM_0, &byte, 1, pdMS_TO_TICKS(50)) != 1)
+#else
     if (usb_serial_jtag_read_bytes(&byte, 1, pdMS_TO_TICKS(50)) != 1)
+#endif
       continue;
 
     // Match LUT magic.
@@ -432,12 +457,26 @@ static void serial_receiver_task(void* /*arg*/) {
 
 // Call once from app_main before the main loop.
 inline void serial_start() {
+#ifdef QEMU_BUILD
+  // QEMU simulates UART0; route the binary protocol over it.
+  const uart_config_t uart_cfg = {
+      .baud_rate = 115200,
+      .data_bits = UART_DATA_8_BITS,
+      .parity = UART_PARITY_DISABLE,
+      .stop_bits = UART_STOP_BITS_1,
+      .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+      .source_clk = UART_SCLK_DEFAULT,
+  };
+  uart_param_config(UART_NUM_0, &uart_cfg);
+  uart_driver_install(UART_NUM_0, 4096, 0, 0, nullptr, 0);
+  uart_vfs_dev_use_driver(0);
+#else
   usb_serial_jtag_driver_config_t cfg = {
       .tx_buffer_size = 1024,
       .rx_buffer_size = 4096,
   };
   usb_serial_jtag_driver_install(&cfg);
   esp_vfs_dev_usb_serial_jtag_register();
-
+#endif
   xTaskCreate(serial_receiver_task, "serial_rx", 8192, nullptr, 3, nullptr);
 }

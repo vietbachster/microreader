@@ -31,6 +31,6 @@ set(MINIZ_DIR ${CMAKE_CURRENT_LIST_DIR}/../../test/build2/_deps/miniz-src)
 idf_component_register(
     SRCS ${app_sources} ${lib_sources} ${MINIZ_DIR}/miniz.c
     INCLUDE_DIRS "." "${CMAKE_CURRENT_LIST_DIR}/../../lib" "${MINIZ_DIR}"
-    REQUIRES fatfs driver)
+    REQUIRES fatfs driver wear_levelling)
 
 

@@ -1,6 +1,5 @@
 #include "Application.h"
 
-#include <algorithm>
 #include <cstdlib>
 #include <ctime>
 
@@ -16,7 +15,7 @@ const char* Application::build_info() const {
   return "microreader";
 }
 
-void Application::start(DisplayQueue& queue) {
+void Application::start(DrawBuffer& buf) {
   ticks_ = 0;
   uptime_ms_ = 0;
   buttons_ = ButtonState{};
@@ -29,18 +28,19 @@ void Application::start(DisplayQueue& queue) {
   std::srand(static_cast<unsigned>(std::time(nullptr)));
 #endif
 
-  screen_mgr_.push(&menu_, canvas_, queue);
-  queue.full_refresh();
+  screen_mgr_.push(&menu_, buf);
+  buf.full_refresh();
 }
 
-void Application::auto_open_book(const char* epub_path, DisplayQueue& queue) {
+void Application::auto_open_book(const char* epub_path, DrawBuffer& buf) {
   auto_reader_.set_path(epub_path);
-  screen_mgr_.push(&auto_reader_, canvas_, queue);
+  screen_mgr_.push(&auto_reader_, buf);
+  buf.refresh();
 }
 
-void Application::update(const ButtonState& buttons, uint32_t dt_ms, DisplayQueue& queue, IRuntime& runtime) {
+void Application::update(const ButtonState& buttons, uint32_t dt_ms, DrawBuffer& buf, IRuntime& runtime) {
   if (!started_)
-    start(queue);
+    start(buf);
   if (!running_)
     return;
 
@@ -49,38 +49,40 @@ void Application::update(const ButtonState& buttons, uint32_t dt_ms, DisplayQueu
   buttons_ = buttons;
 
   if (buttons_.is_pressed(Button::Power)) {
+    // Draw checkerboard pattern then full refresh before deep sleep.
     constexpr int kBlock = 80;
-    const int W = queue.width();
-    const int H = queue.height();
-    queue.submit(0, 0, W, H, [=](DisplayFrame& frame) {
-      for (int row = 0; row < H; ++row) {
-        const int tile_y = row / kBlock;
-        int col = 0;
-        while (col < W) {
-          const int tile_x = col / kBlock;
-          const bool white = ((tile_x ^ tile_y) & 1) == 0;
-          const int tile_end = (tile_x + 1) * kBlock;
-          const int span_end = tile_end < W ? tile_end : W;
-          frame.fill_row(row, col, span_end, white);
-          col = span_end;
-        }
+    const int W = DrawBuffer::kWidth;
+    const int H = DrawBuffer::kHeight;
+    buf.fill(true);
+    for (int row = 0; row < H; ++row) {
+      const int tile_y = row / kBlock;
+      int col = 0;
+      while (col < W) {
+        const int tile_x = col / kBlock;
+        const bool white = ((tile_x ^ tile_y) & 1) == 0;
+        const int tile_end = (tile_x + 1) * kBlock;
+        const int span_end = tile_end < W ? tile_end : W;
+        buf.fill_row(row, col, span_end, white);
+        col = span_end;
       }
-    });
-    queue.full_refresh(RefreshMode::Full);
-    queue.display_deep_sleep();
+    }
+    buf.full_refresh(RefreshMode::Full);
+    buf.deep_sleep();
     running_ = false;
     return;
   }
 
   IScreen* top = screen_mgr_.top();
   if (top) {
-    if (!top->update(buttons_, canvas_, queue, runtime)) {
+    if (!top->update(buttons_, buf, runtime)) {
       // Screen signalled exit.
       if (top == &menu_) {
         // Menu chose a screen — push it onto the stack.
         IScreen* chosen = menu_.chosen();
-        if (chosen)
-          screen_mgr_.push(chosen, canvas_, queue);
+        if (chosen) {
+          screen_mgr_.push(chosen, buf);
+          buf.refresh();
+        }
       } else {
         // Check if the exiting screen selected a sub-screen to push.
         IScreen* next = nullptr;
@@ -90,10 +92,12 @@ void Application::update(const ButtonState& buttons, uint32_t dt_ms, DisplayQueu
 
         if (next) {
           // Push the sub-screen (e.g. BookSelect → Reader).
-          screen_mgr_.push(next, canvas_, queue);
+          screen_mgr_.push(next, buf);
+          buf.refresh();
         } else {
           // Pop back to the previous screen.
-          screen_mgr_.pop(canvas_, queue);
+          screen_mgr_.pop(buf);
+          buf.refresh();
         }
       }
     }

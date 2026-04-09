@@ -3,10 +3,11 @@
 #include <cstdio>
 #include <cstring>
 
+#include "../HeapLog.h"
+
 #ifdef ESP_PLATFORM
 #include <dirent.h>
 #else
-// Desktop: use C++17 filesystem for directory scanning.
 #include <filesystem>
 namespace fs = std::filesystem;
 #endif
@@ -28,7 +29,6 @@ void BookSelectScreen::scan_directory_() {
     if (len > 5 && len < 220 && std::strcmp(ent->d_name + len - 5, ".epub") == 0) {
       auto& e = entries_[count_];
       std::snprintf(e.path, sizeof(e.path), "%s/%s", books_dir_, ent->d_name);
-      // Build display label: strip .epub, truncate to fit.
       size_t name_len = len - 5;
       if (name_len > kMaxLabelLen)
         name_len = kMaxLabelLen;
@@ -65,32 +65,30 @@ void BookSelectScreen::scan_directory_() {
 #endif
 }
 
-void BookSelectScreen::start(Canvas& canvas, DisplayQueue& queue) {
-  chosen_ = nullptr;
-  scan_directory_();
-
-  const int W = queue.width();
-  const int H = queue.height();
-  queue.submit(0, 0, W, H, /*white=*/true);
-
-  // Title.
-  title_.set_text(count_ > 0 ? "Select Book:" : "No books found");
-  title_.set_position(kPadding, kPadding);
-  canvas.add(&title_);
-
-  // List labels.
+void BookSelectScreen::draw_all_(DrawBuffer& buf) const {
+  const int W = DrawBuffer::kWidth;
+  buf.fill(true);
+  const char* title = count_ > 0 ? "Select Book:" : "No books found";
+  buf.draw_text(kPadding, kPadding, title, true, kScale);
   const int list_y = kPadding + kLineHeight + 4;
   for (int i = 0; i < count_; ++i) {
-    labels_[i] = CanvasText(kPadding, list_y + i * kLineHeight, entries_[i].label, i != selected_, kScale);
-    canvas.add(&labels_[i]);
+    buf.draw_text(kPadding, list_y + i * kLineHeight, entries_[i].label, i != selected_, kScale);
   }
+  (void)W;
+}
 
-  canvas.commit(queue);
+void BookSelectScreen::start(DrawBuffer& buf) {
+  HEAP_LOG("BookSelect: start enter");
+  chosen_ = nullptr;
+  selected_ = 0;
+  scan_directory_();
+  HEAP_LOG("BookSelect: after scan");
+  draw_all_(buf);
 }
 
 void BookSelectScreen::stop() {}
 
-bool BookSelectScreen::update(const ButtonState& buttons, Canvas& canvas, DisplayQueue& queue, IRuntime& /*runtime*/) {
+bool BookSelectScreen::update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& /*runtime*/) {
   if (buttons.is_pressed(Button::Button0))
     return false;
 
@@ -112,8 +110,8 @@ bool BookSelectScreen::update(const ButtonState& buttons, Canvas& canvas, Displa
   }
 
   if (moved) {
-    update_cursor_();
-    canvas.commit(queue);
+    draw_all_(buf);
+    buf.refresh();
   }
 
   if (buttons.is_pressed(Button::Button1) && selected_ < count_) {
@@ -123,11 +121,6 @@ bool BookSelectScreen::update(const ButtonState& buttons, Canvas& canvas, Displa
   }
 
   return true;
-}
-
-void BookSelectScreen::update_cursor_() {
-  for (int i = 0; i < count_; ++i)
-    labels_[i].set_color(i != selected_);
 }
 
 }  // namespace microreader

@@ -4,56 +4,34 @@
 
 #include <vector>
 
-#include "microreader/display/Display.h"
+#include "microreader/display/DrawBuffer.h"
 #include "runtime.h"
 
-// Simulates e-ink pixel physics for the desktop emulator.
-// On each tick(ground_truth, target) call the float sim buffer steps each
-// pixel toward `target` at 1/phases per call, producing a smooth transition
-// effect that mirrors the real panel's gradual particle movement.
+// Desktop e-ink emulator. Renders the pixel buffer to an SDL window.
+// Maintains a float sim_ buffer to reproduce e-ink colour tonality;
+// partial_refresh snaps only changed pixels so the paper texture is preserved.
 class DesktopEmulatorDisplay final : public microreader::IDisplay {
  public:
-  bool show_transitions = false;  // overlay pink tint on in-flight pixels
-
-  // Point at DisplayQueue::phases so the sim step size stays in sync.
-  void set_phases_source(const int* src) {
-    phases_ = src;
-  }
-
   static constexpr int kPixels = microreader::DisplayFrame::kPhysicalWidth * microreader::DisplayFrame::kPhysicalHeight;
 
-  explicit DesktopEmulatorDisplay(DesktopRuntime& rt) : rt_(rt), sim_(kPixels, 1.0f), transitioning_(kPixels, false) {}
+  explicit DesktopEmulatorDisplay(DesktopRuntime& rt) : rt_(rt), sim_(kPixels, 1.0f) {}
 
   void set_rotation(microreader::Rotation r) override {
     rotation_ = r;
     rt_.apply_rotation(r);
   }
 
-  microreader::Rotation rotation() const override {
-    return rotation_;
-  }
-
-  // Called each loop tick. Steps sim toward target, then renders.
-  void tick(const uint8_t* ground_truth, bool /*gt_dirty*/, const uint8_t* target, bool /*target_dirty*/,
-            bool /*refresh*/ = true) override {
-    step_and_render(ground_truth, target);
-  }
-
-  // Snap sim state directly to the settled buffer (no animation), then render.
   void full_refresh(const uint8_t* pixels, microreader::RefreshMode /*mode*/) override {
-    for (int y = 0; y < microreader::DisplayFrame::kPhysicalHeight; ++y) {
-      for (int x = 0; x < microreader::DisplayFrame::kPhysicalWidth; ++x) {
-        const std::size_t byte_idx = static_cast<std::size_t>(y * microreader::DisplayFrame::kStride + x / 8);
-        const uint8_t bit = static_cast<uint8_t>(0x80u >> (x & 7));
-        sim_[y * microreader::DisplayFrame::kPhysicalWidth + x] = (pixels[byte_idx] & bit) ? 1.0f : 0.0f;
-      }
+    for (int i = 0; i < kPixels; ++i) {
+      const int y = i / microreader::DisplayFrame::kPhysicalWidth;
+      const int x = i % microreader::DisplayFrame::kPhysicalWidth;
+      const std::size_t byte_idx = static_cast<std::size_t>(y * microreader::DisplayFrame::kStride + x / 8);
+      const uint8_t bit = static_cast<uint8_t>(0x80u >> (x & 7));
+      sim_[i] = (pixels[byte_idx] & bit) ? 1.0f : 0.0f;
     }
-    // ground_truth == target after full_refresh, so pass pixels for both.
-    step_and_render(pixels, pixels);
+    render_();
   }
 
-  // Partial refresh: only drive pixels that differ between old and new,
-  // matching real e-ink behaviour where unchanged pixels are not touched.
   void partial_refresh(const uint8_t* old_pixels, const uint8_t* new_pixels) override {
     for (int y = 0; y < microreader::DisplayFrame::kPhysicalHeight; ++y) {
       for (int x = 0; x < microreader::DisplayFrame::kPhysicalWidth; ++x) {
@@ -61,58 +39,24 @@ class DesktopEmulatorDisplay final : public microreader::IDisplay {
         const uint8_t bit = static_cast<uint8_t>(0x80u >> (x & 7));
         const bool old_white = (old_pixels[byte_idx] & bit) != 0;
         const bool new_white = (new_pixels[byte_idx] & bit) != 0;
-        if (old_white != new_white) {
+        if (old_white != new_white)
           sim_[y * microreader::DisplayFrame::kPhysicalWidth + x] = new_white ? 1.0f : 0.0f;
-        }
-        // Unchanged pixels keep their current sim_ value (may have ghosting).
+        // Unchanged pixels keep their current sim_ value (preserves ghosting appearance).
       }
     }
-    step_and_render(new_pixels, new_pixels);
+    render_();
   }
 
  private:
   DesktopRuntime& rt_;
   microreader::Rotation rotation_ = microreader::Rotation::Deg0;
-  std::vector<float> sim_;           // per-pixel visual state: 0.0=black, 1.0=white
-  std::vector<bool> transitioning_;  // true while ground_truth != target
-  const int* phases_ = nullptr;
+  std::vector<float> sim_;
 
   // E-ink palette: RGB endpoints for black (s=0) and white (s=1).
-  // Settled pixels.
   static constexpr uint8_t kBlackR = 0x18, kBlackG = 0x1A, kBlackB = 0x1C;
   static constexpr uint8_t kWhiteR = 0xE8, kWhiteG = 0xDC, kWhiteB = 0xC8;
-  // Transitioning pixel tint.
-  static constexpr uint8_t kTintBlackR = 0xE8, kTintBlackG = 0x40, kTintBlackB = 0x80;
-  static constexpr uint8_t kTintWhiteR = 0xFF, kTintWhiteG = 0xA0, kTintWhiteB = 0xC0;
 
-  int phases() const {
-    return phases_ ? *phases_ : 1;
-  }
-
-  void step_and_render(const uint8_t* ground_truth, const uint8_t* target) {
-    const float step = 3.0f / static_cast<float>(phases());
-    for (int y = 0; y < microreader::DisplayFrame::kPhysicalHeight; ++y) {
-      for (int x = 0; x < microreader::DisplayFrame::kPhysicalWidth; ++x) {
-        const std::size_t byte_idx = static_cast<std::size_t>(y * microreader::DisplayFrame::kStride + x / 8);
-        const uint8_t bit = static_cast<uint8_t>(0x80u >> (x & 7));
-        const bool gt_white = (ground_truth[byte_idx] & bit) != 0;
-        const bool target_white = (target[byte_idx] & bit) != 0;
-        float& s = sim_[y * microreader::DisplayFrame::kPhysicalWidth + x];
-        const bool transitioning = (gt_white != target_white);
-        transitioning_[y * microreader::DisplayFrame::kPhysicalWidth + x] = transitioning;
-        if (transitioning) {
-          // Pixel is transitioning: move a fraction of the remaining distance
-          // so movement is fast initially and slows as it approaches the target.
-          const float goal = target_white ? 1.0f : 0.0f;
-          s += (goal - s) * step;
-          if (s > 1.0f)
-            s = 1.0f;
-          if (s < 0.0f)
-            s = 0.0f;
-        }
-      }
-    }
-
+  void render_() {
     void* raw = nullptr;
     int pitch = 0;
     SDL_LockTexture(rt_.texture(), nullptr, &raw, &pitch);
@@ -121,16 +65,9 @@ class DesktopEmulatorDisplay final : public microreader::IDisplay {
       uint8_t* row = p + y * pitch;
       for (int x = 0; x < microreader::DisplayFrame::kPhysicalWidth; ++x) {
         const float s = sim_[y * microreader::DisplayFrame::kPhysicalWidth + x];
-        const bool t = show_transitions && transitioning_[y * microreader::DisplayFrame::kPhysicalWidth + x];
-        if (t) {
-          row[x * 3 + 0] = static_cast<uint8_t>(kTintBlackR + s * (kTintWhiteR - kTintBlackR));
-          row[x * 3 + 1] = static_cast<uint8_t>(kTintBlackG + s * (kTintWhiteG - kTintBlackG));
-          row[x * 3 + 2] = static_cast<uint8_t>(kTintBlackB + s * (kTintWhiteB - kTintBlackB));
-        } else {
-          row[x * 3 + 0] = static_cast<uint8_t>(kBlackR + s * (kWhiteR - kBlackR));
-          row[x * 3 + 1] = static_cast<uint8_t>(kBlackG + s * (kWhiteG - kBlackG));
-          row[x * 3 + 2] = static_cast<uint8_t>(kBlackB + s * (kWhiteB - kBlackB));
-        }
+        row[x * 3 + 0] = static_cast<uint8_t>(kBlackR + s * (kWhiteR - kBlackR));
+        row[x * 3 + 1] = static_cast<uint8_t>(kBlackG + s * (kWhiteG - kBlackG));
+        row[x * 3 + 2] = static_cast<uint8_t>(kBlackB + s * (kWhiteB - kBlackB));
       }
     }
     SDL_UnlockTexture(rt_.texture());

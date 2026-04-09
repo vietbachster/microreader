@@ -4,111 +4,97 @@
 #include <cstdlib>
 #include <cstring>
 
-#include "../display/Font.h"
-
 namespace microreader {
 
-void BouncingBallDemo::start(Canvas& canvas, DisplayQueue& queue) {
-  const int W = queue.width();
-  const int H = queue.height();
-  queue.submit(0, 0, W, H, /*white=*/true);
-  for (auto& r : rand_rects_)
-    canvas.add(&r.rect);
-  for (auto& c : rand_circles_)
-    canvas.add(&c.circle);
-  canvas.add(&ball_);
-  for (auto& t : rand_texts_)
-    canvas.add(&t.label);
+void BouncingBallDemo::draw_all_(DrawBuffer& buf) const {
+  buf.fill(true);
+  for (const auto& r : rand_rects_)
+    buf.fill_rect(r.x, r.y, r.w, r.h, false);
+  for (const auto& c : rand_circles_)
+    buf.draw_circle(c.cx, c.cy, c.r, false);
+  buf.draw_circle(ball_cx_, ball_cy_, kBallRadius, false);
+  for (const auto& t : rand_texts_)
+    buf.draw_text(t.x, t.y, t.text, true, 1);
+}
 
-  for (auto& r : rand_rects_) {
-    const int rx = std::rand() % (W - r.w);
-    const int ry = std::rand() % (H - r.h);
-    r.rect.set_position(rx, ry);
-    r.countdown = 25 + std::rand() % 76;
+void BouncingBallDemo::start(DrawBuffer& buf) {
+  const int W = DrawBuffer::kWidth;
+  const int H = DrawBuffer::kHeight;
+
+  ball_cx_ = kBallRadius;
+  ball_cy_ = kBallRadius;
+
+  for (int i = 0; i < kNumRects; ++i) {
+    const int w = kRectSizes[i][0], h = kRectSizes[i][1];
+    rand_rects_[i] = {std::rand() % std::max(1, W - w), std::rand() % std::max(1, H - h), w, h, 25 + std::rand() % 76};
   }
-  for (auto& c : rand_circles_) {
-    const int cx = c.radius + std::rand() % (W - 2 * c.radius);
-    const int cy = c.radius + std::rand() % (H - 2 * c.radius);
-    c.circle.set_position(cx, cy);
-    c.countdown = 25 + std::rand() % 76;
+  for (int i = 0; i < kNumCircles; ++i) {
+    const int r = kCircleRadii[i];
+    rand_circles_[i] = {r + std::rand() % std::max(1, W - 2 * r), r + std::rand() % std::max(1, H - 2 * r), r,
+                        25 + std::rand() % 76};
   }
-  for (auto& t : rand_texts_) {
-    const int len = static_cast<int>(std::strlen(t.label.text()));
-    const int tw = len * CanvasText::kGlyphW;
-    const int tx = std::rand() % std::max(1, W - tw);
-    const int ty = std::rand() % std::max(1, H - CanvasText::kGlyphH);
-    t.label.set_position(tx, ty);
-    t.countdown = 25 + std::rand() % 76;
+  for (int i = 0; i < kNumTexts; ++i) {
+    const int tw = static_cast<int>(std::strlen(kTextLabels[i])) * 8;
+    rand_texts_[i] = {std::rand() % std::max(1, W - tw), std::rand() % std::max(1, H - 8), 25 + std::rand() % 76,
+                      kTextLabels[i]};
   }
-  canvas.commit(queue);
+
+  draw_all_(buf);
 }
 
 void BouncingBallDemo::stop() {}
 
-bool BouncingBallDemo::update(const ButtonState& buttons, Canvas& canvas, DisplayQueue& queue, IRuntime& /*runtime*/) {
-  // Button0 = back to menu.
+bool BouncingBallDemo::update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& /*runtime*/) {
   if (buttons.is_pressed(Button::Button0))
     return false;
 
-  // Up toggles pause/auto-bounce.
-  if (buttons.is_pressed(Button::Up))
-    demo_paused_ = !demo_paused_;
+  const int W = DrawBuffer::kWidth;
+  const int H = DrawBuffer::kHeight;
 
-  // Auto-bounce.
-  int cx = ball_.cx() + demo_vx_;
-  int cy = ball_.cy() + demo_vy_;
-  const int W = queue.width();
-  const int H = queue.height();
-
-  if (cx <= kBallRadius) {
-    cx = kBallRadius;
+  ball_cx_ += demo_vx_;
+  ball_cy_ += demo_vy_;
+  if (ball_cx_ <= kBallRadius) {
+    ball_cx_ = kBallRadius;
     demo_vx_ = -demo_vx_;
   }
-  if (cx >= W - kBallRadius - 1) {
-    cx = W - kBallRadius - 1;
+  if (ball_cx_ >= W - kBallRadius - 1) {
+    ball_cx_ = W - kBallRadius - 1;
     demo_vx_ = -demo_vx_;
   }
-  if (cy <= kBallRadius) {
-    cy = kBallRadius;
+  if (ball_cy_ <= kBallRadius) {
+    ball_cy_ = kBallRadius;
     demo_vy_ = -demo_vy_;
   }
-  if (cy >= H - kBallRadius - 1) {
-    cy = H - kBallRadius - 1;
+  if (ball_cy_ >= H - kBallRadius - 1) {
+    ball_cy_ = H - kBallRadius - 1;
     demo_vy_ = -demo_vy_;
   }
-
-  ball_.set_position(cx, cy);
 
   for (auto& r : rand_rects_) {
     if (--r.countdown <= 0) {
-      const int rx = std::rand() % (W - r.w);
-      const int ry = std::rand() % (H - r.h);
-      r.rect.set_position(rx, ry);
+      r.x = std::rand() % std::max(1, W - r.w);
+      r.y = std::rand() % std::max(1, H - r.h);
       r.countdown = 25 + std::rand() % 76;
     }
   }
-
   for (auto& c : rand_circles_) {
     if (--c.countdown <= 0) {
-      const int cx_ = c.radius + std::rand() % (W - 2 * c.radius);
-      const int cy_ = c.radius + std::rand() % (H - 2 * c.radius);
-      c.circle.set_position(cx_, cy_);
+      c.cx = c.r + std::rand() % std::max(1, W - 2 * c.r);
+      c.cy = c.r + std::rand() % std::max(1, H - 2 * c.r);
       c.countdown = 25 + std::rand() % 76;
     }
   }
-
   for (auto& t : rand_texts_) {
     if (--t.countdown <= 0) {
-      const int len = static_cast<int>(std::strlen(t.label.text()));
-      const int tw = len * CanvasText::kGlyphW;
-      const int tx = std::rand() % std::max(1, W - tw);
-      const int ty = std::rand() % std::max(1, H - CanvasText::kGlyphH);
-      t.label.set_position(tx, ty);
+      const int tw = static_cast<int>(std::strlen(t.text)) * 8;
+      t.x = std::rand() % std::max(1, W - tw);
+      t.y = std::rand() % std::max(1, H - 8);
       t.countdown = 25 + std::rand() % 76;
     }
   }
 
-  canvas.commit(queue);
+  draw_all_(buf);
+  buf.refresh();
   return true;
 }
 

@@ -1,12 +1,9 @@
-#pragma once
+﻿#pragma once
 
-#include <array>
 #include <cstdlib>
 
 #include "../Input.h"
-#include "../display/Canvas.h"
-#include "../display/Display.h"
-#include "../display/DisplayQueue.h"
+#include "../display/DrawBuffer.h"
 #include "IScreen.h"
 
 namespace microreader {
@@ -19,73 +16,44 @@ class BouncingBallDemo final : public IScreen {
     return "Bouncing Ball";
   }
 
-  void start(Canvas& canvas, DisplayQueue& queue) override;
+  void start(DrawBuffer& buf) override;
   void stop() override;
-  bool update(const ButtonState& buttons, Canvas& canvas, DisplayQueue& queue, IRuntime& runtime) override;
+  bool update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& runtime) override;
 
  private:
-  // Bouncing ball.
   static constexpr int kBallRadius = 30;
-  static constexpr int kMoveStep = 10;
-  CanvasCircle ball_{kBallRadius, kBallRadius, kBallRadius, /*white=*/false};
+
+  int ball_cx_ = kBallRadius;
+  int ball_cy_ = kBallRadius;
   int demo_vx_ = 5;
   int demo_vy_ = 5;
-  bool demo_paused_ = true;
 
-  // Randomly repositioning rectangles, each with its own countdown.
-  static constexpr int kNumRects = 10;
   struct RandRect {
-    CanvasRect rect;
-    int countdown = 1;
-    int w, h;
+    int x, y, w, h, countdown;
   };
-  std::array<RandRect, kNumRects> rand_rects_{
-      {
-       {{0, 0, 80, 80}, 1, 80, 80},
-       {{0, 0, 60, 60}, 1, 60, 60},
-       {{0, 0, 100, 100}, 1, 100, 100},
-       {{0, 0, 50, 50}, 1, 50, 50},
-       {{0, 0, 70, 40}, 1, 70, 40},
-       {{0, 0, 90, 90}, 1, 90, 90},
-       {{0, 0, 40, 70}, 1, 40, 70},
-       {{0, 0, 55, 55}, 1, 55, 55},
-       {{0, 0, 120, 45}, 1, 120, 45},
-       {{0, 0, 45, 120}, 1, 45, 120},
-       }
+  static constexpr int kNumRects = 10;
+  static constexpr int kRectSizes[kNumRects][2] = {
+      {80,80},{60,60},{100,100},{50,50},{70,40},{90,90},{40,70},{55,55},{120,45},{45,120},
   };
+  RandRect rand_rects_[kNumRects] = {};
 
-  // Randomly repositioning circles, each with its own countdown.
-  static constexpr int kNumCircles = 5;
   struct RandCircle {
-    CanvasCircle circle;
-    int countdown = 1;
-    int radius;
+    int cx, cy, r, countdown;
   };
-  std::array<RandCircle, kNumCircles> rand_circles_{
-      {
-       {{0, 0, 40}, 1, 40},
-       {{0, 0, 25}, 1, 25},
-       {{0, 0, 55}, 1, 55},
-       {{0, 0, 35}, 1, 35},
-       {{0, 0, 50}, 1, 50},
-       }
-  };
+  static constexpr int kNumCircles = 5;
+  static constexpr int kCircleRadii[kNumCircles] = {40, 25, 55, 35, 50};
+  RandCircle rand_circles_[kNumCircles] = {};
 
-  // Randomly repositioning text labels.
-  static constexpr int kNumTexts = 5;
   struct RandText {
-    CanvasText label;
-    int countdown = 1;
+    int x, y, countdown;
+    const char* text;
   };
-  std::array<RandText, kNumTexts> rand_texts_{
-      {
-       {{0, 0, "Hello"}, 1},
-       {{0, 0, "World"}, 1},
-       {{0, 0, "ePaper"}, 1},
-       {{0, 0, "micro"}, 1},
-       {{0, 0, "reader"}, 1},
-       }
-  };
+  static constexpr int kNumTexts = 5;
+  static constexpr const char* kTextLabels[kNumTexts] = {
+      "Hello", "World", "ePaper", "micro", "reader"};
+  RandText rand_texts_[kNumTexts] = {};
+
+  void draw_all_(DrawBuffer& buf) const;
 };
 
 }  // namespace microreader

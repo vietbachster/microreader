@@ -7,8 +7,7 @@
 #include "../content/TextLayout.h"
 #include "../content/mrb/MrbConverter.h"
 #include "../content/mrb/MrbReader.h"
-#include "../display/Canvas.h"
-#include "../display/DisplayQueue.h"
+#include "../display/DrawBuffer.h"
 #include "../display/Font.h"
 #include "IScreen.h"
 
@@ -33,9 +32,9 @@ class ReaderScreen final : public IScreen {
     return "Reader";
   }
 
-  void start(Canvas& canvas, DisplayQueue& queue) override;
+  void start(DrawBuffer& buf) override;
   void stop() override;
-  bool update(const ButtonState& buttons, Canvas& canvas, DisplayQueue& queue, IRuntime& runtime) override;
+  bool update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& runtime) override;
 
  private:
   static constexpr int kScale = 2;
@@ -47,25 +46,26 @@ class ReaderScreen final : public IScreen {
 
   const char* path_ = nullptr;
   std::string mrb_path_;
-  DisplayQueue* queue_ = nullptr;  // set in start(), cleared in stop()
+  DrawBuffer* buf_ = nullptr;  // set in start(), cleared in stop()
   Book book_;
   MrbReader mrb_;
   std::unique_ptr<MrbChapterSource> chapter_src_;
   size_t chapter_idx_ = 0;
   PagePosition page_pos_;
   PageContent page_;
-  int screen_w_ = 480;
-  int screen_h_ = 800;
   bool open_ok_ = false;
 
-  // Decoded image cache: [key] = decoded bitmap (empty = not yet decoded).
-  std::vector<DecodedImage> decoded_cache_;
-
-  CanvasText error_label_{0, 0, "", false, kScale};
+  // Cached image dimensions: one entry per image ref in the MRB.
+  struct ImageDims {
+    uint16_t width = 0;
+    uint16_t height = 0;
+  };
+  std::vector<ImageDims> dim_cache_;
 
   bool resolve_image_size_(uint16_t key, uint16_t& w, uint16_t& h);
-  bool decode_image_by_offset_(uint32_t offset, DecodedImage& out);
-  void render_page_(DisplayQueue& queue);
+  bool decode_image_to_buffer_(uint32_t offset, DrawBuffer& buf, int dest_x, int dest_y, uint16_t max_w,
+                               uint16_t max_h);
+  void render_page_(DrawBuffer& buf);
   bool next_page_();
   bool prev_page_();
   void load_chapter_(size_t idx);

@@ -8,8 +8,6 @@
 
 #include <cstdint>
 
-#include "Display.h"
-
 namespace microreader {
 namespace detail {
 
@@ -222,39 +220,6 @@ inline int next_glyph_index(const char*& p) {
       return 118;  // ⁄
     default:
       return kFallbackGlyphIdx;
-  }
-}
-
-// Draw a single character at pixel position (x, y). White pixels on black background.
-inline void draw_char(DisplayFrame& frame, int x, int y, char c) {
-  int idx = static_cast<unsigned char>(c) - 0x20;
-  if (idx < 0 || idx >= detail::kAsciiGlyphCount)
-    idx = kFallbackGlyphIdx;
-  const auto& glyph = detail::kFont8x8[idx];
-  for (int row = 0; row < 8; ++row) {
-    for (int col = 0; col < 8; ++col) {
-      const bool on = (glyph[row] & (0x80u >> col)) != 0;
-      frame.set_pixel(x + col, y + row, on);
-    }
-  }
-}
-
-// Draw a null-terminated UTF-8 string at pixel position (x, y).
-// One glyph per codepoint; unknown codepoints render as '?'.
-inline void draw_text(DisplayFrame& frame, int x, int y, const char* text) {
-  int cx = x;
-  while (text && *text) {
-    if (cx + 8 > frame.width())
-      break;
-    int idx = next_glyph_index(text);
-    const auto& glyph = detail::kFont8x8[idx];
-    for (int row = 0; row < 8; ++row) {
-      for (int col = 0; col < 8; ++col) {
-        const bool on = (glyph[row] & (0x80u >> col)) != 0;
-        frame.set_pixel(cx + col, y + row, on);
-      }
-    }
-    cx += 8;
   }
 }
 

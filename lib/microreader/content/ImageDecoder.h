@@ -21,9 +21,11 @@ struct DecodedImage {
     return stride() * height;
   }
 
-  // Get pixel at (x, y): 0 = black, 1 = white
+  // Get pixel at (x, y): returns white (true) for out-of-bounds coords.
   bool pixel(int x, int y) const {
-    size_t byte_idx = y * stride() + x / 8;
+    if (x < 0 || y < 0 || x >= width || y >= height)
+      return true;
+    size_t byte_idx = static_cast<size_t>(y) * stride() + static_cast<size_t>(x) / 8;
     uint8_t bit = 7 - (x % 8);
     return (data[byte_idx] >> bit) & 1;
   }
@@ -114,6 +116,15 @@ bool get_image_size(const uint8_t* data, size_t size, uint16_t& out_w, uint16_t&
 // Can be set from UI settings. Defaults to true.
 extern bool images_enabled;
 
+// Callback invoked for each dithered output row during streaming decode.
+// y: 0-based row index within the image.
+// data: packed 1-bit row, (width+7)/8 bytes, MSB=leftmost pixel.
+// width: image width in pixels.
+struct ImageRowSink {
+  void (*emit_row)(void* ctx, uint16_t y, const uint8_t* data, uint16_t width) = nullptr;
+  void* ctx = nullptr;
+};
+
 // Decode an image to 1-bit dithered bitmap.
 // Input: raw image data (JPEG or PNG).
 // Output: DecodedImage with packed 1-bit pixels.
@@ -123,19 +134,28 @@ ImageError decode_image(const uint8_t* data, size_t size, uint16_t max_w, uint16
 // Decode a JPEG image by streaming directly from a ZIP entry.
 // work_buf must be >= ZipEntryInput::kMinWorkBufSize for deflate entries;
 // if nullptr (or too small), a buffer is heap-allocated internally.
+// scale_to_fill: if true, scale up to fill max_w×max_h even when the source
+// is smaller (aspect-ratio-preserving). Default false = cap to max, keep
+// natural size for small images.
+// sink: if non-null, each dithered row is emitted via the callback instead of
+// being stored in out.data. out.width/height are still set.
 ImageError decode_jpeg_from_entry(IZipFile& file, const ZipEntry& entry, uint16_t max_w, uint16_t max_h,
-                                  DecodedImage& out, uint8_t* work_buf = nullptr, size_t work_buf_size = 0);
+                                  DecodedImage& out, uint8_t* work_buf = nullptr, size_t work_buf_size = 0,
+                                  bool scale_to_fill = false, ImageRowSink* sink = nullptr);
 
 // Decode a PNG image by streaming directly from a ZIP entry.
-// Same work_buf semantics as decode_jpeg_from_entry.
+// Same work_buf, scale_to_fill, and sink semantics as decode_jpeg_from_entry.
 ImageError decode_png_from_entry(IZipFile& file, const ZipEntry& entry, uint16_t max_w, uint16_t max_h,
-                                 DecodedImage& out, uint8_t* work_buf = nullptr, size_t work_buf_size = 0);
+                                 DecodedImage& out, uint8_t* work_buf = nullptr, size_t work_buf_size = 0,
+                                 bool scale_to_fill = false, ImageRowSink* sink = nullptr);
 
 // Decode a JPEG or PNG image by streaming from a ZIP entry.
 // Detects format from the first bytes of the entry.
 // work_buf: optional caller-provided buffer (>= ZipEntryInput::kMinWorkBufSize).
+// sink: if non-null, rows are emitted via callback (no out.data allocation).
 ImageError decode_image_from_entry(IZipFile& file, const ZipEntry& entry, uint16_t max_w, uint16_t max_h,
-                                   DecodedImage& out, uint8_t* work_buf = nullptr, size_t work_buf_size = 0);
+                                   DecodedImage& out, uint8_t* work_buf = nullptr, size_t work_buf_size = 0,
+                                   bool scale_to_fill = false, ImageRowSink* sink = nullptr);
 
 // Floyd-Steinberg dither a grayscale buffer to 1-bit packed bitmap.
 // grayscale: width*height bytes, 0=black, 255=white.

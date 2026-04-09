@@ -720,8 +720,8 @@ TEST(PageLayout, XPositionsIncreaseWithinLine) {
 // Font size tests
 // ===================================================================
 
-TEST(TextLayout, LargeWordsAreWider) {
-  // A large word should be wider than a normal word of the same text
+TEST(TextLayout, LargeWordsSameWidth) {
+  // Large and Normal words have the same width (bitmap font can't resize glyphs).
   TextParagraph para_normal;
   para_normal.runs.push_back(microreader::Run("Hello", FontStyle::Regular, FontSize::Normal));
 
@@ -735,13 +735,13 @@ TEST(TextLayout, LargeWordsAreWider) {
   ASSERT_EQ(lines_n.size(), 1u);
   ASSERT_EQ(lines_l.size(), 1u);
 
-  // Large word occupies more horizontal space
   uint16_t end_n = lines_n[0].words[0].x + font8.word_width("Hello", 5, FontStyle::Regular, FontSize::Normal);
   uint16_t end_l = lines_l[0].words[0].x + font8.word_width("Hello", 5, FontStyle::Regular, FontSize::Large);
-  EXPECT_GT(end_l, end_n);
+  EXPECT_EQ(end_l, end_n);
 }
 
-TEST(TextLayout, SmallWordsAreNarrower) {
+TEST(TextLayout, SmallWordsSameWidth) {
+  // Small and Normal words have the same width (bitmap font can't resize glyphs).
   TextParagraph para_normal;
   para_normal.runs.push_back(microreader::Run("Hello", FontStyle::Regular, FontSize::Normal));
 
@@ -757,11 +757,11 @@ TEST(TextLayout, SmallWordsAreNarrower) {
 
   uint16_t end_n = lines_n[0].words[0].x + font8.word_width("Hello", 5, FontStyle::Regular, FontSize::Normal);
   uint16_t end_s = lines_s[0].words[0].x + font8.word_width("Hello", 5, FontStyle::Regular, FontSize::Small);
-  EXPECT_LT(end_s, end_n);
+  EXPECT_EQ(end_s, end_n);
 }
 
-TEST(TextLayout, LargeTextWrapsEarlier) {
-  // Same text, narrow width — large font should produce more lines
+TEST(TextLayout, LargeTextSameWrapping) {
+  // With fixed glyph width, Large and Normal produce the same line count.
   std::string text = "The quick brown fox jumps over the lazy dog";
 
   TextParagraph para_normal;
@@ -774,7 +774,7 @@ TEST(TextLayout, LargeTextWrapsEarlier) {
   auto lines_n = layout_paragraph(font8, opts, para_normal);
   auto lines_l = layout_paragraph(font8, opts, para_large);
 
-  EXPECT_GE(lines_l.size(), lines_n.size());
+  EXPECT_EQ(lines_l.size(), lines_n.size());
 }
 
 TEST(TextLayout, LayoutWordCarriesFontSize) {
@@ -821,19 +821,20 @@ TEST(TextLayout, MixedSizesLineHeight) {
 }
 
 TEST(TextLayout, FixedFontSizeScaling) {
-  // Verify FixedFont returns different values for different sizes
-  EXPECT_LT(font8.char_width('A', FontStyle::Regular, FontSize::Small),
+  // Width is constant regardless of FontSize (bitmap font can't resize glyphs).
+  EXPECT_EQ(font8.char_width('A', FontStyle::Regular, FontSize::Small),
             font8.char_width('A', FontStyle::Regular, FontSize::Normal));
-  EXPECT_GT(font8.char_width('A', FontStyle::Regular, FontSize::Large),
+  EXPECT_EQ(font8.char_width('A', FontStyle::Regular, FontSize::Large),
             font8.char_width('A', FontStyle::Regular, FontSize::Normal));
 
+  // y_advance still scales (line heights can vary without causing overlap).
   EXPECT_LT(font8.y_advance(FontSize::Small), font8.y_advance(FontSize::Normal));
   EXPECT_GT(font8.y_advance(FontSize::Large), font8.y_advance(FontSize::Normal));
 
-  // Exact values: 8*3/4=6, 8, 8*5/4=10
-  EXPECT_EQ(font8.char_width('A', FontStyle::Regular, FontSize::Small), 6);
+  // Width: always 8 regardless of size
+  EXPECT_EQ(font8.char_width('A', FontStyle::Regular, FontSize::Small), 8);
   EXPECT_EQ(font8.char_width('A', FontStyle::Regular, FontSize::Normal), 8);
-  EXPECT_EQ(font8.char_width('A', FontStyle::Regular, FontSize::Large), 10);
+  EXPECT_EQ(font8.char_width('A', FontStyle::Regular, FontSize::Large), 8);
 
   // Line heights: 16*3/4=12, 16, 16*5/4=20
   EXPECT_EQ(font8.y_advance(FontSize::Small), 12);
@@ -1088,19 +1089,19 @@ TEST(PageLayout, ImageOnlyPageVerticallyCentered) {
   EXPECT_EQ(page.vertical_offset, 50);
 }
 
-TEST(PageLayout, ImageOnlyWithPaddingCenteredInFullPage) {
-  // Image centering should use full page height, not content area
+TEST(PageLayout, ImageOnlyWithPaddingCenteredInContentArea) {
+  // Image centering should use content area (between top and bottom padding)
   Chapter ch;
   ch.paragraphs.push_back(Paragraph::make_image(1, 100, 50));
 
-  // Page 200x200, padding 20 → content area 160x160, but centering uses full 200
+  // Page 200x200, padding 20 → content area 160x160
   PageOptions opts{200, 200, 20, 0};
   auto page = layout_page(font8, opts, ch, PagePosition(0, 0));
 
   ASSERT_EQ(page.image_items.size(), 1);
   EXPECT_TRUE(page.at_chapter_end);
-  // 100x50 scaled up to 200x100 → centered in full 200px: (200-100)/2 = 50
-  EXPECT_EQ(page.vertical_offset, 50);
+  // 100x50 scaled up to 200x100 → centered in content area 160px: (160-100)/2 = 30
+  EXPECT_EQ(page.vertical_offset, 30);
 }
 
 TEST(PageLayout, SparseTextVerticallyCentered) {

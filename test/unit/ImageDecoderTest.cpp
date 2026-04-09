@@ -569,3 +569,302 @@ TEST(DecodeImage, ProgressiveJpeg_BobiverseGerman_NoDuplication) {
   printf("  Left/right half match ratio: %.1f%% (%d/%d rows)\n", match_ratio * 100, matching_rows, check_h);
   EXPECT_LT(match_ratio, 0.5f) << "Image appears duplicated horizontally (left/right halves too similar)";
 }
+
+// ===========================================================================
+// scale_to_fill upscaling tests
+// ---------------------------------------------------------------------------
+// When scale_to_fill=true the decoders must emit enough output rows to reach
+// the requested height — the previous bug only ever emitted one row per source
+// row, which truncated upscaled images to a single row.
+// ===========================================================================
+
+TEST_F(ImageFixtureTest, ScaleToFill_False_Jpeg_NaturalSize) {
+  // With scale_to_fill=false the image should be returned at natural size
+  // (i.e. not enlarged to fill the target slot).
+  StdioZipFile zf;
+  ASSERT_TRUE(zf.open(epub_path_.c_str()));
+  ZipReader zip;
+  ASSERT_EQ(zip.open(zf), ZipError::Ok);
+  auto* entry = zip.find("OEBPS/images/test.jpg");
+  ASSERT_NE(entry, nullptr);
+
+  DecodedImage natural, large_target;
+  ASSERT_EQ(decode_jpeg_from_entry(zf, *entry, 480, 800, natural, nullptr, 0, false), ImageError::Ok);
+  ASSERT_EQ(decode_jpeg_from_entry(zf, *entry, 480, 800, large_target, nullptr, 0, false), ImageError::Ok);
+
+  // Both calls with scale_to_fill=false should yield the same (natural) dims.
+  EXPECT_EQ(large_target.width, natural.width);
+  EXPECT_EQ(large_target.height, natural.height);
+  EXPECT_EQ(large_target.data.size(), static_cast<size_t>(large_target.height) * large_target.stride());
+}
+
+TEST_F(ImageFixtureTest, ScaleToFill_True_Jpeg_FillsTarget) {
+  // With scale_to_fill=true the decoder must upscale the image so that at
+  // least one output dimension reaches the requested target.
+  StdioZipFile zf;
+  ASSERT_TRUE(zf.open(epub_path_.c_str()));
+  ZipReader zip;
+  ASSERT_EQ(zip.open(zf), ZipError::Ok);
+  auto* entry = zip.find("OEBPS/images/test.jpg");
+  ASSERT_NE(entry, nullptr);
+
+  // First determine natural size so we can pick a larger target.
+  DecodedImage natural;
+  ASSERT_EQ(decode_jpeg_from_entry(zf, *entry, 480, 800, natural, nullptr, 0, false), ImageError::Ok);
+  ASSERT_GT(natural.width, 0);
+  ASSERT_GT(natural.height, 0);
+
+  const uint16_t target_w = static_cast<uint16_t>(natural.width + 10);
+  const uint16_t target_h = static_cast<uint16_t>(natural.height + 10);
+
+  DecodedImage filled;
+  ASSERT_EQ(decode_jpeg_from_entry(zf, *entry, target_w, target_h, filled, nullptr, 0, /*scale_to_fill=*/true),
+            ImageError::Ok);
+
+  ASSERT_FALSE(filled.data.empty());
+
+  // Output must be larger than natural size.
+  EXPECT_GT(filled.width, natural.width);
+  EXPECT_GT(filled.height, natural.height);
+
+  // At least one dimension should reach the target (aspect-preserving fill).
+  EXPECT_TRUE(filled.width == target_w || filled.height == target_h)
+      << "expected one dim to reach target; got " << filled.width << "x" << filled.height << " (target " << target_w
+      << "x" << target_h << ")";
+
+  // Data size must be consistent: no truncated rows.
+  EXPECT_EQ(filled.data.size(), static_cast<size_t>(filled.height) * filled.stride());
+}
+
+TEST_F(ImageFixtureTest, ScaleToFill_True_Png_FillsTarget) {
+  // Same as the JPEG test but for the PNG decoder.
+  StdioZipFile zf;
+  ASSERT_TRUE(zf.open(epub_path_.c_str()));
+  ZipReader zip;
+  ASSERT_EQ(zip.open(zf), ZipError::Ok);
+  auto* entry = zip.find("OEBPS/images/test.png");
+  ASSERT_NE(entry, nullptr);
+
+  DecodedImage natural;
+  ASSERT_EQ(decode_png_from_entry(zf, *entry, 480, 800, natural, nullptr, 0, false), ImageError::Ok);
+  ASSERT_GT(natural.width, 0);
+  ASSERT_GT(natural.height, 0);
+
+  const uint16_t target_w = static_cast<uint16_t>(natural.width + 10);
+  const uint16_t target_h = static_cast<uint16_t>(natural.height + 10);
+
+  DecodedImage filled;
+  ASSERT_EQ(decode_png_from_entry(zf, *entry, target_w, target_h, filled, nullptr, 0, /*scale_to_fill=*/true),
+            ImageError::Ok);
+
+  ASSERT_FALSE(filled.data.empty());
+
+  EXPECT_GT(filled.width, natural.width);
+  EXPECT_GT(filled.height, natural.height);
+
+  EXPECT_TRUE(filled.width == target_w || filled.height == target_h)
+      << "expected one dim to reach target; got " << filled.width << "x" << filled.height << " (target " << target_w
+      << "x" << target_h << ")";
+
+  EXPECT_EQ(filled.data.size(), static_cast<size_t>(filled.height) * filled.stride());
+}
+
+// ===========================================================================
+// ImageRowSink tests — verify the streaming sink path produces correct output
+// ===========================================================================
+
+// Helper: collect rows emitted by ImageRowSink into a DecodedImage.
+struct SinkCollector {
+  DecodedImage img;
+
+  static void on_row(void* ctx, uint16_t y, const uint8_t* data, uint16_t width) {
+    auto* self = static_cast<SinkCollector*>(ctx);
+    if (self->img.width == 0) {
+      self->img.width = width;
+    }
+    size_t stride = (width + 7) / 8;
+    size_t needed = static_cast<size_t>(y + 1) * stride;
+    if (self->img.data.size() < needed)
+      self->img.data.resize(needed, 0);
+    std::memcpy(self->img.data.data() + static_cast<size_t>(y) * stride, data, stride);
+    if (y + 1 > self->img.height)
+      self->img.height = y + 1;
+  }
+
+  ImageRowSink sink() {
+    return ImageRowSink{&SinkCollector::on_row, this};
+  }
+};
+
+// Decode via read_local_entry (same path as ReaderScreen): this failed before
+// the fix because the local entry has no filename, causing format detection to
+// fail for deflated entries.
+TEST_F(ImageFixtureTest, DecodeFromLocalEntry_Jpeg_WithSink) {
+  StdioZipFile zf;
+  ASSERT_TRUE(zf.open(epub_path_.c_str()));
+  ZipReader zip;
+  ASSERT_EQ(zip.open(zf), ZipError::Ok);
+
+  auto* cd_entry = zip.find("OEBPS/images/test.jpg");
+  ASSERT_NE(cd_entry, nullptr);
+  uint32_t offset = cd_entry->local_header_offset;
+
+  ZipEntry local_entry;
+  ASSERT_EQ(ZipReader::read_local_entry(zf, offset, local_entry), ZipError::Ok);
+  EXPECT_TRUE(local_entry.name.empty()) << "Local entry should have no filename";
+
+  SinkCollector collector;
+  auto s = collector.sink();
+  DecodedImage dims;
+  auto err = decode_image_from_entry(zf, local_entry, 480, 800, dims, nullptr, 0, false, &s);
+  ASSERT_EQ(err, ImageError::Ok) << "decode_image_from_entry failed for local entry with empty name — "
+                                    "this is the black squares bug";
+  EXPECT_GT(dims.width, 0);
+  EXPECT_GT(dims.height, 0);
+}
+
+TEST_F(ImageFixtureTest, DecodeFromLocalEntry_Png_WithSink) {
+  StdioZipFile zf;
+  ASSERT_TRUE(zf.open(epub_path_.c_str()));
+  ZipReader zip;
+  ASSERT_EQ(zip.open(zf), ZipError::Ok);
+
+  auto* cd_entry = zip.find("OEBPS/images/test.png");
+  ASSERT_NE(cd_entry, nullptr);
+  uint32_t offset = cd_entry->local_header_offset;
+
+  ZipEntry local_entry;
+  ASSERT_EQ(ZipReader::read_local_entry(zf, offset, local_entry), ZipError::Ok);
+
+  SinkCollector collector;
+  auto s = collector.sink();
+  DecodedImage dims;
+  auto err = decode_image_from_entry(zf, local_entry, 480, 800, dims, nullptr, 0, false, &s);
+  ASSERT_EQ(err, ImageError::Ok) << "decode_image_from_entry failed for PNG local entry with empty name";
+  EXPECT_GT(dims.width, 0);
+  EXPECT_GT(dims.height, 0);
+}
+
+// Verify that the sink path produces identical output to the buffer path.
+TEST_F(ImageFixtureTest, SinkOutput_MatchesBufferOutput_Jpeg) {
+  StdioZipFile zf;
+  ASSERT_TRUE(zf.open(epub_path_.c_str()));
+  ZipReader zip;
+  ASSERT_EQ(zip.open(zf), ZipError::Ok);
+
+  auto* entry = zip.find("OEBPS/images/test.jpg");
+  ASSERT_NE(entry, nullptr);
+
+  DecodedImage buf_img;
+  ASSERT_EQ(decode_jpeg_from_entry(zf, *entry, 480, 800, buf_img), ImageError::Ok);
+  ASSERT_GT(buf_img.width, 0);
+  ASSERT_FALSE(buf_img.data.empty());
+
+  SinkCollector collector;
+  auto s = collector.sink();
+  DecodedImage sink_dims;
+  ASSERT_EQ(decode_jpeg_from_entry(zf, *entry, 480, 800, sink_dims, nullptr, 0, false, &s), ImageError::Ok);
+
+  EXPECT_EQ(sink_dims.width, buf_img.width);
+  EXPECT_EQ(sink_dims.height, buf_img.height);
+  EXPECT_EQ(collector.img.width, buf_img.width);
+  EXPECT_EQ(collector.img.height, buf_img.height);
+
+  size_t stride = buf_img.stride();
+  ASSERT_EQ(collector.img.data.size(), buf_img.data.size());
+  for (uint16_t y = 0; y < buf_img.height; ++y) {
+    EXPECT_EQ(std::memcmp(collector.img.data.data() + y * stride, buf_img.data.data() + y * stride, stride), 0)
+        << "Row " << y << " differs between sink and buffer paths";
+  }
+}
+
+TEST_F(ImageFixtureTest, SinkOutput_MatchesBufferOutput_Png) {
+  StdioZipFile zf;
+  ASSERT_TRUE(zf.open(epub_path_.c_str()));
+  ZipReader zip;
+  ASSERT_EQ(zip.open(zf), ZipError::Ok);
+
+  auto* entry = zip.find("OEBPS/images/test.png");
+  ASSERT_NE(entry, nullptr);
+
+  DecodedImage buf_img;
+  ASSERT_EQ(decode_png_from_entry(zf, *entry, 480, 800, buf_img), ImageError::Ok);
+  ASSERT_GT(buf_img.width, 0);
+  ASSERT_FALSE(buf_img.data.empty());
+
+  SinkCollector collector;
+  auto s = collector.sink();
+  DecodedImage sink_dims;
+  ASSERT_EQ(decode_png_from_entry(zf, *entry, 480, 800, sink_dims, nullptr, 0, false, &s), ImageError::Ok);
+
+  EXPECT_EQ(sink_dims.width, buf_img.width);
+  EXPECT_EQ(sink_dims.height, buf_img.height);
+
+  size_t stride = buf_img.stride();
+  ASSERT_EQ(collector.img.data.size(), buf_img.data.size());
+  for (uint16_t y = 0; y < buf_img.height; ++y) {
+    EXPECT_EQ(std::memcmp(collector.img.data.data() + y * stride, buf_img.data.data() + y * stride, stride), 0)
+        << "Row " << y << " differs between sink and buffer paths";
+  }
+}
+
+// ===========================================================================
+// Deflated image decode via read_local_entry — the "black squares" bug
+// ===========================================================================
+// The bobiverse EPUB has OEBPS/cover.jpg stored with deflate compression.
+// When decoded via read_local_entry (empty filename), format detection via
+// a small peek buffer failed for deflated entries, causing ReadError.
+
+TEST(DecodeImage, DeflatedJpeg_LocalEntry_NoFilename) {
+  // Use the bobiverse book which has a deflated cover.jpg.
+  std::string root = test_books::workspace_root();
+  std::string epub = root + "/microreader2/test/books/other/bobiverse one.epub";
+  if (!std::filesystem::exists(epub))
+    GTEST_SKIP() << "bobiverse one.epub not found";
+
+  // Find cover.jpg via central directory to get its offset.
+  StdioZipFile zf;
+  ASSERT_TRUE(zf.open(epub.c_str()));
+  ZipReader zip;
+  ASSERT_EQ(zip.open(zf), ZipError::Ok);
+  auto* cd_entry = zip.find("OEBPS/cover.jpg");
+  ASSERT_NE(cd_entry, nullptr);
+  // Verify it's actually deflated (compression method 8).
+  ASSERT_EQ(cd_entry->compression, 8u) << "Expected deflated entry for this test";
+  uint32_t offset = cd_entry->local_header_offset;
+
+  // Simulate ReaderScreen: read_local_entry (no filename), then decode.
+  ZipEntry local_entry;
+  ASSERT_EQ(ZipReader::read_local_entry(zf, offset, local_entry), ZipError::Ok);
+  EXPECT_TRUE(local_entry.name.empty());
+  EXPECT_EQ(local_entry.compression, 8u) << "Local entry should inherit deflate compression";
+
+  // Decode with sink (same as ReaderScreen pipeline but scale_to_fill=false
+  // since we're passing screen bounds, not pre-computed target dimensions).
+  SinkCollector collector;
+  auto s = collector.sink();
+  DecodedImage dims;
+  auto err = decode_image_from_entry(zf, local_entry, 480, 800, dims, nullptr, 0, false, &s);
+  ASSERT_EQ(err, ImageError::Ok) << "Deflated JPEG with empty filename should decode via magic peek — "
+                                    "this was the black squares bug (err="
+                                 << (int)err << ")";
+
+  EXPECT_GT(dims.width, 0);
+  EXPECT_GT(dims.height, 0);
+  EXPECT_GT(collector.img.height, 0);
+
+  // Verify image is not all-black.
+  size_t stride = (collector.img.width + 7) / 8;
+  size_t white = 0, total = 0;
+  for (uint16_t y = 0; y < collector.img.height; ++y) {
+    for (uint16_t x = 0; x < collector.img.width; ++x) {
+      bool is_white = (collector.img.data[y * stride + x / 8] >> (7 - (x & 7))) & 1;
+      if (is_white)
+        white++;
+      total++;
+    }
+  }
+  float white_pct = total > 0 ? 100.0f * white / total : 0;
+  printf("  Decoded deflated JPEG: %ux%u  white=%.1f%%\n", dims.width, dims.height, white_pct);
+  EXPECT_GT(white, 0u) << "Decoded image is completely black";
+}

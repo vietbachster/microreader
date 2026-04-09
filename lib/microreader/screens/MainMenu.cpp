@@ -1,6 +1,5 @@
 #include "MainMenu.h"
 
-#include <algorithm>
 #include <cstdio>
 #include <cstring>
 
@@ -15,26 +14,14 @@
 
 namespace microreader {
 
-void MainMenu::build_items_(DisplayQueue& queue) {
+void MainMenu::build_items_() {
   count_ = 0;
-  // Book selection (shown first if a books directory has been set).
   if (book_select_.has_books_dir()) {
     if (count_ < kMaxItems)
       items_[count_++] = {"Select Book", &book_select_, nullptr};
   }
-  // Demo screens.
-  IScreen* screens[] = {&bouncing_ball_};
-  for (auto* s : screens) {
-    if (count_ < kMaxItems)
-      items_[count_++] = {s->name(), s, nullptr};
-  }
-  // Built-in actions.
   if (count_ < kMaxItems)
-    items_[count_++] = {"Rotate Screen", nullptr, rotate_action_};
-  if (count_ < kMaxItems) {
-    update_phases_label_(queue.phases);
-    items_[count_++] = {phases_label_, nullptr, phases_action_};
-  }
+    items_[count_++] = {bouncing_ball_.name(), &bouncing_ball_, nullptr};
   if (count_ < kMaxItems && book_select_.has_books_dir())
     items_[count_++] = {"Clear Converted", nullptr, clear_converted_action_};
 #ifdef ESP_PLATFORM
@@ -43,31 +30,28 @@ void MainMenu::build_items_(DisplayQueue& queue) {
 #endif
 }
 
-void MainMenu::update_phases_label_(int phases) {
-  char* p = phases_label_;
-  const char* prefix = "Phases: ";
-  while (*prefix)
-    *p++ = *prefix++;
-  if (phases >= 10)
-    *p++ = '0' + (phases / 10);
-  *p++ = '0' + (phases % 10);
-  *p = '\0';
+void MainMenu::draw_all_(DrawBuffer& buf) const {
+  static const char* kTitle = "Select Demo:";
+  const int W = DrawBuffer::kWidth;
+  const int H = DrawBuffer::kHeight;
+  const int total_h = kLineHeight * count_;
+  const int items_y = (H - total_h) / 2;
+  const int title_w = static_cast<int>(std::strlen(kTitle)) * kGlyphW;
+  const int title_x = (W - title_w) / 2;
+
+  buf.fill(true);
+  buf.draw_text(title_x, items_y - kLineHeight, kTitle, true, kScale);
+
+  for (int i = 0; i < count_; ++i) {
+    const int label_len = static_cast<int>(std::strlen(items_[i].label));
+    const int lx = (W - label_len * kGlyphW) / 2;
+    const int ly = items_y + i * kLineHeight;
+    // Selected item: black bg / white text (white=false). Others: white bg / black text.
+    buf.draw_text(lx, ly, items_[i].label, i != selected_, kScale);
+  }
 }
 
-void MainMenu::rotate_action_(MainMenu& /*self*/, DisplayQueue& queue) {
-  Rotation next = queue.rotation() == Rotation::Deg0 ? Rotation::Deg90 : Rotation::Deg0;
-  queue.set_rotation(next);
-}
-
-void MainMenu::phases_action_(MainMenu& self, DisplayQueue& queue) {
-  int next = queue.phases + 1;
-  if (next > kMaxPhases)
-    next = kMinPhases;
-  queue.phases = next;
-  self.update_phases_label_(next);
-}
-
-void MainMenu::clear_converted_action_(MainMenu& self, DisplayQueue& /*queue*/) {
+void MainMenu::clear_converted_action_(MainMenu& self) {
   const char* dir = self.book_select_.books_dir();
   if (!dir)
     return;
@@ -101,7 +85,7 @@ void MainMenu::clear_converted_action_(MainMenu& self, DisplayQueue& /*queue*/) 
 #ifdef ESP_PLATFORM
 namespace microreader {
 
-void MainMenu::ota_action_(MainMenu& /*self*/, DisplayQueue& /*queue*/) {
+void MainMenu::ota_action_(MainMenu& /*self*/) {
   auto running = esp_ota_get_running_partition();
   auto next = esp_ota_get_next_update_partition(running);
   esp_ota_set_boot_partition(next);
@@ -113,35 +97,15 @@ void MainMenu::ota_action_(MainMenu& /*self*/, DisplayQueue& /*queue*/) {
 
 namespace microreader {
 
-void MainMenu::start(Canvas& canvas, DisplayQueue& queue) {
+void MainMenu::start(DrawBuffer& buf) {
   chosen_ = nullptr;
-  build_items_(queue);
-
-  const int W = queue.width();
-  const int H = queue.height();
-  const int total_h = kLineHeight * count_;
-  const int items_y = (H - total_h) / 2;
-  const int title_x = (W - title_.text_width()) / 2;
-
-  queue.submit(0, 0, W, H, /*white=*/true);
-
-  title_.set_position(title_x, items_y - kLineHeight);
-  canvas.add(&title_);
-
-  for (int i = 0; i < count_; ++i) {
-    const int label_len = static_cast<int>(std::strlen(items_[i].label));
-    const int lx = (W - label_len * kGlyphW) / 2;
-    labels_[i] = CanvasText(lx, items_y + i * kLineHeight, items_[i].label, /*white=*/false, kScale);
-    canvas.add(&labels_[i]);
-  }
-
-  update_cursor_(items_y, canvas, queue);
-  canvas.commit(queue);
+  build_items_();
+  draw_all_(buf);
 }
 
 void MainMenu::stop() {}
 
-bool MainMenu::update(const ButtonState& buttons, Canvas& canvas, DisplayQueue& queue, IRuntime& /*runtime*/) {
+bool MainMenu::update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& /*runtime*/) {
   bool moved = false;
 
   if (buttons.is_pressed(Button::Button3)) {
@@ -153,36 +117,24 @@ bool MainMenu::update(const ButtonState& buttons, Canvas& canvas, DisplayQueue& 
     moved = true;
   }
 
-  if (moved)
-    update_cursor(canvas, queue);
+  if (moved) {
+    draw_all_(buf);
+    buf.refresh();
+  }
+
   if (buttons.is_pressed(Button::Button1) && selected_ < count_) {
     const auto& item = items_[selected_];
     if (item.action) {
-      item.action(*this, queue);
-      // Re-layout after the action (e.g. rotation may change dimensions).
-      stop();
-      canvas.clear();
-      start(canvas, queue);
-      // queue.partial_refresh();
+      item.action(*this);
+      // Redraw after action (e.g. Clear Converted).
+      draw_all_(buf);
+      buf.refresh();
     } else {
       chosen_ = item.target_screen;
       return false;
     }
   }
   return true;
-}
-
-void MainMenu::update_cursor(Canvas& canvas, DisplayQueue& queue) {
-  const int H = queue.height();
-  const int total_h = kLineHeight * count_;
-  const int items_y = (H - total_h) / 2;
-  update_cursor_(items_y, canvas, queue);
-}
-
-void MainMenu::update_cursor_(int /*items_y*/, Canvas& canvas, DisplayQueue& queue) {
-  for (int i = 0; i < count_; ++i)
-    labels_[i].set_color(i != selected_);
-  canvas.commit(queue);
 }
 
 }  // namespace microreader

@@ -72,15 +72,12 @@ struct FixedFont : IFont {
   }
 
  private:
-  uint16_t scale_width(FontSize size) const {
-    switch (size) {
-      case FontSize::Small:
-        return glyph_width * 3 / 4;  // 75%
-      case FontSize::Large:
-        return glyph_width * 5 / 4;  // 125%
-      default:
-        return glyph_width;
-    }
+  uint16_t scale_width(FontSize /*size*/) const {
+    // Width is always fixed: the 8×8 bitmap font renders at exactly
+    // glyph_width pixels per codepoint regardless of FontSize.
+    // Returning different values for Small/Large causes layout positions
+    // to diverge from draw_glyphs_(), producing overlapping text.
+    return glyph_width;
   }
   uint16_t scale_height(FontSize size) const {
     switch (size) {

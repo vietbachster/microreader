@@ -404,9 +404,9 @@ static PageContent assemble_page(const PageOptions& opts, const IFont& font, IPa
     prev_para = item.para_idx;
   }
 
-  // Vertical centering for image-only pages
-  if (page.text_items.empty() && !page.image_items.empty() && y < opts.height) {
-    page.vertical_offset = (opts.height - y) / 2;
+  // Vertical centering for image-only pages (center within content area)
+  if (page.text_items.empty() && !page.image_items.empty() && y < page_height) {
+    page.vertical_offset = (page_height - y) / 2;
   }
   // Center sparse text on single-page chapters
   if (center_sparse_text && at_chapter_end && page.vertical_offset == 0 && !page.text_items.empty() &&

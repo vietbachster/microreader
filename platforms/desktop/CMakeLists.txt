@@ -1,4 +1,13 @@
 cmake_minimum_required(VERSION 3.16)
+
+# Use /Z7 (embedded debug info per .obj) instead of shared /Zi .pdb to avoid
+# C1041 PDB lock errors from parallel MSVC compilation.
+# CMP0141 must be set before project() to take effect.
+if(POLICY CMP0141)
+  cmake_policy(SET CMP0141 NEW)
+  set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "Embedded")
+endif()
+
 project(microreader_desktop CXX)
 
 set(CMAKE_CXX_STANDARD 17)

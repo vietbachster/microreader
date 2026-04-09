@@ -42,6 +42,7 @@ class Esp32InputSource final : public microreader::IInputSource {
     gpio_config(&cfg);
 
     // Initialise ADC1 in oneshot mode, 12 dB attenuation (full 0–3.3 V range)
+#ifndef QEMU_BUILD
     adc_oneshot_unit_init_cfg_t unit_cfg{};
     unit_cfg.unit_id = ADC_UNIT_1;
     adc_oneshot_new_unit(&unit_cfg, &adc_handle_);
@@ -59,6 +60,7 @@ class Esp32InputSource final : public microreader::IInputSource {
     timer_args.dispatch_method = ESP_TIMER_TASK;
     esp_timer_create(&timer_args, &sample_timer_);
     esp_timer_start_periodic(sample_timer_, kSampleIntervalUs);
+#endif  // !QEMU_BUILD
   }
 
   // Returns accumulated button state since last poll, then clears the latch.

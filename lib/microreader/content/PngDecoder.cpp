@@ -297,7 +297,8 @@ static void dither_row_png(const uint8_t* src_row, const PngHeader& hdr, const u
 // ---------------------------------------------------------------------------
 
 ImageError decode_png_from_entry(IZipFile& file, const ZipEntry& entry, uint16_t max_w, uint16_t max_h,
-                                 DecodedImage& out, uint8_t* work_buf, size_t work_buf_size) {
+                                 DecodedImage& out, uint8_t* work_buf, size_t work_buf_size, bool scale_to_fill,
+                                 ImageRowSink* sink) {
   // If no work_buf, allocate one
   std::unique_ptr<uint8_t[]> owned_work;
   if (!work_buf || work_buf_size < ZipEntryInput::kMinWorkBufSize) {
@@ -413,7 +414,11 @@ ImageError decode_png_from_entry(IZipFile& file, const ZipEntry& entry, uint16_t
     max_h = static_cast<uint16_t>(src_h < 65535 ? src_h : 65535);
 
   uint32_t out_w, out_h;
-  if (src_w <= max_w && src_h <= max_h) {
+  if (scale_to_fill) {
+    // Caller already computed correct aspect-ratio-preserving target.
+    out_w = max_w;
+    out_h = max_h;
+  } else if (src_w <= max_w && src_h <= max_h) {
     out_w = src_w;
     out_h = src_h;
   } else if (src_w * uint64_t(max_h) > src_h * uint64_t(max_w)) {
@@ -444,10 +449,12 @@ ImageError decode_png_from_entry(IZipFile& file, const ZipEntry& entry, uint16_t
     return ImageError::ReadError;
 
   // Output bitmap
-  out.data.resize(static_cast<size_t>(out_stride) * static_cast<size_t>(out_h));
-  std::fill(out.data.begin(), out.data.end(), uint8_t(0));
   out.width = static_cast<uint16_t>(out_w);
   out.height = static_cast<uint16_t>(out_h);
+  if (!sink) {
+    out.data.resize(static_cast<size_t>(out_stride) * static_cast<size_t>(out_h));
+    std::fill(out.data.begin(), out.data.end(), uint8_t(0));
+  }
 
   // tinfl decompressor + 32KB LZ dictionary on heap
   auto decomp_mem = std::unique_ptr<tinfl_decompressor>(new (std::nothrow) tinfl_decompressor{});
@@ -531,18 +538,25 @@ ImageError decode_png_from_entry(IZipFile& file, const ZipEntry& entry, uint16_t
         std::memcpy(curr_row.get(), row_buf.get() + 1, scan_bytes);
         unfilter_row(filter, curr_row.get(), prev_row.get(), scan_bytes, bpp_filter);
 
-        // Check whether this source row maps to an output row
-        if (out_y < out_h) {
+        // Emit all output rows that map to this source row (handles upscaling too).
+        while (out_y < out_h) {
           uint32_t target_src_y = (out_y * y_step) >> 16;
-          if (src_y == target_src_y) {
+          if (src_y != target_src_y)
+            break;
+          if (sink) {
+            uint8_t temp_row[128] = {};  // max 1024/8 = 128 bytes
+            dither_row_png(curr_row.get(), hdr, palette_grey, x_step, static_cast<int>(out_w), err_cur.get(),
+                           err_nxt.get(), temp_row);
+            sink->emit_row(sink->ctx, static_cast<uint16_t>(out_y), temp_row, static_cast<uint16_t>(out_w));
+          } else {
             uint8_t* out_row = out.data.data() + out_y * out_stride;
             std::memset(out_row, 0, out_stride);
             dither_row_png(curr_row.get(), hdr, palette_grey, x_step, static_cast<int>(out_w), err_cur.get(),
                            err_nxt.get(), out_row);
-            ++out_y;
-            std::swap(err_cur, err_nxt);
-            std::fill(err_nxt.get(), err_nxt.get() + out_w + 2, int16_t(0));
           }
+          ++out_y;
+          std::swap(err_cur, err_nxt);
+          std::fill(err_nxt.get(), err_nxt.get() + out_w + 2, int16_t(0));
         }
 
         std::swap(prev_row, curr_row);

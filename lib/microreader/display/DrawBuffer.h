@@ -1,0 +1,332 @@
+#pragma once
+
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <utility>
+
+#include "Font.h"
+
+namespace microreader {
+
+enum class Rotation { Deg0 = 0, Deg90 = 90 };
+
+// Refresh mode for full-screen updates.
+enum class RefreshMode { Full, Half };
+
+// Physical screen constants and bit-packed pixel helpers (used internally by DrawBuffer).
+struct DisplayFrame {
+  static constexpr int kPhysicalWidth = 800;
+  static constexpr int kPhysicalHeight = 480;
+  static constexpr int kStride = (kPhysicalWidth + 7) / 8;
+  static constexpr std::size_t kPixelBytes = static_cast<std::size_t>(kStride) * kPhysicalHeight;
+};
+
+// Display driver interface implemented by each platform.
+class IDisplay {
+ public:
+  virtual ~IDisplay() = default;
+
+  // Full physical refresh. Both BW and RED RAM are set to `pixels`.
+  virtual void full_refresh(const uint8_t* pixels, RefreshMode mode) = 0;
+
+  // Partial refresh: old_pixels → RED RAM, new_pixels → BW RAM, then fast refresh.
+  virtual void partial_refresh(const uint8_t* old_pixels, const uint8_t* new_pixels) = 0;
+
+  // Put the display controller into deep sleep (low-power mode).
+  virtual void deep_sleep() {}
+
+  // Notify the display of the logical rotation used by the caller.
+  // Used by the desktop emulator to resize/orient the SDL window.
+  virtual void set_rotation(Rotation r) {
+    (void)r;
+  }
+};
+
+// Double-buffered display with simple draw helpers.
+//
+// Uses Deg90 (portrait) rotation: logical 480×800, physical 800×480.
+// The "inactive" buffer is drawn to; "active" is what's currently displayed.
+// refresh() swaps and does a partial hardware refresh.
+//
+// Scratch buffer loan: scratch_buf1()/scratch_buf2() expose both 48KB buffers
+// for callers (e.g. EPUB→MRB conversion). Call reset_after_scratch() when done.
+class DrawBuffer {
+ public:
+  // Logical portrait dimensions.
+  static constexpr int kWidth = DisplayFrame::kPhysicalHeight;   // 480
+  static constexpr int kHeight = DisplayFrame::kPhysicalWidth;   // 800
+  static constexpr size_t kBufSize = DisplayFrame::kPixelBytes;  // 48000
+
+  explicit DrawBuffer(IDisplay& display) : display_(display) {
+    memset(bufs_[0], 0xFF, kBufSize);
+    memset(bufs_[1], 0xFF, kBufSize);
+    display_.set_rotation(Rotation::Deg90);
+  }
+
+  // ── Draw helpers (logical portrait coordinates) ─────────────────────────
+
+  // Fill the entire inactive buffer.
+  void fill(bool white = true) {
+    memset(inactive_(), white ? 0xFF : 0x00, kBufSize);
+  }
+
+  // Fill a logical rectangle.
+  void fill_rect(int lx, int ly, int lw, int lh, bool white) {
+    // Deg90: logical (lx,ly,lw,lh) → physical (px=ly, py=PhysH-lx-lw, pw=lh, ph=lw)
+    fill_rect_physical_(inactive_(), ly, DisplayFrame::kPhysicalHeight - lx - lw, lh, lw, white);
+  }
+
+  // Fill a logical horizontal span [x1, x2) on logical row ly.
+  // In physical space this is a vertical column segment.
+  void fill_row(int ly, int x1, int x2, bool white) {
+    x1 = std::max(x1, 0);
+    x2 = std::min(x2, kWidth);
+    if (x1 >= x2 || ly < 0 || ly >= kHeight)
+      return;
+    // Deg90: logical row ly → physical col ly; logical cols [x1,x2) → physical rows [PhysH-x2, PhysH-x1)
+    fill_col_physical_(inactive_(), ly, DisplayFrame::kPhysicalHeight - x2, DisplayFrame::kPhysicalHeight - x1, white);
+  }
+
+  // Set a single logical pixel.
+  void set_pixel(int lx, int ly, bool white) {
+    if (lx < 0 || lx >= kWidth || ly < 0 || ly >= kHeight)
+      return;
+    const int px = ly;
+    const int py = DisplayFrame::kPhysicalHeight - 1 - lx;
+    uint8_t* buf = inactive_();
+    const size_t bidx = static_cast<size_t>(py * DisplayFrame::kStride + px / 8);
+    const uint8_t bit = static_cast<uint8_t>(0x80u >> (px & 7));
+    if (white)
+      buf[bidx] |= bit;
+    else
+      buf[bidx] &= static_cast<uint8_t>(~bit);
+  }
+
+  // Blit a horizontal row of 1-bit packed pixels at logical position (lx, ly).
+  // data_1bit is MSB-first packed, width pixels long.
+  // Due to Deg90 rotation, this maps to a vertical column in physical space.
+  void blit_1bit_row(int lx, int ly, const uint8_t* data_1bit, int width) {
+    if (ly < 0 || ly >= kHeight || width <= 0)
+      return;
+    uint8_t* buf = inactive_();
+    const int px = ly;
+    const int byte_col = px / 8;
+    const uint8_t set_mask = static_cast<uint8_t>(0x80u >> (px & 7));
+    const uint8_t clr_mask = static_cast<uint8_t>(~set_mask);
+
+    // Clip x range to [0, kWidth)
+    int col_start = 0, col_end = width;
+    if (lx < 0)
+      col_start = -lx;
+    if (lx + width > kWidth)
+      col_end = kWidth - lx;
+
+    for (int col = col_start; col < col_end; ++col) {
+      const int py = DisplayFrame::kPhysicalHeight - 1 - (lx + col);
+      const size_t bidx = static_cast<size_t>(py) * DisplayFrame::kStride + byte_col;
+      const bool white = (data_1bit[col >> 3] >> (7 - (col & 7))) & 1;
+      if (white)
+        buf[bidx] |= set_mask;
+      else
+        buf[bidx] &= clr_mask;
+    }
+  }
+
+  // Draw text with the 8×8 bitmap font, including background fill.
+  // white=true  → white background, black glyphs (normal unselected item).
+  // white=false → black background, white glyphs (highlighted selected item).
+  void draw_text(int x, int y, const char* text, bool white, int scale = 1) {
+    if (!text || !*text)
+      return;
+    const char* p = text;
+    size_t glyph_count = 0;
+    while (*p) {
+      const uint8_t b = static_cast<uint8_t>(*p);
+      if (b < 0x80)
+        p += 1;
+      else if (b < 0xE0)
+        p += 2;
+      else if (b < 0xF0)
+        p += 3;
+      else
+        p += 4;
+      ++glyph_count;
+    }
+    if (glyph_count == 0)
+      return;
+    const int gw = 8, gh = 8;
+    const int tw = static_cast<int>(glyph_count) * gw * scale;
+    const int th = gh * scale;
+    fill_rect(x, y, tw, th, white);
+    draw_glyphs_(x, y, text, !white, scale);
+  }
+
+  // Draw text glyphs only (no background fill). Glyph color = white param.
+  void draw_text_no_bg(int x, int y, const char* text, bool white, int scale = 1) {
+    if (!text || !*text)
+      return;
+    draw_glyphs_(x, y, text, white, scale);
+  }
+
+  // Draw a filled circle.
+  void draw_circle(int cx, int cy, int r, bool white) {
+    if (r <= 0)
+      return;
+    const int r2 = r * r;
+    int dx = r;
+    for (int dy = 0; dy <= r; ++dy) {
+      while (dx * dx + dy * dy > r2)
+        --dx;
+      if (dx < 0)
+        break;
+      fill_row(cy + dy, cx - dx, cx + dx + 1, white);
+      if (dy != 0)
+        fill_row(cy - dy, cx - dx, cx + dx + 1, white);
+    }
+  }
+
+  // ── Display operations ──────────────────────────────────────────────────
+
+  // Swap active↔inactive, then do a partial hardware refresh.
+  void refresh() {
+    display_.partial_refresh(active_(), inactive_());
+    active_idx_ = 1 - active_idx_;
+    // Sync new inactive to match active so next render has consistent start state.
+    memcpy(inactive_(), active_(), kBufSize);
+  }
+
+  // Call full hardware refresh using the current inactive buffer, then sync both.
+  void full_refresh(RefreshMode mode = RefreshMode::Half) {
+    display_.full_refresh(inactive_(), mode);
+    memcpy(bufs_[active_idx_], bufs_[1 - active_idx_], kBufSize);
+    active_idx_ = 1 - active_idx_;
+  }
+
+  void deep_sleep() {
+    display_.deep_sleep();
+  }
+
+  // ── Scratch buffer loan (for EPUB conversion / image decode) ────────────
+
+  // Loan the inactive buffer as scratch (will be overwritten before next refresh).
+  uint8_t* scratch_buf1() {
+    return bufs_[1 - active_idx_];
+  }
+  // Loan the active buffer as scratch (for operations needing two buffers).
+  uint8_t* scratch_buf2() {
+    return bufs_[active_idx_];
+  }
+
+  // Reset both buffers after scratch use, before drawing new content.
+  void reset_after_scratch(bool white = true) {
+    memset(bufs_[0], white ? 0xFF : 0x00, kBufSize);
+    memset(bufs_[1], white ? 0xFF : 0x00, kBufSize);
+    active_idx_ = 0;
+  }
+
+ private:
+  IDisplay& display_;
+  alignas(4) uint8_t bufs_[2][kBufSize];
+  int active_idx_ = 0;
+
+  uint8_t* inactive_() {
+    return bufs_[1 - active_idx_];
+  }
+  const uint8_t* active_() const {
+    return bufs_[active_idx_];
+  }
+
+  // ── Internal draw helpers ───────────────────────────────────────────────
+
+  void draw_glyphs_(int x, int y, const char* text, bool white, int scale) {
+    const char* p = text;
+    int gi = 0;
+    while (*p) {
+      const int idx = next_glyph_index(p);
+      const auto& glyph = detail::kFont8x8[idx];
+      const int gx = x + gi * 8 * scale;
+      for (int grow = 0; grow < 8; ++grow) {
+        const uint8_t bits = glyph[grow];
+        if (bits == 0)
+          continue;
+        int col = 0;
+        while (col < 8) {
+          if (!(bits & (0x80u >> col))) {
+            ++col;
+            continue;
+          }
+          const int start = col;
+          while (col < 8 && (bits & (0x80u >> col)))
+            ++col;
+          for (int sr = 0; sr < scale; ++sr)
+            fill_row(y + grow * scale + sr, gx + start * scale, gx + col * scale, white);
+        }
+      }
+      ++gi;
+    }
+  }
+
+  // Fill a physical horizontal span [x1, x2) on physical row `row`.
+  static void fill_row_physical_(uint8_t* buf, int row, int x1, int x2, bool white) {
+    x1 = std::max(x1, 0);
+    x2 = std::min(x2, DisplayFrame::kPhysicalWidth);
+    if (x1 >= x2 || row < 0 || row >= DisplayFrame::kPhysicalHeight)
+      return;
+    const int bx1 = x1 / 8;
+    const int bx2 = (x2 - 1) / 8;
+    const auto lmask = static_cast<uint8_t>(0xFF >> (x1 & 7));
+    const auto rmask = static_cast<uint8_t>(0xFF << (7 - ((x2 - 1) & 7)));
+    uint8_t* rp = buf + row * DisplayFrame::kStride;
+    if (bx1 == bx2) {
+      const auto m = static_cast<uint8_t>(lmask & rmask);
+      if (white)
+        rp[bx1] |= m;
+      else
+        rp[bx1] &= static_cast<uint8_t>(~m);
+    } else {
+      if (white)
+        rp[bx1] |= lmask;
+      else
+        rp[bx1] &= static_cast<uint8_t>(~lmask);
+      if (bx2 > bx1 + 1)
+        memset(rp + bx1 + 1, white ? 0xFF : 0x00, bx2 - bx1 - 1);
+      if (white)
+        rp[bx2] |= rmask;
+      else
+        rp[bx2] &= static_cast<uint8_t>(~rmask);
+    }
+  }
+
+  // Fill a physical rectangle (rx, ry, rw, rh).
+  static void fill_rect_physical_(uint8_t* buf, int rx, int ry, int rw, int rh, bool white) {
+    const int x1 = std::max(rx, 0);
+    const int y1 = std::max(ry, 0);
+    const int x2 = std::min(rx + rw, DisplayFrame::kPhysicalWidth);
+    const int y2 = std::min(ry + rh, DisplayFrame::kPhysicalHeight);
+    if (x1 >= x2 || y1 >= y2)
+      return;
+    for (int row = y1; row < y2; ++row)
+      fill_row_physical_(buf, row, x1, x2, white);
+  }
+
+  // Fill physical column `pcol` for rows [py1, py2).
+  static void fill_col_physical_(uint8_t* buf, int pcol, int py1, int py2, bool white) {
+    py1 = std::max(py1, 0);
+    py2 = std::min(py2, DisplayFrame::kPhysicalHeight);
+    if (pcol < 0 || pcol >= DisplayFrame::kPhysicalWidth || py1 >= py2)
+      return;
+    const int bidx = pcol / 8;
+    const uint8_t bit = static_cast<uint8_t>(0x80u >> (pcol & 7));
+    for (int row = py1; row < py2; ++row) {
+      uint8_t* p = buf + row * DisplayFrame::kStride + bidx;
+      if (white)
+        *p |= bit;
+      else
+        *p &= static_cast<uint8_t>(~bit);
+    }
+  }
+};
+
+}  // namespace microreader

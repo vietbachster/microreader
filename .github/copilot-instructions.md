@@ -146,20 +146,72 @@ $env:USERPROFILE\.platformio\penv\Scripts\pio.exe device monitor --baud 115200
 - ESP32 sources are **explicitly listed** in `platforms/esp32/CMakeLists.txt` (NOT auto-discovered by PIO LDF). When adding new `.cpp` files, you must add them to the source list.
 
 ### Tests
+
+Three levels of testing, from fastest to most thorough:
+
+#### 1. Unit tests (fastest — run after every change)
+
 ```bash
 cd microreader2/test
-cmake -B build2 -DCMAKE_BUILD_TYPE=Debug
+cmake -B build2 -DCMAKE_BUILD_TYPE=Debug -DCMAKE_POLICY_VERSION_MINIMUM:STRING=3.5
 cmake --build build2 --config Debug
-
-# Fast unit tests (~330 tests, <1 second):
 .\build2\Debug\unit_tests.exe
+```
 
-# Full suite including real EPUB integration tests:
+~375 tests, runs in <1 second. Covers ZipReader, XmlReader, CssParser, EpubParser, ImageDecoder, TextLayout with synthetic fixtures only. **Always run this first.**
+
+VS Code task shortcut: **Run Unit Tests** (builds + runs automatically).
+
+#### 2. Integration tests (includes real EPUB books)
+
+```bash
 .\build2\Debug\microreader_tests.exe
+```
 
-# Specific test filter:
+Includes everything from unit tests plus RealBookTest, BulkBookTest, DebugOhlerTest, HtmlExportTest. Requires real `.epub` files in `test/books/`. Run a subset with `--gtest_filter`:
+
+```bash
+.\build2\Debug\microreader_tests.exe --gtest_filter="HtmlExport.*"
 .\build2\Debug\microreader_tests.exe --gtest_filter="DebugOhler.*"
 ```
+
+VS Code task shortcuts: **Run All Tests**, **Run HTML Export Tests**.
+
+#### 3. On-device tests (real hardware or QEMU)
+
+Tests book opening, page navigation, and heap stability on actual ESP32 firmware.
+
+**Real device (COM4):**
+```bash
+# Build + flash firmware
+& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run -t upload
+
+# Run book tests (opens each book, navigates pages, checks for crashes)
+python tools/test_books.py --port COM4 --pages 20 --heap
+```
+
+**QEMU (no hardware needed):**
+```bash
+# Terminal 1: start QEMU with books pre-loaded
+python tools/run_qemu.py --with-books
+
+# Terminal 2: run tests against QEMU
+python tools/test_books.py --port socket://localhost:4444 --pages 20 --delay 0.1
+```
+
+`test_books.py` options:
+- `--pages N` — pages to navigate per book (default: 20)
+- `--heap` — print heap stats per book (before/after open/close)
+- `--filter STR` — only test books matching STR
+- `--clean` — delete all `.mrb` files first (forces fresh conversion)
+- `-v` — verbose per-page output
+
+#### Recommended workflow
+
+1. **Edit code** → run **unit tests** (task or `unit_tests.exe`)
+2. If content/layout changes → run **integration tests** (`microreader_tests.exe`)
+3. If touching memory, images, or ESP32-specific code → **flash + test_books.py** on device
+4. For CI-like coverage without hardware → **QEMU + test_books.py**
 
 Two test binaries:
 - `unit_tests`: ZipReader, XmlReader, CssParser, EpubParser, ImageDecoder, TextLayout tests
