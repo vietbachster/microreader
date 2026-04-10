@@ -277,22 +277,39 @@ static void unfilter_row(uint8_t filter, uint8_t* row, const uint8_t* prev, size
 
 static void dither_row_png(const uint8_t* src_row, const PngHeader& hdr, const uint8_t palette_grey[256],
                            uint32_t x_step, int out_w, int16_t* err_cur, int16_t* err_nxt, uint8_t* out_row) {
+  uint32_t sx_fp = 0;
+  uint8_t acc = 0, bit = 0x80;
+  // Fast path for the most common case in ebook covers/illustrations.
+  bool grey8 = (hdr.color_type == kColorGreyscale && hdr.bit_depth == 8);
   for (int ox = 0; ox < out_w; ++ox) {
-    size_t sx = static_cast<size_t>((static_cast<uint32_t>(ox) * x_step) >> 16);
-    int16_t g = static_cast<int16_t>(pixel_to_grey(src_row, sx, hdr, palette_grey));
-    int16_t val = std::max(int16_t(0), std::min(int16_t(255), static_cast<int16_t>(g + err_cur[ox + 1])));
-    bool blk = (val < 128);
-    int16_t q = blk ? int16_t(0) : int16_t(255);
-    int16_t e = static_cast<int16_t>(val - q);
+    size_t sx = sx_fp >> 16;
+    sx_fp += x_step;
+    int16_t g =
+        grey8 ? static_cast<int16_t>(src_row[sx]) : static_cast<int16_t>(pixel_to_grey(src_row, sx, hdr, palette_grey));
+    int16_t val = static_cast<int16_t>(g + err_cur[ox + 1]);
+    if (val < 0)
+      val = 0;
+    if (val > 255)
+      val = static_cast<int16_t>(255);
+    bool blk = val < 128;
+    int16_t e = blk ? val : static_cast<int16_t>(val - 255);
 
     if (!blk)
-      out_row[ox / 8] |= static_cast<uint8_t>(1u << (7 - (ox & 7)));
+      acc |= bit;
+    bit >>= 1;
+    if (!bit) {
+      *out_row++ = acc;
+      acc = 0;
+      bit = 0x80;
+    }
 
-    err_cur[ox + 2] = static_cast<int16_t>(err_cur[ox + 2] + e * 7 / 16);
-    err_nxt[ox] = static_cast<int16_t>(err_nxt[ox] + e * 3 / 16);
-    err_nxt[ox + 1] = static_cast<int16_t>(err_nxt[ox + 1] + e * 5 / 16);
-    err_nxt[ox + 2] = static_cast<int16_t>(err_nxt[ox + 2] + e * 1 / 16);
+    err_cur[ox + 2] = static_cast<int16_t>(err_cur[ox + 2] + ((e * 7) >> 4));
+    err_nxt[ox] = static_cast<int16_t>(err_nxt[ox] + ((e * 3) >> 4));
+    err_nxt[ox + 1] = static_cast<int16_t>(err_nxt[ox + 1] + ((e * 5) >> 4));
+    err_nxt[ox + 2] = static_cast<int16_t>(err_nxt[ox + 2] + (e >> 4));
   }
+  if (bit != 0x80)
+    *out_row = acc;
 }
 
 // ---------------------------------------------------------------------------
@@ -532,42 +549,51 @@ ImageError decode_png_from_entry(IZipFile& file, const ZipEntry& entry, uint16_t
       std::memmove(idat_buf, idat_buf + in_bytes, in_avail - in_bytes);
     in_avail -= in_bytes;
 
-    // Feed decompressed bytes into the scanline accumulator
-    for (size_t i = 0; i < out_bytes; ++i) {
-      row_buf[row_pos++] = lz_dict[(write_pos + i) & (kLZDictSize - 1)];
+    // The decompressed region [write_pos, write_pos+out_bytes) is contiguous (no ring
+    // wrap) because tinfl writes at most kLZDictSize-write_pos bytes per call.
+    // Batch memcpy into row_buf instead of copying byte-at-a-time.
+    {
+      const uint8_t* src = lz_dict.get() + write_pos;
+      size_t remaining = out_bytes;
+      while (remaining > 0) {
+        size_t chunk = std::min(remaining, row_total - row_pos);
+        std::memcpy(row_buf.get() + row_pos, src, chunk);
+        row_pos += chunk;
+        src += chunk;
+        remaining -= chunk;
 
-      if (row_pos == row_total) {
-        uint8_t filter = row_buf[0];
-        std::memcpy(curr_row.get(), row_buf.get() + 1, scan_bytes);
-        unfilter_row(filter, curr_row.get(), prev_row.get(), scan_bytes, bpp_filter);
+        if (row_pos == row_total) {
+          uint8_t filter = row_buf[0];
+          std::memcpy(curr_row.get(), row_buf.get() + 1, scan_bytes);
+          unfilter_row(filter, curr_row.get(), prev_row.get(), scan_bytes, bpp_filter);
 
-        // Emit all output rows that map to this source row (handles upscaling too).
-        while (out_y < out_h) {
-          uint32_t target_src_y = (out_y * y_step) >> 16;
-          if (src_y != target_src_y)
-            break;
-          if (sink) {
-            uint8_t temp_row[128] = {};  // max 1024/8 = 128 bytes
-            dither_row_png(curr_row.get(), hdr, palette_grey, x_step, static_cast<int>(out_w), err_cur.get(),
-                           err_nxt.get(), temp_row);
-            sink->emit_row(sink->ctx, static_cast<uint16_t>(out_y), temp_row, static_cast<uint16_t>(out_w));
-          } else {
-            uint8_t* out_row = out.data.data() + out_y * out_stride;
-            std::memset(out_row, 0, out_stride);
-            dither_row_png(curr_row.get(), hdr, palette_grey, x_step, static_cast<int>(out_w), err_cur.get(),
-                           err_nxt.get(), out_row);
+          // Emit all output rows that map to this source row (handles upscaling too).
+          while (out_y < out_h) {
+            uint32_t target_src_y = (out_y * y_step) >> 16;
+            if (src_y != target_src_y)
+              break;
+            if (sink) {
+              uint8_t temp_row[128];  // byte accumulator writes all bytes
+              dither_row_png(curr_row.get(), hdr, palette_grey, x_step, static_cast<int>(out_w), err_cur.get(),
+                             err_nxt.get(), temp_row);
+              sink->emit_row(sink->ctx, static_cast<uint16_t>(out_y), temp_row, static_cast<uint16_t>(out_w));
+            } else {
+              uint8_t* out_row = out.data.data() + out_y * out_stride;
+              dither_row_png(curr_row.get(), hdr, palette_grey, x_step, static_cast<int>(out_w), err_cur.get(),
+                             err_nxt.get(), out_row);
+            }
+            ++out_y;
+            std::swap(err_cur, err_nxt);
+            std::fill(err_nxt.get(), err_nxt.get() + out_w + 2, int16_t(0));
           }
-          ++out_y;
-          std::swap(err_cur, err_nxt);
-          std::fill(err_nxt.get(), err_nxt.get() + out_w + 2, int16_t(0));
-        }
 
-        std::swap(prev_row, curr_row);
-        std::fill(curr_row.get(), curr_row.get() + scan_bytes, uint8_t(0));
-        row_pos = 0;
-        ++src_y;
-      }
-    }
+          std::swap(prev_row, curr_row);
+          std::fill(curr_row.get(), curr_row.get() + scan_bytes, uint8_t(0));
+          row_pos = 0;
+          ++src_y;
+        }  // end row_pos == row_total
+      }  // end while remaining
+    }  // end batch copy block
 
     dict_pos += out_bytes;
 

@@ -98,9 +98,12 @@ bool ReaderScreen::decode_image_to_buffer_(uint32_t offset, DrawBuffer& buf, int
     bc->buf->blit_1bit_row(bc->x, bc->y + row, data, width);
   };
 
-  // Let the decoder heap-allocate its own work buffer (~44KB, temporary).
+  // Use the active display buffer as the work buffer to avoid a 44KB heap
+  // allocation.  The active buffer is safe to overwrite here: it is not
+  // needed for this render pass and will be cleared before the next refresh.
   DecodedImage dims;  // only width/height will be set; data stays empty
-  auto err = decode_image_from_entry(file, entry, max_w, max_h, dims, nullptr, 0, /*scale_to_fill=*/true, &sink);
+  auto err = decode_image_from_entry(file, entry, max_w, max_h, dims, buf.scratch_buf2(), DrawBuffer::kBufSize,
+                                     /*scale_to_fill=*/true, &sink);
   return err == ImageError::Ok;
 }
 

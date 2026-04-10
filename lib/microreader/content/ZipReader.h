@@ -29,6 +29,7 @@ struct ZipEntry {
   uint32_t uncompressed_size = 0;
   uint32_t compressed_size = 0;
   uint32_t local_header_offset = 0;  // offset to the local file header
+  uint32_t data_offset = 0;          // offset to the first byte of file data (0 = not cached)
   uint16_t compression = 0;          // 0=stored, 8=deflate
 };
 
@@ -176,10 +177,12 @@ class ZipEntryInput : public IXmlInput {
   bool error_ = false;
   uint16_t compression_ = 0;
 
-  // For stored entries: direct file reads through work_buf
+  // For stored entries: read-ahead via work_buf
   uint8_t* store_buf_ = nullptr;
   size_t store_buf_capacity_ = 0;
-  size_t store_remaining_ = 0;
+  size_t store_remaining_ = 0;  // bytes not yet read from SD
+  size_t store_buf_avail_ = 0;  // bytes in store_buf_ ready to serve
+  size_t store_buf_ofs_ = 0;    // read cursor into store_buf_
 };
 
 }  // namespace microreader

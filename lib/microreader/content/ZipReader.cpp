@@ -200,6 +200,7 @@ ZipError ZipReader::read_local_entry(IZipFile& file, uint32_t offset, ZipEntry& 
     return ZipError::InvalidSignature;
 
   out.local_header_offset = offset;
+  out.data_offset = offset + static_cast<uint32_t>(sizeof(LocalFileHeader)) + lfh.filename_len + lfh.extra_len;
   out.compression = lfh.compression;
   out.compressed_size = lfh.compressed_size;
   out.uncompressed_size = lfh.uncompressed_size;
@@ -209,6 +210,13 @@ ZipError ZipReader::read_local_entry(IZipFile& file, uint32_t offset, ZipEntry& 
 
 // Seek to the start of the compressed data for an entry.
 static ZipError seek_to_data(IZipFile& file, const ZipEntry& entry) {
+  // Fast path: data_offset was pre-computed by read_local_entry — skip
+  // re-reading the local header entirely (saves one seek + 30-byte read).
+  if (entry.data_offset != 0) {
+    file.seek(entry.data_offset, SEEK_SET);
+    return ZipError::Ok;
+  }
+
   file.seek(entry.local_header_offset, SEEK_SET);
 
   LocalFileHeader lfh{};
@@ -405,10 +413,14 @@ ZipError ZipEntryInput::open(IZipFile& file, const ZipEntry& entry, uint8_t* wor
     return err;
 
   if (compression_ == 0) {
-    // Stored: use work_buf as a read-through buffer
+    // Stored: use work_buf as a read-ahead buffer.
+    // ZipEntryInput::read() will fill it in large chunks from SD,
+    // then drain it without further SD calls.
     store_buf_ = work_buf;
     store_buf_capacity_ = work_buf_size;
     store_remaining_ = entry.uncompressed_size;
+    store_buf_avail_ = 0;
+    store_buf_ofs_ = 0;
     return ZipError::Ok;
   }
 
@@ -444,21 +456,32 @@ size_t ZipEntryInput::read(void* buf, size_t max_size) {
   size_t total = 0;
 
   if (compression_ == 0) {
-    // Stored: read through work buffer (avoids requiring caller to provide
-    // a large buffer aligned with the file's read interface)
-    while (total < max_size && store_remaining_ > 0) {
-      size_t want = std::min(max_size - total, store_remaining_);
-      want = std::min(want, store_buf_capacity_);
-      size_t got = file_->read(store_buf_, want);
+    // Stored: read-ahead buffering — refill store_buf_ in large chunks
+    // (up to store_buf_capacity_) and drain from it, minimising SD read calls.
+    while (total < max_size) {
+      // Drain already-buffered data first.
+      if (store_buf_avail_ > 0) {
+        size_t n = std::min(max_size - total, store_buf_avail_);
+        std::memcpy(out + total, store_buf_ + store_buf_ofs_, n);
+        store_buf_ofs_ += n;
+        store_buf_avail_ -= n;
+        total += n;
+        continue;
+      }
+      // Nothing buffered: read a large chunk from SD.
+      if (store_remaining_ == 0)
+        break;
+      size_t to_read = std::min(store_remaining_, store_buf_capacity_);
+      size_t got = file_->read(store_buf_, to_read);
       if (got == 0) {
         error_ = true;
         break;
       }
-      std::memcpy(out + total, store_buf_, got);
-      total += got;
       store_remaining_ -= got;
+      store_buf_ofs_ = 0;
+      store_buf_avail_ = got;
     }
-    if (store_remaining_ == 0)
+    if (store_buf_avail_ == 0 && store_remaining_ == 0)
       done_ = true;
     return total;
   }

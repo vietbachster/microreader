@@ -841,23 +841,39 @@ static void idct(const int32_t block[64], uint8_t out[64]) {
 
 static void dither_row(const uint8_t* row, uint32_t x_step, int out_w, int16_t* err_cur, int16_t* err_nxt,
                        uint8_t* out_row) {
+  // Running fixed-point x accumulator avoids one multiply per pixel.
+  uint32_t sx_fp = 0;
+  // Byte accumulator: buffer 8 output bits then write, avoiding per-pixel RMW.
+  uint8_t acc = 0, bit = 0x80;
   for (int ox = 0; ox < out_w; ++ox) {
-    int sx = static_cast<int>((static_cast<uint32_t>(ox) * x_step) >> 16);
-    int16_t g = static_cast<int16_t>(row[sx]);
-    int16_t val =
-        static_cast<int16_t>(std::max(int16_t(0), std::min(int16_t(255), static_cast<int16_t>(g + err_cur[ox + 1]))));
+    int16_t g = static_cast<int16_t>(row[sx_fp >> 16]);
+    sx_fp += x_step;
+    int16_t val = static_cast<int16_t>(g + err_cur[ox + 1]);
+    if (val < 0)
+      val = 0;
+    if (val > 255)
+      val = static_cast<int16_t>(255);
     bool blk = val < 128;
-    int16_t q = blk ? int16_t(0) : int16_t(255);
-    int16_t e = static_cast<int16_t>(val - q);
+    int16_t e = blk ? val : static_cast<int16_t>(val - 255);
 
     if (!blk)
-      out_row[ox / 8] |= static_cast<uint8_t>(1u << (7 - (ox & 7)));
+      acc |= bit;
+    bit >>= 1;
+    if (!bit) {
+      *out_row++ = acc;
+      acc = 0;
+      bit = 0x80;
+    }
 
-    err_cur[ox + 2] = static_cast<int16_t>(err_cur[ox + 2] + e * 7 / 16);
-    err_nxt[ox] = static_cast<int16_t>(err_nxt[ox] + e * 3 / 16);
-    err_nxt[ox + 1] = static_cast<int16_t>(err_nxt[ox + 1] + e * 5 / 16);
-    err_nxt[ox + 2] = static_cast<int16_t>(err_nxt[ox + 2] + e * 1 / 16);
+    // >>4 instead of /16: arithmetic right shift is equivalent for Floyd-Steinberg.
+    err_cur[ox + 2] = static_cast<int16_t>(err_cur[ox + 2] + ((e * 7) >> 4));
+    err_nxt[ox] = static_cast<int16_t>(err_nxt[ox] + ((e * 3) >> 4));
+    err_nxt[ox + 1] = static_cast<int16_t>(err_nxt[ox + 1] + ((e * 5) >> 4));
+    err_nxt[ox + 2] = static_cast<int16_t>(err_nxt[ox + 2] + (e >> 4));
   }
+  // Flush last partial byte (no-op when out_w is a multiple of 8).
+  if (bit != 0x80)
+    *out_row = acc;
 }
 
 // ---------------------------------------------------------------------------
@@ -993,12 +1009,11 @@ static const char* decode_baseline(const JpegState& st, BitReader& r, uint16_t m
         if (target_src_y != src_y)
           break;
         if (sink) {
-          uint8_t temp_row[128] = {};  // max 1024/8 = 128 bytes
+          uint8_t temp_row[128];  // byte accumulator writes all bytes; no zero-init needed
           dither_row(y_row.get() + py * row_w, x_step, out_w, err_cur.get(), err_nxt.get(), temp_row);
           sink->emit_row(sink->ctx, static_cast<uint16_t>(out_y), temp_row, static_cast<uint16_t>(out_w));
         } else {
           uint8_t* out_row = out.data.data() + out_y * out_stride;
-          std::memset(out_row, 0, out_stride);
           dither_row(y_row.get() + py * row_w, x_step, out_w, err_cur.get(), err_nxt.get(), out_row);
         }
         ++out_y;
