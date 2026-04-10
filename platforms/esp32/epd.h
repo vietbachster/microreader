@@ -49,15 +49,13 @@ enum EpdRefreshMode { EPD_FULL_REFRESH, EPD_HALF_REFRESH, EPD_FAST_REFRESH };
 
 class EInkDisplay : public microreader::IDisplay {
  public:
-  static const uint16_t DISPLAY_WIDTH = 800;
-  static const uint16_t DISPLAY_HEIGHT = 480;
-  static const uint16_t DISPLAY_WIDTH_BYTES = DISPLAY_WIDTH / 8;
-  static const uint32_t BUFFER_SIZE = DISPLAY_WIDTH_BYTES * DISPLAY_HEIGHT;
+  static constexpr uint16_t DISPLAY_WIDTH = microreader::DisplayFrame::kPhysicalWidth;
+  static constexpr uint16_t DISPLAY_HEIGHT = microreader::DisplayFrame::kPhysicalHeight;
+  static constexpr uint16_t DISPLAY_WIDTH_BYTES = microreader::DisplayFrame::kStride;
+  static constexpr uint32_t BUFFER_SIZE = microreader::DisplayFrame::kPixelBytes;
 
   bool isScreenOn = false;
   bool inDeepSleep_ = false;
-
-  int active_buffer = 0;
 
   spi_device_handle_t spi_;
 
@@ -108,22 +106,18 @@ class EInkDisplay : public microreader::IDisplay {
   void full_refresh(const uint8_t* pixels, microreader::RefreshMode mode) override {
     wakeIfNeeded();
     waitWhileBusy();
-    setRamArea(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+    // parts of the screen are not visible so we offset the image
+    setRamArea(12, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
     writeRamBuffer(CMD_WRITE_RAM_BW, pixels, BUFFER_SIZE);
     writeRamBuffer(CMD_WRITE_RAM_RED, pixels, BUFFER_SIZE);
     refreshDisplay(mode == microreader::RefreshMode::Half ? EPD_HALF_REFRESH : EPD_FULL_REFRESH);
-    active_buffer = 0;
   }
 
   void partial_refresh(const uint8_t* new_pixels) override {
     wakeIfNeeded();
     waitWhileBusy();
-    setRamArea(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
-    if (active_buffer == 1) {
-      writeRamBuffer(CMD_WRITE_RAM_RED, new_pixels, BUFFER_SIZE);
-    } else {
-      writeRamBuffer(CMD_WRITE_RAM_BW, new_pixels, BUFFER_SIZE);
-    }
+    setRamArea(12, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+    writeRamBuffer(CMD_WRITE_RAM_BW, new_pixels, BUFFER_SIZE);
     refreshDisplay(EPD_FAST_REFRESH);
   }
 
@@ -222,6 +216,18 @@ class EInkDisplay : public microreader::IDisplay {
   void refreshDisplay(EpdRefreshMode mode) {
     sendCommand(CMD_DISPLAY_UPDATE_CTRL1);
     sendData(mode == EPD_FAST_REFRESH ? CTRL1_NORMAL : CTRL1_BYPASS_RED);
+
+    // best guess at display mode bits:
+    // bit | hex | name                    | effect
+    // ----+-----+--------------------------+-------------------------------------------
+    // 7   | 80  | CLOCK_ON                | Start internal oscillator
+    // 6   | 40  | ANALOG_ON               | Enable analog power rails (VGH/VGL drivers)
+    // 5   | 20  | TEMP_LOAD               | Load temperature (internal or I2C)
+    // 4   | 10  | LUT_LOAD                | Load waveform LUT
+    // 3   | 08  | MODE_SELECT             | Mode 1/2
+    // 2   | 04  | DISPLAY_START           | Run display
+    // 1   | 02  | ANALOG_OFF_PHASE        | Shutdown step 1 (undocumented)
+    // 0   | 01  | CLOCK_OFF               | Disable internal oscillator
 
     uint8_t displayMode = 0x00;
     if (!isScreenOn) {

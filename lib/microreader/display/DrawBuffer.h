@@ -17,7 +17,8 @@ enum class RefreshMode { Full, Half };
 
 // Physical screen constants and bit-packed pixel helpers (used internally by DrawBuffer).
 struct DisplayFrame {
-  static constexpr int kPhysicalWidth = 800;
+  // The full size is 800x480 but we only use 788x480 to avoid the hidden areas.
+  static constexpr int kPhysicalWidth = 788;
   static constexpr int kPhysicalHeight = 480;
   static constexpr int kStride = (kPhysicalWidth + 7) / 8;
   static constexpr std::size_t kPixelBytes = static_cast<std::size_t>(kStride) * kPhysicalHeight;

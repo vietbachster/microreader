@@ -1,5 +1,6 @@
 #include "MrbConverter.h"
 
+#include "../../display/DrawBuffer.h"
 #include "../EpubParser.h"
 #include "../ZipReader.h"
 
@@ -374,8 +375,8 @@ void benchmark_image_decode(Book& book, uint8_t* work_buf) {
   static constexpr const char* TAG = "img_decode";
   // Full display resolution — same cap the ReaderScreen uses.
   // 480×800 → stride=60, output=48 000 bytes (fits in scratch_buf1).
-  static constexpr uint16_t kMaxW = 480;
-  static constexpr uint16_t kMaxH = 800;
+  static constexpr uint16_t kMaxW = DrawBuffer::kWidth;
+  static constexpr uint16_t kMaxH = DrawBuffer::kHeight;
 
   IZipFile& file = book.file();
   const ZipReader& zip = book.epub().zip();

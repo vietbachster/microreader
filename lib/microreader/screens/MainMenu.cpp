@@ -40,6 +40,14 @@ void MainMenu::draw_all_(DrawBuffer& buf) const {
   const int title_x = (W - title_w) / 2;
 
   buf.fill(true);
+
+  // // Corner markers for screen-edge debugging (8×8 black squares).
+  // static constexpr int kCorner = 8;
+  // buf.fill_rect(0, 0, kCorner, kCorner, false);                      // top-left
+  // buf.fill_rect(W - kCorner, 0, kCorner, kCorner, false);            // top-right
+  // buf.fill_rect(0, H - kCorner, kCorner, kCorner, false);            // bottom-left
+  // buf.fill_rect(W - kCorner, H - kCorner, kCorner, kCorner, false);  // bottom-right
+
   buf.draw_text(title_x, items_y - kLineHeight, kTitle, true, kScale);
 
   for (int i = 0; i < count_; ++i) {

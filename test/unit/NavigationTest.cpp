@@ -15,6 +15,7 @@
 #include "microreader/content/TextLayout.h"
 #include "microreader/content/mrb/MrbConverter.h"
 #include "microreader/content/mrb/MrbReader.h"
+#include "microreader/display/DrawBuffer.h"
 
 using namespace microreader;
 namespace fs = std::filesystem;
@@ -26,10 +27,9 @@ static constexpr int kScale = 2;
 static constexpr int kGlyphW = 8;
 static constexpr int kGlyphH = 8;
 static constexpr int kPadding = 20;
-static constexpr int kPaddingTop = 40;
 static constexpr int kParaSpacing = 12;
-static constexpr int kWidth = 480;
-static constexpr int kHeight = 800;
+static constexpr int kWidth = DrawBuffer::kWidth;
+static constexpr int kHeight = DrawBuffer::kHeight;
 
 static FixedFont device_font() {
   return FixedFont(kGlyphW * kScale, kGlyphH * kScale + 4);
@@ -37,7 +37,6 @@ static FixedFont device_font() {
 
 static PageOptions device_opts() {
   PageOptions opts(kWidth, kHeight, kPadding, kParaSpacing, Alignment::Start);
-  opts.padding_top = kPaddingTop;
   return opts;
 }
 

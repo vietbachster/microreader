@@ -12,6 +12,7 @@
 #include "microreader/content/ZipReader.h"
 #include "microreader/content/mrb/MrbConverter.h"
 #include "microreader/content/mrb/MrbReader.h"
+#include "microreader/display/DrawBuffer.h"
 
 namespace fs = std::filesystem;
 using namespace microreader;
@@ -126,7 +127,7 @@ class MrbLayoutComparisonTest : public ::testing::Test {
         << epub_name << " chapter count mismatch";
 
     FixedFont font(16, 20);
-    PageOptions opts(480, 800, 20, 16, Alignment::Start);
+    PageOptions opts(DrawBuffer::kWidth, DrawBuffer::kHeight, 20, 16, Alignment::Start);
 
     for (uint16_t ci = 0; ci < mrb.chapter_count(); ++ci) {
       // EPUB path: load chapter into memory.
@@ -241,7 +242,7 @@ TEST_P(BulkMrbComparisonTest, LayoutMatchesEpub) {
   ASSERT_EQ(mrb.chapter_count(), static_cast<uint16_t>(book.chapter_count())) << filename << " chapter count mismatch";
 
   FixedFont font(16, 20);
-  PageOptions opts(480, 800, 20, 16, Alignment::Start);
+  PageOptions opts(DrawBuffer::kWidth, DrawBuffer::kHeight, 20, 16, Alignment::Start);
 
   size_t total_pages = 0;
   for (uint16_t ci = 0; ci < mrb.chapter_count(); ++ci) {
@@ -339,7 +340,7 @@ TEST_P(StreamingMrbComparisonTest, StreamingMatchesNormal) {
   ASSERT_EQ(mrb_n.chapter_count(), mrb_s.chapter_count()) << filename << " chapter count";
 
   FixedFont font(16, 20);
-  PageOptions opts(480, 800, 20, 16, Alignment::Start);
+  PageOptions opts(DrawBuffer::kWidth, DrawBuffer::kHeight, 20, 16, Alignment::Start);
 
   size_t total_pages = 0;
   for (uint16_t ci = 0; ci < mrb_n.chapter_count(); ++ci) {

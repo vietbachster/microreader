@@ -41,7 +41,6 @@ class ReaderScreen final : public IScreen {
   static constexpr int kGlyphW = 8;
   static constexpr int kGlyphH = 8;
   static constexpr int kPadding = 20;
-  static constexpr int kPaddingTop = 40;
   static constexpr int kParaSpacing = 12;
 
   const char* path_ = nullptr;

@@ -7,6 +7,7 @@
 
 #include "microreader/content/ImageDecoder.h"
 #include "microreader/content/ZipReader.h"
+#include "microreader/display/DrawBuffer.h"
 
 using namespace microreader;
 
@@ -589,8 +590,11 @@ TEST_F(ImageFixtureTest, ScaleToFill_False_Jpeg_NaturalSize) {
   ASSERT_NE(entry, nullptr);
 
   DecodedImage natural, large_target;
-  ASSERT_EQ(decode_jpeg_from_entry(zf, *entry, 480, 800, natural, nullptr, 0, false), ImageError::Ok);
-  ASSERT_EQ(decode_jpeg_from_entry(zf, *entry, 480, 800, large_target, nullptr, 0, false), ImageError::Ok);
+  ASSERT_EQ(decode_jpeg_from_entry(zf, *entry, DrawBuffer::kWidth, DrawBuffer::kHeight, natural, nullptr, 0, false),
+            ImageError::Ok);
+  ASSERT_EQ(
+      decode_jpeg_from_entry(zf, *entry, DrawBuffer::kWidth, DrawBuffer::kHeight, large_target, nullptr, 0, false),
+      ImageError::Ok);
 
   // Both calls with scale_to_fill=false should yield the same (natural) dims.
   EXPECT_EQ(large_target.width, natural.width);
@@ -610,7 +614,8 @@ TEST_F(ImageFixtureTest, ScaleToFill_True_Jpeg_FillsTarget) {
 
   // First determine natural size so we can pick a larger target.
   DecodedImage natural;
-  ASSERT_EQ(decode_jpeg_from_entry(zf, *entry, 480, 800, natural, nullptr, 0, false), ImageError::Ok);
+  ASSERT_EQ(decode_jpeg_from_entry(zf, *entry, DrawBuffer::kWidth, DrawBuffer::kHeight, natural, nullptr, 0, false),
+            ImageError::Ok);
   ASSERT_GT(natural.width, 0);
   ASSERT_GT(natural.height, 0);
 
@@ -646,7 +651,8 @@ TEST_F(ImageFixtureTest, ScaleToFill_True_Png_FillsTarget) {
   ASSERT_NE(entry, nullptr);
 
   DecodedImage natural;
-  ASSERT_EQ(decode_png_from_entry(zf, *entry, 480, 800, natural, nullptr, 0, false), ImageError::Ok);
+  ASSERT_EQ(decode_png_from_entry(zf, *entry, DrawBuffer::kWidth, DrawBuffer::kHeight, natural, nullptr, 0, false),
+            ImageError::Ok);
   ASSERT_GT(natural.width, 0);
   ASSERT_GT(natural.height, 0);
 
@@ -716,7 +722,8 @@ TEST_F(ImageFixtureTest, DecodeFromLocalEntry_Jpeg_WithSink) {
   SinkCollector collector;
   auto s = collector.sink();
   DecodedImage dims;
-  auto err = decode_image_from_entry(zf, local_entry, 480, 800, dims, nullptr, 0, false, &s);
+  auto err =
+      decode_image_from_entry(zf, local_entry, DrawBuffer::kWidth, DrawBuffer::kHeight, dims, nullptr, 0, false, &s);
   ASSERT_EQ(err, ImageError::Ok) << "decode_image_from_entry failed for local entry with empty name — "
                                     "this is the black squares bug";
   EXPECT_GT(dims.width, 0);
@@ -739,7 +746,8 @@ TEST_F(ImageFixtureTest, DecodeFromLocalEntry_Png_WithSink) {
   SinkCollector collector;
   auto s = collector.sink();
   DecodedImage dims;
-  auto err = decode_image_from_entry(zf, local_entry, 480, 800, dims, nullptr, 0, false, &s);
+  auto err =
+      decode_image_from_entry(zf, local_entry, DrawBuffer::kWidth, DrawBuffer::kHeight, dims, nullptr, 0, false, &s);
   ASSERT_EQ(err, ImageError::Ok) << "decode_image_from_entry failed for PNG local entry with empty name";
   EXPECT_GT(dims.width, 0);
   EXPECT_GT(dims.height, 0);
@@ -756,14 +764,16 @@ TEST_F(ImageFixtureTest, SinkOutput_MatchesBufferOutput_Jpeg) {
   ASSERT_NE(entry, nullptr);
 
   DecodedImage buf_img;
-  ASSERT_EQ(decode_jpeg_from_entry(zf, *entry, 480, 800, buf_img), ImageError::Ok);
+  ASSERT_EQ(decode_jpeg_from_entry(zf, *entry, DrawBuffer::kWidth, DrawBuffer::kHeight, buf_img), ImageError::Ok);
   ASSERT_GT(buf_img.width, 0);
   ASSERT_FALSE(buf_img.data.empty());
 
   SinkCollector collector;
   auto s = collector.sink();
   DecodedImage sink_dims;
-  ASSERT_EQ(decode_jpeg_from_entry(zf, *entry, 480, 800, sink_dims, nullptr, 0, false, &s), ImageError::Ok);
+  ASSERT_EQ(
+      decode_jpeg_from_entry(zf, *entry, DrawBuffer::kWidth, DrawBuffer::kHeight, sink_dims, nullptr, 0, false, &s),
+      ImageError::Ok);
 
   EXPECT_EQ(sink_dims.width, buf_img.width);
   EXPECT_EQ(sink_dims.height, buf_img.height);
@@ -788,14 +798,16 @@ TEST_F(ImageFixtureTest, SinkOutput_MatchesBufferOutput_Png) {
   ASSERT_NE(entry, nullptr);
 
   DecodedImage buf_img;
-  ASSERT_EQ(decode_png_from_entry(zf, *entry, 480, 800, buf_img), ImageError::Ok);
+  ASSERT_EQ(decode_png_from_entry(zf, *entry, DrawBuffer::kWidth, DrawBuffer::kHeight, buf_img), ImageError::Ok);
   ASSERT_GT(buf_img.width, 0);
   ASSERT_FALSE(buf_img.data.empty());
 
   SinkCollector collector;
   auto s = collector.sink();
   DecodedImage sink_dims;
-  ASSERT_EQ(decode_png_from_entry(zf, *entry, 480, 800, sink_dims, nullptr, 0, false, &s), ImageError::Ok);
+  ASSERT_EQ(
+      decode_png_from_entry(zf, *entry, DrawBuffer::kWidth, DrawBuffer::kHeight, sink_dims, nullptr, 0, false, &s),
+      ImageError::Ok);
 
   EXPECT_EQ(sink_dims.width, buf_img.width);
   EXPECT_EQ(sink_dims.height, buf_img.height);
@@ -844,7 +856,8 @@ TEST(DecodeImage, DeflatedJpeg_LocalEntry_NoFilename) {
   SinkCollector collector;
   auto s = collector.sink();
   DecodedImage dims;
-  auto err = decode_image_from_entry(zf, local_entry, 480, 800, dims, nullptr, 0, false, &s);
+  auto err =
+      decode_image_from_entry(zf, local_entry, DrawBuffer::kWidth, DrawBuffer::kHeight, dims, nullptr, 0, false, &s);
   ASSERT_EQ(err, ImageError::Ok) << "Deflated JPEG with empty filename should decode via magic peek — "
                                     "this was the black squares bug (err="
                                  << (int)err << ")";

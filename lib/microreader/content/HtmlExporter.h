@@ -3,14 +3,15 @@
 #include <cstdio>
 #include <string>
 
+#include "../display/DrawBuffer.h"
 #include "Book.h"
 #include "TextLayout.h"
 
 namespace microreader {
 
 struct HtmlExportOptions {
-  uint16_t page_width = 480;   // real e-ink display width
-  uint16_t page_height = 800;  // real e-ink display height
+  uint16_t page_width = DrawBuffer::kWidth;    // real e-ink display width
+  uint16_t page_height = DrawBuffer::kHeight;  // real e-ink display height
   uint16_t padding = 20;
   uint16_t para_spacing = 8;
   Alignment alignment = Alignment::Justify;

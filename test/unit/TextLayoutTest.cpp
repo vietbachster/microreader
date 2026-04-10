@@ -3,6 +3,7 @@
 #include <algorithm>
 
 #include "microreader/content/TextLayout.h"
+#include "microreader/display/DrawBuffer.h"
 #include "microreader/display/Font.h"
 
 using namespace microreader;
@@ -329,7 +330,7 @@ TEST(TextLayout, GermanTextRenderingPipeline) {
                                                    "1945"),                        // 1945
                                        FontStyle::Regular, false));
 
-  LayoutOptions opts{480, Alignment::Start};
+  LayoutOptions opts{DrawBuffer::kWidth, Alignment::Start};
   auto lines = layout_paragraph(font16, opts, para);
 
   ASSERT_GE(lines.size(), 1u);
@@ -1258,7 +1259,7 @@ TEST(PageLayout, InlineImageBottomAlignsWithBaseline) {
   // 80x75 image (like Alice initial cap). Font: 8px wide, 16px line height, baseline=12.
   // Image bottom should align with the baseline of the first text line.
   auto ch = make_inline_image_chapter(80, 75, "URIOUSER and curiouser cried Alice she was so much surprised");
-  PageOptions opts{480, 800, 0, 20};
+  PageOptions opts{DrawBuffer::kWidth, DrawBuffer::kHeight, 0, 20};
   auto page = layout_page(font8, opts, ch, PagePosition(0, 0));
 
   ASSERT_EQ(page.image_items.size(), 1u);
@@ -1280,7 +1281,7 @@ TEST(PageLayout, InlineImageBottomAlignsWithBaseline) {
 TEST(PageLayout, InlineImageFirstLineIndented) {
   // First line text should be indented by image width + 4px gap
   auto ch = make_inline_image_chapter(80, 75, "URIOUSER and curiouser cried Alice she was so much surprised");
-  PageOptions opts{480, 800, 0, 20};
+  PageOptions opts{DrawBuffer::kWidth, DrawBuffer::kHeight, 0, 20};
   auto page = layout_page(font8, opts, ch, PagePosition(0, 0));
 
   ASSERT_GE(page.text_items.size(), 2u);
@@ -1351,7 +1352,7 @@ TEST(PageLayout, InlineImageNoOverlapWithText) {
   auto ch = make_inline_image_chapter(
       80, 75,
       "URIOUSER and curiouser cried Alice she was so much surprised that for a moment she quite forgot how to speak");
-  PageOptions opts{480, 800, 0, 20};
+  PageOptions opts{DrawBuffer::kWidth, DrawBuffer::kHeight, 0, 20};
   auto page = layout_page(font8, opts, ch, PagePosition(0, 0));
 
   ASSERT_EQ(page.image_items.size(), 1u);
