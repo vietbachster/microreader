@@ -1,7 +1,7 @@
 // PngDecoder.cpp
 //
-// Minimal streaming PNG decoder producing 1-bit Floyd–Steinberg dithered
-// bitmaps. Ported from TrustyReader (Rust) to C++17.
+// Minimal streaming PNG decoder producing 1-bit Atkinson-dithered bitmaps.
+// Ported from TrustyReader (Rust) to C++17.
 //
 // Streams row-by-row: reads chunks from ZipEntryInput, feeds IDAT data
 // into a tinfl (miniz) zlib decompressor, reconstructs scanlines one at a
@@ -21,9 +21,13 @@
 #include <cstring>
 #include <memory>
 
+#include "../HeapLog.h"
 #include "ImageDecoder.h"
 #include "ZipReader.h"
 #include "miniz.h"
+#ifdef ESP_PLATFORM
+#include "esp_timer.h"
+#endif
 
 namespace microreader {
 
@@ -241,60 +245,94 @@ static uint8_t paeth(uint8_t a, uint8_t b, uint8_t c) {
 }
 
 static void unfilter_row(uint8_t filter, uint8_t* row, const uint8_t* prev, size_t len, int bpp) {
+  size_t ib = static_cast<size_t>(bpp);
   switch (filter) {
     case kFilterNone:
       break;
     case kFilterSub:
-      for (size_t i = bpp; i < len; ++i)
-        row[i] = static_cast<uint8_t>(row[i] + row[i - bpp]);
+      for (size_t i = ib; i < len; ++i)
+        row[i] = static_cast<uint8_t>(row[i] + row[i - ib]);
       break;
-    case kFilterUp:
-      for (size_t i = 0; i < len; ++i)
+    case kFilterUp: {
+      // Word-parallel byte addition: 4 bytes per iteration, no cross-byte carry.
+      // Correct on unaligned inputs via memcpy; GCC emits lw/sw when aligned.
+      size_t i = 0;
+      for (; i + 4 <= len; i += 4) {
+        uint32_t r, p;
+        std::memcpy(&r, row + i, 4);
+        std::memcpy(&p, prev + i, 4);
+        uint32_t even = ((r & 0x00FF00FFu) + (p & 0x00FF00FFu)) & 0x00FF00FFu;
+        uint32_t odd = (((r >> 8) & 0x00FF00FFu) + ((p >> 8) & 0x00FF00FFu)) & 0x00FF00FFu;
+        r = even | (odd << 8);
+        std::memcpy(row + i, &r, 4);
+      }
+      for (; i < len; ++i)
         row[i] = static_cast<uint8_t>(row[i] + prev[i]);
       break;
-    case kFilterAverage:
-      for (size_t i = 0; i < len; ++i) {
-        uint8_t a = (i >= static_cast<size_t>(bpp)) ? row[i - bpp] : 0;
-        row[i] = static_cast<uint8_t>(row[i] + static_cast<uint8_t>((uint16_t(a) + uint16_t(prev[i])) / 2));
-      }
+    }
+    case kFilterAverage: {
+      // First ib bytes: left pixel (a) = 0.
+      for (size_t i = 0; i < ib && i < len; ++i)
+        row[i] = static_cast<uint8_t>(row[i] + static_cast<uint8_t>(uint16_t(prev[i]) / 2));
+      for (size_t i = ib; i < len; ++i)
+        row[i] = static_cast<uint8_t>(row[i] + static_cast<uint8_t>((uint16_t(row[i - ib]) + uint16_t(prev[i])) / 2));
       break;
-    case kFilterPaeth:
-      for (size_t i = 0; i < len; ++i) {
-        uint8_t a = (i >= static_cast<size_t>(bpp)) ? row[i - bpp] : 0;
+    }
+    case kFilterPaeth: {
+      // First ib bytes: a = 0, c = 0 → paeth(0, b, 0) = b; hoists branch out of loop.
+      for (size_t i = 0; i < ib && i < len; ++i)
+        row[i] = static_cast<uint8_t>(row[i] + prev[i]);
+      for (size_t i = ib; i < len; ++i) {
+        uint8_t a = row[i - ib];
         uint8_t b = prev[i];
-        uint8_t c = (i >= static_cast<size_t>(bpp)) ? prev[i - bpp] : 0;
+        uint8_t c = prev[i - ib];
         row[i] = static_cast<uint8_t>(row[i] + paeth(a, b, c));
       }
       break;
+    }
     default:
       break;  // Unknown filter — treat as None
   }
 }
 
 // ---------------------------------------------------------------------------
-// Floyd–Steinberg dithering (one PNG row → 1-bit output)
+// Atkinson dithering (one PNG row → 1-bit output)
+// Distributes 6/8 of error to 6 neighbors; intentionally loses 1/4.
+// Requires 3 error rows: cur (this row), nxt (next), nxt2 (row+2).
 // ---------------------------------------------------------------------------
 
 static void dither_row_png(const uint8_t* src_row, const PngHeader& hdr, const uint8_t palette_grey[256],
-                           uint32_t x_step, int out_w, int16_t* err_cur, int16_t* err_nxt, uint8_t* out_row) {
+                           uint32_t x_step, int out_w, int16_t* err_cur, int16_t* err_nxt, int16_t* err_nxt2,
+                           uint8_t* out_row) {
   uint32_t sx_fp = 0;
   uint8_t acc = 0, bit = 0x80;
-  // Fast path for the most common case in ebook covers/illustrations.
   bool grey8 = (hdr.color_type == kColorGreyscale && hdr.bit_depth == 8);
+  bool rgb8 = (hdr.color_type == kColorRGB && hdr.bit_depth == 8);
+  bool pal4 = (hdr.color_type == kColorPalette && hdr.bit_depth == 4);
   for (int ox = 0; ox < out_w; ++ox) {
     size_t sx = sx_fp >> 16;
     sx_fp += x_step;
-    int16_t g =
-        grey8 ? static_cast<int16_t>(src_row[sx]) : static_cast<int16_t>(pixel_to_grey(src_row, sx, hdr, palette_grey));
+    int16_t g;
+    if (grey8)
+      g = static_cast<int16_t>(src_row[sx]);
+    else if (rgb8)
+      g = static_cast<int16_t>(rgb_to_grey(src_row[sx * 3], src_row[sx * 3 + 1], src_row[sx * 3 + 2]));
+    else if (pal4) {
+      uint8_t n = (sx & 1) ? (src_row[sx >> 1] & 0x0F) : (src_row[sx >> 1] >> 4);
+      g = static_cast<int16_t>(palette_grey[n]);
+    } else
+      g = static_cast<int16_t>(pixel_to_grey(src_row, sx, hdr, palette_grey));
+
     int16_t val = static_cast<int16_t>(g + err_cur[ox + 1]);
     if (val < 0)
       val = 0;
     if (val > 255)
-      val = static_cast<int16_t>(255);
-    bool blk = val < 128;
-    int16_t e = blk ? val : static_cast<int16_t>(val - 255);
+      val = 255;
+    bool white = val >= 128;
+    int16_t e = white ? static_cast<int16_t>(val - 255) : val;
+    int16_t q = static_cast<int16_t>(e >> 3);
 
-    if (!blk)
+    if (white)
       acc |= bit;
     bit >>= 1;
     if (!bit) {
@@ -303,23 +341,24 @@ static void dither_row_png(const uint8_t* src_row, const PngHeader& hdr, const u
       bit = 0x80;
     }
 
-    err_cur[ox + 2] = static_cast<int16_t>(err_cur[ox + 2] + ((e * 7) >> 4));
-    err_nxt[ox] = static_cast<int16_t>(err_nxt[ox] + ((e * 3) >> 4));
-    err_nxt[ox + 1] = static_cast<int16_t>(err_nxt[ox + 1] + ((e * 5) >> 4));
-    err_nxt[ox + 2] = static_cast<int16_t>(err_nxt[ox + 2] + (e >> 4));
+    err_cur[ox + 2] = static_cast<int16_t>(err_cur[ox + 2] + q);
+    err_cur[ox + 3] = static_cast<int16_t>(err_cur[ox + 3] + q);
+    err_nxt[ox] = static_cast<int16_t>(err_nxt[ox] + q);
+    err_nxt[ox + 1] = static_cast<int16_t>(err_nxt[ox + 1] + q);
+    err_nxt[ox + 2] = static_cast<int16_t>(err_nxt[ox + 2] + q);
+    err_nxt2[ox + 1] = static_cast<int16_t>(err_nxt2[ox + 1] + q);
   }
   if (bit != 0x80)
     *out_row = acc;
 }
 
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
-
 ImageError decode_png_from_entry(IZipFile& file, const ZipEntry& entry, uint16_t max_w, uint16_t max_h,
                                  DecodedImage& out, uint8_t* work_buf, size_t work_buf_size, bool scale_to_fill,
                                  ImageRowSink* sink) {
   // If no work_buf, allocate one
+#ifdef ESP_PLATFORM
+  int64_t _t_entry = esp_timer_get_time();
+#endif
   std::unique_ptr<uint8_t[]> owned_work;
   if (!work_buf || work_buf_size < ZipEntryInput::kMinWorkBufSize) {
     owned_work = std::unique_ptr<uint8_t[]>(new (std::nothrow) uint8_t[ZipEntryInput::kMinWorkBufSize]);
@@ -463,9 +502,10 @@ ImageError decode_png_from_entry(IZipFile& file, const ZipEntry& entry, uint16_t
   if (!prev_row || !curr_row || !row_buf)
     return ImageError::ReadError;
 
-  auto err_cur = std::unique_ptr<int16_t[]>(new (std::nothrow) int16_t[out_w + 2]());
-  auto err_nxt = std::unique_ptr<int16_t[]>(new (std::nothrow) int16_t[out_w + 2]());
-  if (!err_cur || !err_nxt)
+  auto err_cur = std::unique_ptr<int16_t[]>(new (std::nothrow) int16_t[out_w + 4]());
+  auto err_nxt = std::unique_ptr<int16_t[]>(new (std::nothrow) int16_t[out_w + 4]());
+  auto err_nxt2 = std::unique_ptr<int16_t[]>(new (std::nothrow) int16_t[out_w + 4]());
+  if (!err_cur || !err_nxt || !err_nxt2)
     return ImageError::ReadError;
 
   // Output bitmap
@@ -497,6 +537,10 @@ ImageError decode_png_from_entry(IZipFile& file, const ZipEntry& entry, uint16_t
   uint32_t src_y = 0, out_y = 0;
 
   // ---- IDAT streaming decompression + row processing ----
+#ifdef ESP_PLATFORM
+  int64_t _t_idat = esp_timer_get_time();
+  int64_t _t_pre = _t_idat - _t_entry;
+#endif
   for (;;) {
     // Top up input buffer from the IDAT stream
     while (in_avail < kIDAT_BufSize) {
@@ -575,16 +619,18 @@ ImageError decode_png_from_entry(IZipFile& file, const ZipEntry& entry, uint16_t
             if (sink) {
               uint8_t temp_row[128];  // byte accumulator writes all bytes
               dither_row_png(curr_row.get(), hdr, palette_grey, x_step, static_cast<int>(out_w), err_cur.get(),
-                             err_nxt.get(), temp_row);
+                             err_nxt.get(), err_nxt2.get(), temp_row);
               sink->emit_row(sink->ctx, static_cast<uint16_t>(out_y), temp_row, static_cast<uint16_t>(out_w));
             } else {
               uint8_t* out_row = out.data.data() + out_y * out_stride;
               dither_row_png(curr_row.get(), hdr, palette_grey, x_step, static_cast<int>(out_w), err_cur.get(),
-                             err_nxt.get(), out_row);
+                             err_nxt.get(), err_nxt2.get(), out_row);
             }
             ++out_y;
+            // Rotate three error rows: cur←nxt, nxt←nxt2, nxt2←fresh
             std::swap(err_cur, err_nxt);
-            std::fill(err_nxt.get(), err_nxt.get() + out_w + 2, int16_t(0));
+            std::swap(err_nxt, err_nxt2);
+            std::fill(err_nxt2.get(), err_nxt2.get() + out_w + 4, int16_t(0));
           }
 
           std::swap(prev_row, curr_row);
@@ -606,6 +652,11 @@ ImageError decode_png_from_entry(IZipFile& file, const ZipEntry& entry, uint16_t
   }
 
   out.height = static_cast<uint16_t>(out_y);
+#ifdef ESP_PLATFORM
+  MR_LOGI("pngd", "ct=%u bd=%u src=%ux%u pre=%ldms idat=%ldms", (unsigned)hdr.color_type, (unsigned)hdr.bit_depth,
+          (unsigned)hdr.src_width, (unsigned)hdr.src_height, (long)(_t_pre / 1000),
+          (long)((esp_timer_get_time() - _t_idat) / 1000));
+#endif
   return ImageError::Ok;
 }
 

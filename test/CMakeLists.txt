@@ -116,6 +116,7 @@ add_executable(microreader_tests
     unit/MrbLayoutComparisonTest.cpp
     unit/StreamingPipelineTest.cpp
     unit/NavigationTest.cpp
+    unit/DitherComparisonTest.cpp
 )
 target_link_libraries(microreader_tests PRIVATE
     microreader_content

@@ -1,7 +1,7 @@
 // JpegDecoder.cpp
 //
-// Minimal streaming baseline JPEG decoder producing 1-bit Floyd–Steinberg
-// dithered bitmaps. Ported from TrustyReader (Rust) to C++17.
+// Minimal streaming baseline JPEG decoder producing 1-bit Atkinson-dithered
+// bitmaps. Ported from TrustyReader (Rust) to C++17.
 //
 // Single-pass header parse: markers are read segment-by-segment from a
 // ZipEntryInput without buffering the whole header (avoids the 32KB header
@@ -19,6 +19,9 @@
 #include <memory>
 
 #include "../HeapLog.h"
+#ifdef ESP_PLATFORM
+#include "esp_timer.h"
+#endif
 #include "ImageDecoder.h"
 #include "ZipReader.h"
 #include "miniz.h"
@@ -91,12 +94,14 @@ struct Component {
 };
 
 // Huffman decoding table.
-// sym[]/len[] are the 8-bit fast-path lookup: if len[x]>0, the code for
-// the byte pattern x has length len[x] and maps to symbol sym[x].
-// mincode/maxcode/valptr are the slow path for codes longer than 8 bits.
+// sym[]/len[] are the 10-bit fast-path lookup: if len[x]>0, the code for
+// the 10-bit pattern x has length len[x] and maps to symbol sym[x].
+// mincode/maxcode/valptr are the slow path for codes longer than 10 bits.
+static constexpr int kHuffLUTBits = 10;
+static constexpr int kHuffLUTSize = 1 << kHuffLUTBits;  // 1024
 struct HuffTable {
-  uint8_t sym[256] = {};
-  uint8_t len[256] = {};
+  uint8_t sym[kHuffLUTSize] = {};
+  uint8_t len[kHuffLUTSize] = {};
   int32_t mincode[17] = {};
   int32_t maxcode[17] = {};  // -1 means no codes of this length
   uint16_t valptr[17] = {};
@@ -236,10 +241,10 @@ static void build_huff_table(HuffTable& t, const uint8_t bits[16], const uint8_t
       t.valptr[bl] = static_cast<uint16_t>(si);
       t.mincode[bl] = static_cast<int32_t>(code);
       for (int k = 0; k < cnt; ++k) {
-        if (bl <= 8) {
-          int prefix = static_cast<int>(code << (8 - bl));
-          int fill = 1 << (8 - bl);
-          for (int j = 0; j < fill && (prefix + j) < 256; ++j) {
+        if (bl <= kHuffLUTBits) {
+          int prefix = static_cast<int>(code << (kHuffLUTBits - bl));
+          int fill = 1 << (kHuffLUTBits - bl);
+          for (int j = 0; j < fill && (prefix + j) < kHuffLUTSize; ++j) {
             t.sym[prefix + j] = vals[si];
             t.len[prefix + j] = static_cast<uint8_t>(bl);
           }
@@ -630,16 +635,16 @@ class BitReader {
 // ---------------------------------------------------------------------------
 
 static uint8_t huff_decode(BitReader& r, const HuffTable& t) {
-  // Fast path: 8-bit code
-  uint32_t peek8 = r.peek(8);
-  uint8_t nb = t.len[peek8];
+  // 10-bit fast path: covers ~99% of codes in practice.
+  uint32_t peek10 = r.peek(kHuffLUTBits);
+  uint8_t nb = t.len[peek10];
   if (nb > 0) {
     r.drop(nb);
-    return t.sym[peek8];
+    return t.sym[peek10];
   }
-  // Slow path: code > 8 bits
+  // Slow path: code > 10 bits (rare)
   uint32_t peek16 = r.peek(16);
-  for (uint8_t bl = 9; bl <= 16; ++bl) {
+  for (uint8_t bl = kHuffLUTBits + 1; bl <= 16; ++bl) {
     if (t.maxcode[bl] < 0)
       continue;
     int32_t code = static_cast<int32_t>(peek16 >> (16 - bl));
@@ -836,14 +841,14 @@ static void idct(const int32_t block[64], uint8_t out[64]) {
 }
 
 // ---------------------------------------------------------------------------
-// Floyd–Steinberg dithering (one MCU row → 1-bit output)
+// Atkinson dithering (one MCU row → 1-bit output)
+// Distributes 6/8 of error to 6 neighbors; intentionally loses 1/4.
+// Requires 3 error rows: cur (this row), nxt (next), nxt2 (row+2).
 // ---------------------------------------------------------------------------
 
 static void dither_row(const uint8_t* row, uint32_t x_step, int out_w, int16_t* err_cur, int16_t* err_nxt,
-                       uint8_t* out_row) {
-  // Running fixed-point x accumulator avoids one multiply per pixel.
+                       int16_t* err_nxt2, uint8_t* out_row) {
   uint32_t sx_fp = 0;
-  // Byte accumulator: buffer 8 output bits then write, avoiding per-pixel RMW.
   uint8_t acc = 0, bit = 0x80;
   for (int ox = 0; ox < out_w; ++ox) {
     int16_t g = static_cast<int16_t>(row[sx_fp >> 16]);
@@ -853,10 +858,11 @@ static void dither_row(const uint8_t* row, uint32_t x_step, int out_w, int16_t* 
       val = 0;
     if (val > 255)
       val = static_cast<int16_t>(255);
-    bool blk = val < 128;
-    int16_t e = blk ? val : static_cast<int16_t>(val - 255);
+    bool white = val >= 128;
+    int16_t e = white ? static_cast<int16_t>(val - 255) : val;
+    int16_t q = static_cast<int16_t>(e >> 3);  // 1/8 of error
 
-    if (!blk)
+    if (white)
       acc |= bit;
     bit >>= 1;
     if (!bit) {
@@ -865,13 +871,13 @@ static void dither_row(const uint8_t* row, uint32_t x_step, int out_w, int16_t* 
       bit = 0x80;
     }
 
-    // >>4 instead of /16: arithmetic right shift is equivalent for Floyd-Steinberg.
-    err_cur[ox + 2] = static_cast<int16_t>(err_cur[ox + 2] + ((e * 7) >> 4));
-    err_nxt[ox] = static_cast<int16_t>(err_nxt[ox] + ((e * 3) >> 4));
-    err_nxt[ox + 1] = static_cast<int16_t>(err_nxt[ox + 1] + ((e * 5) >> 4));
-    err_nxt[ox + 2] = static_cast<int16_t>(err_nxt[ox + 2] + (e >> 4));
+    err_cur[ox + 2] = static_cast<int16_t>(err_cur[ox + 2] + q);    // (x+1, y)
+    err_cur[ox + 3] = static_cast<int16_t>(err_cur[ox + 3] + q);    // (x+2, y)
+    err_nxt[ox] = static_cast<int16_t>(err_nxt[ox] + q);            // (x-1, y+1)
+    err_nxt[ox + 1] = static_cast<int16_t>(err_nxt[ox + 1] + q);    // (x,   y+1)
+    err_nxt[ox + 2] = static_cast<int16_t>(err_nxt[ox + 2] + q);    // (x+1, y+1)
+    err_nxt2[ox + 1] = static_cast<int16_t>(err_nxt2[ox + 1] + q);  // (x,   y+2)
   }
-  // Flush last partial byte (no-op when out_w is a multiple of 8).
   if (bit != 0x80)
     *out_row = acc;
 }
@@ -934,9 +940,10 @@ static const char* decode_baseline(const JpegState& st, BitReader& r, uint16_t m
     std::fill(out.data.begin(), out.data.end(), uint8_t(0));
   }
 
-  auto err_cur = std::unique_ptr<int16_t[]>(new (std::nothrow) int16_t[out_w + 2]());
-  auto err_nxt = std::unique_ptr<int16_t[]>(new (std::nothrow) int16_t[out_w + 2]());
-  if (!err_cur || !err_nxt)
+  auto err_cur = std::unique_ptr<int16_t[]>(new (std::nothrow) int16_t[out_w + 4]());
+  auto err_nxt = std::unique_ptr<int16_t[]>(new (std::nothrow) int16_t[out_w + 4]());
+  auto err_nxt2 = std::unique_ptr<int16_t[]>(new (std::nothrow) int16_t[out_w + 4]());
+  if (!err_cur || !err_nxt || !err_nxt2)
     return "jpeg: OOM for dither buffers";
 
   int32_t dc_pred[MAX_COMP] = {};
@@ -1010,15 +1017,17 @@ static const char* decode_baseline(const JpegState& st, BitReader& r, uint16_t m
           break;
         if (sink) {
           uint8_t temp_row[128];  // byte accumulator writes all bytes; no zero-init needed
-          dither_row(y_row.get() + py * row_w, x_step, out_w, err_cur.get(), err_nxt.get(), temp_row);
+          dither_row(y_row.get() + py * row_w, x_step, out_w, err_cur.get(), err_nxt.get(), err_nxt2.get(), temp_row);
           sink->emit_row(sink->ctx, static_cast<uint16_t>(out_y), temp_row, static_cast<uint16_t>(out_w));
         } else {
           uint8_t* out_row = out.data.data() + out_y * out_stride;
-          dither_row(y_row.get() + py * row_w, x_step, out_w, err_cur.get(), err_nxt.get(), out_row);
+          dither_row(y_row.get() + py * row_w, x_step, out_w, err_cur.get(), err_nxt.get(), err_nxt2.get(), out_row);
         }
         ++out_y;
+        // Rotate three error rows: cur←nxt, nxt←nxt2, nxt2←fresh
         std::swap(err_cur, err_nxt);
-        std::fill(err_nxt.get(), err_nxt.get() + out_w + 2, int16_t(0));
+        std::swap(err_nxt, err_nxt2);
+        std::fill(err_nxt2.get(), err_nxt2.get() + out_w + 4, int16_t(0));
       }
     }
   }
@@ -1065,7 +1074,13 @@ ImageError decode_jpeg_from_entry(IZipFile& file, const ZipEntry& entry, uint16_
   }
 
   BitReader r(inp);
+#ifdef ESP_PLATFORM
+  int64_t _t_jdec = esp_timer_get_time();
+#endif
   err = decode_baseline(*st, r, max_w, max_h, out, scale_to_fill, sink);
+#ifdef ESP_PLATFORM
+  MR_LOGI("jpgd", "decode=%ldms w=%d h=%d", (long)((esp_timer_get_time() - _t_jdec) / 1000), st->width, st->height);
+#endif
   if (err) {
     MR_LOGI("jpeg", "%s", err);
     return ImageError::InvalidData;
