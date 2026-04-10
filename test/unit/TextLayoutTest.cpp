@@ -1090,8 +1090,8 @@ TEST(PageLayout, ImageOnlyPageVerticallyCentered) {
   EXPECT_EQ(page.vertical_offset, 50);
 }
 
-TEST(PageLayout, ImageOnlyWithPaddingCenteredInContentArea) {
-  // Image centering should use content area (between top and bottom padding)
+TEST(PageLayout, ImageOnlyWithPaddingCenteredOnFullScreen) {
+  // Image centering uses full screen height, not just the content area
   Chapter ch;
   ch.paragraphs.push_back(Paragraph::make_image(1, 100, 50));
 
@@ -1101,8 +1101,8 @@ TEST(PageLayout, ImageOnlyWithPaddingCenteredInContentArea) {
 
   ASSERT_EQ(page.image_items.size(), 1);
   EXPECT_TRUE(page.at_chapter_end);
-  // 100x50 scaled up to 200x100 → centered in content area 160px: (160-100)/2 = 30
-  EXPECT_EQ(page.vertical_offset, 30);
+  // 100x50 scaled up to 200x100 → centered on full 200px screen: (200-100)/2 = 50
+  EXPECT_EQ(page.vertical_offset, 50);
 }
 
 TEST(PageLayout, SparseTextVerticallyCentered) {
@@ -1139,7 +1139,8 @@ TEST(PageLayout, FullPageTextNotVerticallyCentered) {
   PageOptions opts{200, 80, 0, 0};  // small page that will be mostly full
   auto page = layout_page(font8, opts, ch, PagePosition(0, 0));
 
-  EXPECT_EQ(page.vertical_offset, 0);
+  // Full page → vertical_offset is normal top padding (no extra centering)
+  EXPECT_EQ(page.vertical_offset, opts.effective_padding_top());
 }
 
 TEST(PageLayout, MixedTextAndImageNoVerticalCenter) {
@@ -1153,8 +1154,8 @@ TEST(PageLayout, MixedTextAndImageNoVerticalCenter) {
   PageOptions opts{200, 200, 0, 4};
   auto page = layout_page(font8, opts, ch, PagePosition(0, 0));
 
-  // Has both text and image → no vertical centering
-  EXPECT_EQ(page.vertical_offset, 0);
+  // Has both text and image → vertical_offset is normal top padding (no extra centering)
+  EXPECT_EQ(page.vertical_offset, opts.effective_padding_top());
 }
 
 TEST(PageLayout, NoCenteringOnMultiPageChapter) {
@@ -1191,8 +1192,8 @@ TEST(PageLayout, NoCenteringOnMultiPageChapter) {
     pos = last_page.end;
   }
   EXPECT_TRUE(last_page.at_chapter_end);
-  // Last page should NOT be centered even though it's sparse
-  EXPECT_EQ(last_page.vertical_offset, 0);
+  // Last page should NOT be extra-centered — vertical_offset equals normal top padding
+  EXPECT_EQ(last_page.vertical_offset, opts.effective_padding_top());
 }
 
 TEST(PageLayout, ImageDoesNotOverlapText) {

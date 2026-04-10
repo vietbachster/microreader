@@ -327,6 +327,7 @@ static void scale_image(const PageOptions& opts, uint16_t content_width, uint16_
       img_w = content_width;
     }
   }
+  // Always scale proportionally — preserve aspect ratio in all cases.
   if (img_h > full_height) {
     img_w = static_cast<uint16_t>(static_cast<uint32_t>(img_w) * full_height / img_h);
     img_h = full_height;
@@ -368,7 +369,6 @@ static PageContent assemble_page(const PageOptions& opts, const IFont& font, IPa
                                  bool at_chapter_end, bool center_sparse_text) {
   const uint16_t content_width = opts.width - 2 * opts.padding;
   const uint16_t default_y_advance = font.y_advance();
-  const uint16_t page_height = opts.height - opts.effective_padding_top() - opts.padding;
 
   PageContent page;
   page.start = start;
@@ -404,14 +404,18 @@ static PageContent assemble_page(const PageOptions& opts, const IFont& font, IPa
     prev_para = item.para_idx;
   }
 
-  // Vertical centering for image-only pages (center within content area)
-  if (page.text_items.empty() && !page.image_items.empty() && y < page_height) {
-    page.vertical_offset = (page_height - y) / 2;
+  // vertical_offset is an absolute screen Y — where the content block starts.
+  // Default: normal top padding keeps content within the padded area.
+  page.vertical_offset = opts.effective_padding_top();
+
+  // Image-only page: center the image block on the full screen.
+  if (page.text_items.empty() && !page.image_items.empty()) {
+    page.vertical_offset = static_cast<uint16_t>(opts.height > y ? (opts.height - y) / 2 : 0);
   }
-  // Center sparse text on single-page chapters
-  if (center_sparse_text && at_chapter_end && page.vertical_offset == 0 && !page.text_items.empty() &&
-      page.image_items.empty() && y <= page_height / 2) {
-    page.vertical_offset = (page_height - y) / 2;
+  // Sparse text at end of single-page chapter: center on full screen.
+  else if (center_sparse_text && at_chapter_end && !page.text_items.empty() && page.image_items.empty() &&
+           y <= opts.height / 2) {
+    page.vertical_offset = static_cast<uint16_t>((opts.height - y) / 2);
   }
 
   return page;

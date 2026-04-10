@@ -391,7 +391,7 @@ bool export_to_html(Book& book, const IFont& font, const HtmlExportOptions& opts
       for (size_t ti = 0; ti < page.text_items.size(); ++ti) {
         const auto& item = page.text_items[ti];
 
-        writef(f, "<div class=\"line\" style=\"left:%dpx;top:%dpx\">\n", pad, pad + voff + item.y_offset);
+        writef(f, "<div class=\"line\" style=\"left:%dpx;top:%dpx\">\n", pad, voff + item.y_offset);
 
         for (size_t wi = 0; wi < item.line.words.size(); ++wi) {
           const auto& w = item.line.words[wi];
@@ -455,8 +455,8 @@ bool export_to_html(Book& book, const IFont& font, const HtmlExportOptions& opts
                  "<img src=\"%s/%s\" "
                  "width=\"%d\" height=\"%d\" alt=\"Image\">"
                  "</div>\n",
-                 img_item.x_offset, (img_item.y_offset == 0 ? 0 : pad) + voff + img_item.y_offset, img_rel.c_str(),
-                 img_name.c_str(), img_item.width, img_item.height);
+                 img_item.x_offset, voff + img_item.y_offset, img_rel.c_str(), img_name.c_str(), img_item.width,
+                 img_item.height);
           ++total_images_decoded;
         } else {
           writef(f,
@@ -465,8 +465,8 @@ bool export_to_html(Book& book, const IFont& font, const HtmlExportOptions& opts
                  "border:1px dashed #999;display:flex;align-items:center;"
                  "justify-content:center;\">"
                  "<span style=\"color:#999\">Image error %d</span></div>\n",
-                 img_item.x_offset, (img_item.y_offset == 0 ? 0 : pad) + voff + img_item.y_offset, img_item.width,
-                 img_item.height, static_cast<int>(img_err));
+                 img_item.x_offset, voff + img_item.y_offset, img_item.width, img_item.height,
+                 static_cast<int>(img_err));
           ++total_images_failed;
         }
       }
@@ -474,7 +474,7 @@ bool export_to_html(Book& book, const IFont& font, const HtmlExportOptions& opts
       // Render HRs at their positioned locations
       for (const auto& hr : page.hr_items) {
         writef(f, "<div class=\"hr-abs\" style=\"left:%dpx;top:%dpx;width:%dpx\"></div>\n", hr.x_offset,
-               pad + voff + hr.y_offset, hr.width);
+               voff + hr.y_offset, hr.width);
       }
 
       writef(f, "<span class=\"page-num\">%d</span>\n", page_num);

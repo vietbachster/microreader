@@ -246,7 +246,7 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
 
     ImageToDraw itd;
     itd.x = static_cast<int>(img_item.x_offset);
-    itd.y = static_cast<int>(kPadding + img_item.y_offset + page_.vertical_offset);
+    itd.y = static_cast<int>(img_item.y_offset + page_.vertical_offset);
     itd.w = img_w;
     itd.h = img_h;
     itd.offset = mrb_.image_ref(img_item.key).local_header_offset;
@@ -263,7 +263,7 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
     for (const auto& w : item.line.words) {
       DrawWord dw;
       dw.x = kPadding + w.x;
-      dw.y = kPadding + item.y_offset + page_.vertical_offset;
+      dw.y = item.y_offset + page_.vertical_offset;
       dw.len = static_cast<int>(w.len);
       if (dw.len > 63)
         dw.len = 63;
@@ -287,7 +287,7 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
 
   // Horizontal rules.
   for (const auto& hr : page_.hr_items) {
-    buf.fill_rect(static_cast<int>(hr.x_offset), static_cast<int>(kPadding + hr.y_offset + page_.vertical_offset),
+    buf.fill_rect(static_cast<int>(hr.x_offset), static_cast<int>(hr.y_offset + page_.vertical_offset),
                   static_cast<int>(hr.width), 1, false);
   }
 

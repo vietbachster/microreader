@@ -404,11 +404,11 @@ ImageError decode_image(const uint8_t* data, size_t size, uint16_t max_w, uint16
   if (!pixels)
     return ImageError::InvalidData;
 
-  // Calculate target dimensions
+  // Calculate target dimensions (downscale only, preserve aspect ratio)
   uint16_t target_w, target_h;
   scaled_size(static_cast<uint16_t>(w), static_cast<uint16_t>(h), max_w, max_h, target_w, target_h);
 
-  // Downscale if needed
+  // Resample to target dimensions if needed
   std::vector<uint8_t> gray;
   if (target_w != w || target_h != h) {
     gray.resize(target_w * target_h);

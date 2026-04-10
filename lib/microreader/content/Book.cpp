@@ -69,7 +69,7 @@ ImageError Book::decode_image(uint16_t entry_index, DecodedImage& out, uint16_t 
     return ImageError::UnsupportedFormat;
 
   auto& entry = epub_.zip().entry(entry_index);
-  return decode_image_from_entry(file_, entry, max_w, max_h, out, work_buf, work_buf_size);
+  return decode_image_from_entry(file_, entry, max_w, max_h, out, work_buf, work_buf_size, /*scale_to_fill=*/true);
 }
 
 ZipError Book::extract_entry(uint16_t entry_index, std::vector<uint8_t>& out) {
