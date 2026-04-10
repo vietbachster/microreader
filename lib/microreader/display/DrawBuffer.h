@@ -31,8 +31,8 @@ class IDisplay {
   // Full physical refresh. Both BW and RED RAM are set to `pixels`.
   virtual void full_refresh(const uint8_t* pixels, RefreshMode mode) = 0;
 
-  // Partial refresh: old_pixels → RED RAM, new_pixels → BW RAM, then fast refresh.
-  virtual void partial_refresh(const uint8_t* old_pixels, const uint8_t* new_pixels) = 0;
+  // Partial refresh: new_pixels → BW RAM. Driver tracks previous frame for RED RAM.
+  virtual void partial_refresh(const uint8_t* new_pixels) = 0;
 
   // Put the display controller into deep sleep (low-power mode).
   virtual void deep_sleep() {}
@@ -191,10 +191,8 @@ class DrawBuffer {
 
   // Swap active↔inactive, then do a partial hardware refresh.
   void refresh() {
-    display_.partial_refresh(active_(), inactive_());
+    display_.partial_refresh(inactive_());
     active_idx_ = 1 - active_idx_;
-    // Sync new inactive to match active so next render has consistent start state.
-    memcpy(inactive_(), active_(), kBufSize);
   }
 
   // Call full hardware refresh using the current inactive buffer, then sync both.

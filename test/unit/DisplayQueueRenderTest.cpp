@@ -39,7 +39,7 @@ class TestDisplay : public IDisplay {
   void full_refresh(const uint8_t* /*pixels*/, RefreshMode /*mode*/) override {
     refresh_count++;
   }
-  void partial_refresh(const uint8_t* /*old_pixels*/, const uint8_t* /*new_pixels*/) override {
+  void partial_refresh(const uint8_t* /*new_pixels*/) override {
     partial_count++;
   }
   void set_rotation(Rotation /*r*/) override {}

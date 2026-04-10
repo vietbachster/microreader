@@ -80,7 +80,6 @@ void BookSelectScreen::draw_all_(DrawBuffer& buf) const {
 void BookSelectScreen::start(DrawBuffer& buf) {
   HEAP_LOG("BookSelect: start enter");
   chosen_ = nullptr;
-  selected_ = 0;
   scan_directory_();
   HEAP_LOG("BookSelect: after scan");
   draw_all_(buf);

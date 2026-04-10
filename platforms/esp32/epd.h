@@ -57,6 +57,8 @@ class EInkDisplay : public microreader::IDisplay {
   bool isScreenOn = false;
   bool inDeepSleep_ = false;
 
+  int active_buffer = 0;
+
   spi_device_handle_t spi_;
 
   void begin() {
@@ -110,14 +112,18 @@ class EInkDisplay : public microreader::IDisplay {
     writeRamBuffer(CMD_WRITE_RAM_BW, pixels, BUFFER_SIZE);
     writeRamBuffer(CMD_WRITE_RAM_RED, pixels, BUFFER_SIZE);
     refreshDisplay(mode == microreader::RefreshMode::Half ? EPD_HALF_REFRESH : EPD_FULL_REFRESH);
+    active_buffer = 0;
   }
 
-  void partial_refresh(const uint8_t* old_pixels, const uint8_t* new_pixels) override {
+  void partial_refresh(const uint8_t* new_pixels) override {
     wakeIfNeeded();
     waitWhileBusy();
     setRamArea(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
-    writeRamBuffer(CMD_WRITE_RAM_BW, new_pixels, BUFFER_SIZE);
-    writeRamBuffer(CMD_WRITE_RAM_RED, old_pixels, BUFFER_SIZE);
+    if (active_buffer == 1) {
+      writeRamBuffer(CMD_WRITE_RAM_RED, new_pixels, BUFFER_SIZE);
+    } else {
+      writeRamBuffer(CMD_WRITE_RAM_BW, new_pixels, BUFFER_SIZE);
+    }
     refreshDisplay(EPD_FAST_REFRESH);
   }
 

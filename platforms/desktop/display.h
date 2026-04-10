@@ -32,13 +32,13 @@ class DesktopEmulatorDisplay final : public microreader::IDisplay {
     render_();
   }
 
-  void partial_refresh(const uint8_t* old_pixels, const uint8_t* new_pixels) override {
+  void partial_refresh(const uint8_t* new_pixels) override {
     for (int y = 0; y < microreader::DisplayFrame::kPhysicalHeight; ++y) {
       for (int x = 0; x < microreader::DisplayFrame::kPhysicalWidth; ++x) {
         const std::size_t byte_idx = static_cast<std::size_t>(y * microreader::DisplayFrame::kStride + x / 8);
         const uint8_t bit = static_cast<uint8_t>(0x80u >> (x & 7));
-        const bool old_white = (old_pixels[byte_idx] & bit) != 0;
         const bool new_white = (new_pixels[byte_idx] & bit) != 0;
+        const bool old_white = sim_[y * microreader::DisplayFrame::kPhysicalWidth + x] >= 0.5f;
         if (old_white != new_white)
           sim_[y * microreader::DisplayFrame::kPhysicalWidth + x] = new_white ? 1.0f : 0.0f;
         // Unchanged pixels keep their current sim_ value (preserves ghosting appearance).
