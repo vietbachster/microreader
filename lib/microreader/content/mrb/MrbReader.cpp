@@ -71,9 +71,12 @@ bool MrbReader::open(const char* path) {
     toc_.entries.resize(toc_count);
     for (uint16_t i = 0; i < toc_count; ++i) {
       toc_.entries[i].label = read_string();
-      uint8_t fidx[2];
-      if (read_bytes(fidx, 2))
-        toc_.entries[i].file_idx = mrb_read_u16(fidx);
+      uint8_t buf[5];
+      if (read_bytes(buf, 5)) {
+        toc_.entries[i].file_idx = mrb_read_u16(buf);
+        toc_.entries[i].depth = buf[2];
+        toc_.entries[i].para_index = mrb_read_u16(buf + 3);
+      }
     }
   }
 

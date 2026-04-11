@@ -5,15 +5,11 @@
 
 namespace microreader {
 
-// Convert an opened EPUB book to MRB format.
+// Convert an opened EPUB book to MRB format using the streaming path.
 // The Book must already be open().  Writes output to `output_path`.
-// Returns true on success.
-bool convert_epub_to_mrb(Book& book, const char* output_path);
-
-// Streaming variant: uses ~37KB working memory per chapter instead of
-// extracting the full XHTML. Safe for ESP32's limited RAM.
+// Uses ~37KB working memory per chapter. Safe for ESP32's limited RAM.
 // Optional work_buf/xml_buf avoid heap allocation for the decompression
-// buffers (pass nullptr to allocate from heap as before).
+// buffers (pass nullptr to allocate from heap).
 bool convert_epub_to_mrb_streaming(Book& book, const char* output_path, uint8_t* work_buf = nullptr,
                                    uint8_t* xml_buf = nullptr);
 

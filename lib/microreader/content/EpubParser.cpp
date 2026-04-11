@@ -167,8 +167,9 @@ static EpubError parse_ncx(IZipFile& file, const ZipReader& zip, const ZipEntry&
     return EpubError::XmlError;
 
   // Simple NCX parsing: find navPoint → navLabel → text, content[@src]
+  // nav_depth tracks nesting so sub-chapters carry a non-zero depth.
   std::string current_label;
-  bool in_nav_point = false;
+  int nav_depth = 0;  // current nesting level (0 = outside any navPoint)
   bool in_nav_label = false;
 
   XmlEvent ev;
@@ -178,22 +179,25 @@ static EpubError parse_ncx(IZipFile& file, const ZipReader& zip, const ZipEntry&
 
     if (ev.type == XmlEventType::StartElement) {
       if (sv_eq(ev.name, "navPoint")) {
-        in_nav_point = true;
+        ++nav_depth;
         current_label.clear();
-      } else if (in_nav_point && sv_eq(ev.name, "navLabel")) {
+      } else if (nav_depth > 0 && sv_eq(ev.name, "navLabel")) {
         in_nav_label = true;
       } else if (in_nav_label && sv_eq(ev.name, "text")) {
         XmlEvent text;
         if (reader.next_event(text) == XmlError::Ok && text.type == XmlEventType::Text) {
           current_label = sv_to_string(text.content);
         }
-      } else if (in_nav_point && sv_eq(ev.name, "content")) {
+      } else if (nav_depth > 0 && sv_eq(ev.name, "content")) {
         auto src = sv_to_string(ev.attrs.get("src"));
         if (!src.empty()) {
-          // Strip fragment
+          // Separate fragment from path
+          std::string fragment;
           auto hash = src.find('#');
-          if (hash != std::string::npos)
+          if (hash != std::string::npos) {
+            fragment = src.substr(hash + 1);
             src = src.substr(0, hash);
+          }
 
           std::string full_path = root_dir + src;
           int idx = -1;
@@ -204,13 +208,14 @@ static EpubError parse_ncx(IZipFile& file, const ZipReader& zip, const ZipEntry&
             }
           }
           if (idx >= 0) {
-            toc.entries.push_back({current_label, static_cast<uint16_t>(idx)});
+            uint8_t depth = static_cast<uint8_t>(nav_depth - 1 < 255 ? nav_depth - 1 : 255);
+            toc.entries.push_back({current_label, static_cast<uint16_t>(idx), depth, std::move(fragment), 0});
           }
         }
       }
     } else if (ev.type == XmlEventType::EndElement) {
       if (sv_eq(ev.name, "navPoint"))
-        in_nav_point = false;
+        --nav_depth;
       if (sv_eq(ev.name, "navLabel"))
         in_nav_label = false;
     }
@@ -1160,6 +1165,14 @@ class BodyParser {
   Sink sink_ = nullptr;
   void* sink_ctx_ = nullptr;
   bool has_emitted_ = false;
+  uint32_t emitted_count_ = 0;
+  using IdCallback = void (*)(void* ctx, const char* id, size_t id_len, uint32_t para_idx);
+  IdCallback id_cb_ = nullptr;
+  void* id_cb_ctx_ = nullptr;
+  void set_id_callback(IdCallback cb, void* ctx) {
+    id_cb_ = cb;
+    id_cb_ctx_ = ctx;
+  }
 
 #ifdef ESP_PLATFORM
   int64_t* emit_us_ = nullptr;  // accumulator for time spent in sink callbacks
@@ -1167,6 +1180,7 @@ class BodyParser {
 
   void emit(Paragraph&& p) {
     has_emitted_ = true;
+    ++emitted_count_;
     if (sink_) {
 #ifdef ESP_PLATFORM
       if (emit_us_) {
@@ -1463,6 +1477,11 @@ static EpubError parse_xhtml_events(XmlReader& reader, const CssStylesheet* inli
         if (!parser.merge_after_float_) {
           parser.flush_run();
         }
+      }
+
+      // Record element ID for TOC fragment resolution (after flush so emitted_count_ is up-to-date).
+      if (id_sv.data && id_sv.length > 0 && parser.id_cb_) {
+        parser.id_cb_(parser.id_cb_ctx_, id_sv.data, id_sv.length, parser.emitted_count_);
       }
 
       parser.depth++;
@@ -1775,7 +1794,7 @@ EpubError Epub::parse_chapter(IZipFile& file, size_t index, Chapter& out) const 
 // ---------------------------------------------------------------------------
 
 EpubError Epub::parse_chapter_streaming(IZipFile& file, size_t index, ParagraphSink sink, void* sink_ctx,
-                                        uint8_t* work_buf, uint8_t* xml_buf) const {
+                                        uint8_t* work_buf, uint8_t* xml_buf, IdSink id_sink, void* id_sink_ctx) const {
   if (index >= spine_.size())
     return EpubError::InvalidData;
 
@@ -1805,6 +1824,8 @@ EpubError Epub::parse_chapter_streaming(IZipFile& file, size_t index, ParagraphS
 
   BodyParser parser;
   parser.set_sink(sink, sink_ctx);
+  if (id_sink)
+    parser.set_id_callback(id_sink, id_sink_ctx);
 
   EpubError err = parse_xhtml_events(reader, nullptr, &stylesheet_, base_dir, zip_, parser);
   if (err != EpubError::Ok)

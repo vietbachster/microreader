@@ -118,7 +118,7 @@ class MrbLayoutComparisonTest : public ::testing::Test {
     if (err != EpubError::Ok)
       GTEST_SKIP() << epub_name << " not found";
 
-    ASSERT_TRUE(convert_epub_to_mrb(book, tmp_path_.c_str())) << "Failed to convert " << epub_name;
+    ASSERT_TRUE(convert_epub_to_mrb_streaming(book, tmp_path_.c_str())) << "Failed to convert " << epub_name;
 
     MrbReader mrb;
     ASSERT_TRUE(mrb.open(tmp_path_.c_str())) << "Failed to open MRB for " << epub_name;
@@ -234,7 +234,7 @@ TEST_P(BulkMrbComparisonTest, LayoutMatchesEpub) {
   if (err != EpubError::Ok)
     GTEST_SKIP() << "Cannot open " << filename << ": error " << (int)err;
 
-  ASSERT_TRUE(convert_epub_to_mrb(book, tmp_path_.c_str())) << "Failed to convert " << filename;
+  ASSERT_TRUE(convert_epub_to_mrb_streaming(book, tmp_path_.c_str())) << "Failed to convert " << filename;
 
   MrbReader mrb;
   ASSERT_TRUE(mrb.open(tmp_path_.c_str())) << "Failed to open MRB for " << filename;
@@ -288,98 +288,6 @@ INSTANTIATE_TEST_SUITE_P(SmokeBooks, BulkMrbComparisonTest, ::testing::ValuesIn(
                          });
 #else
 INSTANTIATE_TEST_SUITE_P(AllBooks, BulkMrbComparisonTest, ::testing::ValuesIn(test_books::get_curated_books()),
-                         [](const ::testing::TestParamInfo<std::string>& info) {
-                           return test_books::epub_test_name(info.param);
-                         });
-#endif
-
-// ---------------------------------------------------------------------------
-// Streaming converter comparison: verify convert_epub_to_mrb_streaming
-// produces identical MRB files as convert_epub_to_mrb.
-// ---------------------------------------------------------------------------
-
-class StreamingMrbComparisonTest : public ::testing::TestWithParam<std::string> {
- protected:
-  std::string mrb_normal_;
-  std::string mrb_streaming_;
-
-  void SetUp() override {
-    mrb_normal_ = (fs::temp_directory_path() / "mrb_stream_cmp_normal.mrb").string();
-    mrb_streaming_ = (fs::temp_directory_path() / "mrb_stream_cmp_streaming.mrb").string();
-  }
-
-  void TearDown() override {
-    std::remove(mrb_normal_.c_str());
-    std::remove(mrb_streaming_.c_str());
-  }
-};
-
-TEST_P(StreamingMrbComparisonTest, StreamingMatchesNormal) {
-  const std::string& epub_path = GetParam();
-  auto filename = fs::path(epub_path).filename().string();
-
-  // Convert with normal path.
-  Book book1;
-  auto err = book1.open(epub_path.c_str());
-  if (err != EpubError::Ok)
-    GTEST_SKIP() << "Cannot open " << filename;
-  ASSERT_TRUE(convert_epub_to_mrb(book1, mrb_normal_.c_str())) << "Normal convert failed for " << filename;
-
-  // Convert with streaming path.
-  Book book2;
-  err = book2.open(epub_path.c_str());
-  ASSERT_EQ(err, EpubError::Ok);
-  ASSERT_TRUE(convert_epub_to_mrb_streaming(book2, mrb_streaming_.c_str()))
-      << "Streaming convert failed for " << filename;
-
-  // Open both MRBs.
-  MrbReader mrb_n, mrb_s;
-  ASSERT_TRUE(mrb_n.open(mrb_normal_.c_str()));
-  ASSERT_TRUE(mrb_s.open(mrb_streaming_.c_str()));
-
-  ASSERT_EQ(mrb_n.chapter_count(), mrb_s.chapter_count()) << filename << " chapter count";
-
-  FixedFont font(16, 20);
-  PageOptions opts(DrawBuffer::kWidth, DrawBuffer::kHeight, 20, 16, Alignment::Start);
-
-  size_t total_pages = 0;
-  for (uint16_t ci = 0; ci < mrb_n.chapter_count(); ++ci) {
-    MrbChapterSource src_n(mrb_n, ci);
-    MrbChapterSource src_s(mrb_s, ci);
-
-    ASSERT_EQ(src_n.paragraph_count(), src_s.paragraph_count()) << filename << " ch" << ci << " paragraph count";
-
-    PagePosition pos_n{0, 0}, pos_s{0, 0};
-    int page_num = 0;
-
-    while (true) {
-      auto page_n = layout_page(font, opts, src_n, pos_n);
-      auto page_s = layout_page(font, opts, src_s, pos_s);
-
-      std::string ctx = filename + " ch" + std::to_string(ci) + " page" + std::to_string(page_num);
-      assert_pages_equal(page_n, page_s, ctx);
-
-      if (page_n.at_chapter_end)
-        break;
-
-      pos_n = page_n.end;
-      pos_s = page_s.end;
-      ++page_num;
-      ++total_pages;
-      ASSERT_LT(page_num, 50000) << ctx;
-    }
-    total_pages++;
-  }
-  printf("  [%s] %d chapters, %zu pages — STREAMING MATCH\n", filename.c_str(), mrb_n.chapter_count(), total_pages);
-}
-
-#ifdef SMOKE_TESTS_ONLY
-INSTANTIATE_TEST_SUITE_P(SmokeBooks, StreamingMrbComparisonTest, ::testing::ValuesIn(test_books::get_smoke_books()),
-                         [](const ::testing::TestParamInfo<std::string>& info) {
-                           return test_books::epub_test_name(info.param);
-                         });
-#else
-INSTANTIATE_TEST_SUITE_P(AllBooks, StreamingMrbComparisonTest, ::testing::ValuesIn(test_books::get_curated_books()),
                          [](const ::testing::TestParamInfo<std::string>& info) {
                            return test_books::epub_test_name(info.param);
                          });

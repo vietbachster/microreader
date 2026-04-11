@@ -384,7 +384,7 @@ TEST_F(MrbFormatTest, ConvertBasicEpub) {
   if (err != EpubError::Ok)
     GTEST_SKIP() << "basic.epub not found";
 
-  ASSERT_TRUE(convert_epub_to_mrb(book, tmp_path_.c_str()));
+  ASSERT_TRUE(convert_epub_to_mrb_streaming(book, tmp_path_.c_str()));
 
   MrbReader reader;
   ASSERT_TRUE(reader.open(tmp_path_.c_str()));
@@ -409,7 +409,7 @@ TEST_F(MrbFormatTest, ConvertMultiChapterEpub) {
   if (err != EpubError::Ok)
     GTEST_SKIP() << "multi_chapter.epub not found";
 
-  ASSERT_TRUE(convert_epub_to_mrb(book, tmp_path_.c_str()));
+  ASSERT_TRUE(convert_epub_to_mrb_streaming(book, tmp_path_.c_str()));
 
   MrbReader reader;
   ASSERT_TRUE(reader.open(tmp_path_.c_str()));

@@ -11,6 +11,7 @@ set(lib_sources
     ${LIB}/screens/MainMenu.cpp
     ${LIB}/screens/ReaderScreen.cpp
     ${LIB}/screens/BookSelectScreen.cpp
+    ${LIB}/screens/ChapterSelectScreen.cpp
     ${LIB}/content/ZipReader.cpp
     ${LIB}/content/XmlReader.cpp
     ${LIB}/content/CssParser.cpp

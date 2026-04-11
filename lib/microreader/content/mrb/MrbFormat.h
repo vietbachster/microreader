@@ -24,7 +24,7 @@ namespace microreader {
 // ---------------------------------------------------------------------------
 
 static constexpr uint8_t kMrbMagic[4] = {'M', 'R', 'B', '1'};
-static constexpr uint16_t kMrbVersion = 3;
+static constexpr uint16_t kMrbVersion = 6;
 
 // ---------------------------------------------------------------------------
 // Header (32 bytes, fixed)

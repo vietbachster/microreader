@@ -50,34 +50,6 @@ void remap_paragraph_images(Paragraph& para, MrbWriter& writer, std::vector<Imag
 
 }  // namespace
 
-bool convert_epub_to_mrb(Book& book, const char* output_path) {
-  MrbWriter writer;
-  if (!writer.open(output_path))
-    return false;
-
-  std::vector<ImageMapping> image_map;
-  const auto& zip = book.epub().zip();
-
-  for (size_t ci = 0; ci < book.chapter_count(); ++ci) {
-    Chapter ch;
-    EpubError err = book.load_chapter(ci, ch);
-    if (err != EpubError::Ok)
-      continue;
-
-    writer.begin_chapter();
-
-    for (auto& para : ch.paragraphs) {
-      remap_paragraph_images(para, writer, image_map, zip);
-      if (!writer.write_paragraph(para))
-        return false;
-    }
-
-    writer.end_chapter();
-  }
-
-  return writer.finish(book.metadata(), book.toc());
-}
-
 bool convert_epub_to_mrb_streaming(Book& book, const char* output_path, uint8_t* work_buf, uint8_t* xml_buf) {
   MrbWriter writer;
   if (!writer.open(output_path))
@@ -105,18 +77,44 @@ bool convert_epub_to_mrb_streaming(Book& book, const char* output_path, uint8_t*
   int64_t total_start = esp_timer_get_time();
 #endif
 
-  // Context for the streaming paragraph sink.
+  // --- Fragment → para_index resolution setup ---
+  // Build a working copy of the TOC early so we can resolve fragment anchors.
+  struct FragmentNeed {
+    uint16_t zip_file_idx;  // zip entry index of the XHTML file (raw, before spine remapping)
+    std::string fragment;   // the id value to locate
+    size_t toc_entry_idx;   // index into toc_work.entries to fill in
+  };
+  TableOfContents toc_work = book.toc();
+  std::vector<FragmentNeed> fragment_needs;
+  for (size_t i = 0; i < toc_work.entries.size(); ++i) {
+    if (!toc_work.entries[i].fragment.empty()) {
+      fragment_needs.push_back({toc_work.entries[i].file_idx, toc_work.entries[i].fragment, i});
+    }
+  }
+
+  // Context for the streaming paragraph + ID sinks.
   struct SinkCtx {
     MrbWriter* writer;
     std::vector<ImageMapping>* image_map;
     const ZipReader* zip;
     bool error;
+    // Fragment resolution (nullptr if no fragments need resolving)
+    std::vector<FragmentNeed>* fragment_needs;
+    TableOfContents* toc_work;
+    uint16_t current_zip_file_idx;
 #ifdef ESP_PLATFORM
     int64_t write_us;  // time in write_paragraph (MRB I/O)
     size_t para_count;
 #endif
   };
-  SinkCtx ctx{&writer, &image_map, &zip, false};
+  SinkCtx ctx{};
+  ctx.writer = &writer;
+  ctx.image_map = &image_map;
+  ctx.zip = &zip;
+  ctx.error = false;
+  ctx.fragment_needs = &fragment_needs;
+  ctx.toc_work = &toc_work;
+  ctx.current_zip_file_idx = 0;
 #ifdef ESP_PLATFORM
   ctx.write_us = 0;
   ctx.para_count = 0;
@@ -125,6 +123,23 @@ bool convert_epub_to_mrb_streaming(Book& book, const char* output_path, uint8_t*
   int slowest_ci = -1;
   int64_t last_log_us = esp_timer_get_time();
 #endif
+
+  // ID sink: maps element id attributes to paragraph indices for TOC fragments.
+  // Assigned only when there are fragments to resolve; takes same ctx pointer as para sink.
+  IdSink id_sink = nullptr;
+  if (!fragment_needs.empty()) {
+    id_sink = [](void* raw_ctx, const char* id_p, size_t id_len, uint32_t para_idx) {
+      auto& c = *static_cast<SinkCtx*>(raw_ctx);
+      for (auto& need : *c.fragment_needs) {
+        if (need.zip_file_idx == c.current_zip_file_idx && need.fragment.size() == id_len &&
+            std::memcmp(need.fragment.data(), id_p, id_len) == 0) {
+          auto& entry = c.toc_work->entries[need.toc_entry_idx];
+          if (entry.para_index == 0)  // only record first match per entry
+            entry.para_index = static_cast<uint16_t>(para_idx < 0xFFFFu ? para_idx : 0xFFFFu);
+        }
+      }
+    };
+  }
 
   // Non-text paragraph sink: remap image keys and write to MRB.
   auto sink = [](void* raw_ctx, Paragraph&& para) {
@@ -152,7 +167,8 @@ bool convert_epub_to_mrb_streaming(Book& book, const char* output_path, uint8_t*
     int64_t ch_start = esp_timer_get_time();
 #endif
 
-    book.load_chapter_streaming(ci, sink, &ctx, work_buf, xml_buf);
+    ctx.current_zip_file_idx = static_cast<uint16_t>(book.epub().spine()[ci].file_idx);
+    book.load_chapter_streaming(ci, sink, &ctx, work_buf, xml_buf, id_sink, &ctx);
     if (ctx.error)
       return false;
 
@@ -177,7 +193,18 @@ bool convert_epub_to_mrb_streaming(Book& book, const char* output_path, uint8_t*
 #endif
   }
 
-  bool ok = writer.finish(book.metadata(), book.toc());
+  // Remap TOC file_idx (zip entry index) → spine index so ReaderScreen::load_chapter_() works.
+  // toc_work already has para_index values filled in from fragment anchor resolution.
+  const auto& spine = book.epub().spine();
+  for (auto& entry : toc_work.entries) {
+    for (size_t si = 0; si < spine.size(); ++si) {
+      if (spine[si].file_idx == entry.file_idx) {
+        entry.file_idx = static_cast<uint16_t>(si);
+        break;
+      }
+    }
+  }
+  bool ok = writer.finish(book.metadata(), toc_work);
   writer.close();  // explicit close so fclose() happens before we return
 
 #ifdef ESP_PLATFORM

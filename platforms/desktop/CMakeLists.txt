@@ -73,6 +73,7 @@ add_library(microreader_core STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/microreader/screens/MainMenu.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/microreader/screens/ReaderScreen.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/microreader/screens/BookSelectScreen.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/microreader/screens/ChapterSelectScreen.cpp
 )
 target_include_directories(microreader_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/../../lib

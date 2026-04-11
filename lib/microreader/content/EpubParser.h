@@ -13,6 +13,11 @@ namespace microreader {
 // Each paragraph is emitted as soon as it's parsed — no accumulation.
 using ParagraphSink = void (*)(void* ctx, Paragraph&& para);
 
+// Callback for element id="" annotations encountered during streaming XHTML parsing.
+// Called once per element that has an id attribute.
+// para_idx = number of paragraphs already emitted before this element opens.
+using IdSink = void (*)(void* ctx, const char* id, size_t id_len, uint32_t para_idx);
+
 enum class EpubError {
   Ok = 0,
   ContainerMissing,
@@ -60,7 +65,7 @@ class Epub {
   // Stream-parse a chapter: paragraphs are emitted one at a time via sink.
   // Uses ~37KB working memory instead of extracting the full XHTML.
   EpubError parse_chapter_streaming(IZipFile& file, size_t index, ParagraphSink sink, void* sink_ctx, uint8_t* work_buf,
-                                    uint8_t* xml_buf) const;
+                                    uint8_t* xml_buf, IdSink id_sink = nullptr, void* id_sink_ctx = nullptr) const;
 
   // Access metadata.
   const EpubMetadata& metadata() const {

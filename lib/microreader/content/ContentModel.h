@@ -173,6 +173,9 @@ struct SpineItem {
 struct TocEntry {
   std::string label;
   uint16_t file_idx = 0;
+  uint8_t depth = 0;        // nesting depth in NCX (0 = top-level)
+  std::string fragment;     // fragment anchor from NCX; resolved during conversion, not stored in MRB
+  uint16_t para_index = 0;  // paragraph index within chapter (stored in MRB v6+)
 };
 
 struct TableOfContents {

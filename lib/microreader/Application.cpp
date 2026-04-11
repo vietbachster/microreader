@@ -94,6 +94,8 @@ void Application::update(const ButtonState& buttons, uint32_t dt_ms, DrawBuffer&
         auto* book_sel = menu_.book_select();
         if (top == book_sel)
           next = book_sel->chosen();
+        else if (top == book_sel->reader())
+          next = book_sel->reader()->chosen();
 
         if (next) {
           // Push the sub-screen (e.g. BookSelect → Reader).

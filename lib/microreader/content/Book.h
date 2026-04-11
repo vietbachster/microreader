@@ -55,8 +55,9 @@ class Book {
   EpubError load_chapter(size_t index, Chapter& out);
 
   // Stream-parse a chapter: paragraphs emitted via callback, ~37KB working memory.
+  // id_sink (optional): called for each element with id="" in the XHTML source.
   EpubError load_chapter_streaming(size_t index, ParagraphSink sink, void* sink_ctx, uint8_t* work_buf,
-                                   uint8_t* xml_buf);
+                                   uint8_t* xml_buf, IdSink id_sink = nullptr, void* id_sink_ctx = nullptr);
 
   // Extract and decode an image from the EPUB (by zip entry index).
   // Returns the 1-bit dithered bitmap. The caller owns the memory.

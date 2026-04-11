@@ -170,7 +170,15 @@ void ReaderScreen::start(DrawBuffer& buf) {
   chapter_idx_ = 0;
   page_pos_ = PagePosition{0, 0};
   dim_cache_.assign(mrb_.image_count(), ImageDims{});
-  load_chapter_(0);
+  // Restore position: if the user selected a chapter from the TOC, jump there;
+  // otherwise restore the saved chapter/page (defaults to 0/{0,0} on first open).
+  if (chapter_select_.has_pending()) {
+    saved_chapter_idx_ = chapter_select_.pending_chapter();
+    saved_page_pos_ = PagePosition{chapter_select_.pending_para_index(), 0};
+    chapter_select_.clear_pending();
+  }
+  load_chapter_(saved_chapter_idx_);
+  page_pos_ = saved_page_pos_;
   render_page_(buf);
 #ifdef ESP_PLATFORM
   ESP_LOGI("reader", "BOOK_OK: %s", path_);
@@ -195,6 +203,7 @@ void ReaderScreen::stop() {
   mrb_path_.clear();
   mrb_path_.shrink_to_fit();
   open_ok_ = false;
+  nav_chosen_ = nullptr;
   buf_ = nullptr;
 }
 
@@ -204,6 +213,15 @@ bool ReaderScreen::update(const ButtonState& buttons, DrawBuffer& buf, IRuntime&
 
   if (!open_ok_)
     return true;
+
+  // Button1: open chapter list (only if TOC is available).
+  if (buttons.is_pressed(Button::Button1) && !mrb_.toc().entries.empty()) {
+    saved_chapter_idx_ = chapter_idx_;
+    saved_page_pos_ = page_pos_;
+    chapter_select_.populate(mrb_.toc());
+    nav_chosen_ = &chapter_select_;
+    return false;
+  }
 
   bool changed = false;
   if (buttons.is_pressed(Button::Button2))
@@ -310,7 +328,7 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
       int baseline_y = dw.y + fset->baseline(FontSize::Normal);
       // Vertical shift for superscript/subscript.
       if (dw.vertical_align == VerticalAlign::Super)
-        baseline_y -= fset->y_advance(FontSize::Normal) * 10 / 100;
+        baseline_y -= fset->y_advance(FontSize::Normal) * 20 / 100;
       else if (dw.vertical_align == VerticalAlign::Sub)
         baseline_y += fset->y_advance(FontSize::Normal) * 20 / 100;
       buf.draw_text_proportional(dw.x, baseline_y, dw.text, static_cast<size_t>(dw.len), *fset, false /*black*/,

@@ -10,6 +10,7 @@
 #include "../content/mrb/MrbReader.h"
 #include "../display/DrawBuffer.h"
 #include "../display/Font.h"
+#include "ChapterSelectScreen.h"
 #include "IScreen.h"
 
 namespace microreader {
@@ -17,6 +18,7 @@ namespace microreader {
 // Simple EPUB page viewer.
 // Renders text using the 8×8 bitmap font scaled 2× (16×16 glyphs).
 // Button2 = next page, Button3 = prev page, Button0 = back to menu.
+// Button1 = open chapter list (if TOC available).
 class ReaderScreen final : public IScreen {
  public:
   ReaderScreen() = default;
@@ -45,6 +47,11 @@ class ReaderScreen final : public IScreen {
     return "Reader";
   }
 
+  // Returns the chapter select screen to push (set when Button1 pressed), or null.
+  IScreen* chosen() const {
+    return nav_chosen_;
+  }
+
   void start(DrawBuffer& buf) override;
   void stop() override;
   bool update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& runtime) override;
@@ -68,6 +75,14 @@ class ReaderScreen final : public IScreen {
   PagePosition page_pos_;
   PageContent page_;
   bool open_ok_ = false;
+
+  // Chapter select screen — owned here, pushed when user presses Button1.
+  ChapterSelectScreen chapter_select_;
+  IScreen* nav_chosen_ = nullptr;
+
+  // Saved position (survives stop()) so we can restore after chapter select cancel.
+  size_t saved_chapter_idx_ = 0;
+  PagePosition saved_page_pos_;
 
   // Cached image dimensions: one entry per image ref in the MRB.
   struct ImageDims {

@@ -281,9 +281,11 @@ bool MrbWriter::finish(const EpubMetadata& meta, const TableOfContents& toc) {
   write_bytes(toc_hdr, 2);
   for (const auto& entry : toc.entries) {
     write_string(entry.label);
-    uint8_t fidx[2];
-    mrb_write_u16(fidx, entry.file_idx);
-    write_bytes(fidx, 2);
+    uint8_t buf[5];
+    mrb_write_u16(buf, entry.file_idx);
+    buf[2] = entry.depth;
+    mrb_write_u16(buf + 3, entry.para_index);
+    write_bytes(buf, 5);
   }
 
   // --- Fix up header ---
