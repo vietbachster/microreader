@@ -88,6 +88,7 @@ add_executable(unit_tests
     unit/MrbLayoutComparisonTest.cpp
     unit/StreamingPipelineTest.cpp
     unit/NavigationTest.cpp
+    unit/BitmapFontTest.cpp
 )
 target_link_libraries(unit_tests PRIVATE
     microreader_content

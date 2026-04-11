@@ -559,7 +559,11 @@ static bool is_breaking(XmlStringView name) {
 }
 
 static FontSize heading_size(XmlStringView name) {
-  if (name == "h1" || name == "h2" || name == "h3")
+  if (name == "h1")
+    return FontSize::XXLarge;
+  if (name == "h2")
+    return FontSize::XLarge;
+  if (name == "h3")
     return FontSize::Large;
   return FontSize::Normal;
 }
@@ -1397,7 +1401,9 @@ static EpubError parse_xhtml_events(XmlReader& reader, const CssStylesheet* inli
         } else if (sv_eq(ev.name, "dd")) {
           style.margin_left = 24;  // ~2em default indent for definition descriptions
         } else if (sv_eq(ev.name, "ul") || sv_eq(ev.name, "ol")) {
-          style.margin_left = 16;  // ~1.3em default indent for lists
+          // Only indent nested lists (level 2+); top-level lists are flush left
+          if (!parser.list_stack_.empty())
+            style.margin_left = 16;  // ~1.3em default indent for nested lists
         }
       }
 

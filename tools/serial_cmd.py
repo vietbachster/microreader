@@ -207,6 +207,74 @@ def drain(ser: serial.Serial):
     ser.timeout = 1
 
 
+def upload_font(ser: serial.Serial, filepath: Path) -> bool:
+    """Upload an MBF font file to the device's flash partition."""
+    data = filepath.read_bytes()
+    crc = zlib.crc32(data) & 0xFFFFFFFF
+    print(f"Uploading font {filepath.name} ({len(data)} bytes, CRC32=0x{crc:08x})")
+
+    # Send FONT magic + 4-byte size (LE)
+    ser.write(b"FONT" + struct.pack("<I", len(data)))
+
+    # Wait for READY
+    deadline = time.time() + 10
+    while time.time() < deadline:
+        resp = ser.readline().decode("utf-8", errors="replace").strip()
+        if not resp:
+            continue
+        if resp == "READY":
+            break
+        if resp.startswith("ERR:"):
+            print(f"Upload failed: {resp!r}")
+            return False
+    else:
+        print("Timeout waiting for READY")
+        return False
+    print("Device ready, sending font data...")
+
+    chunk_size = 2048
+    sent = 0
+    t0 = time.time()
+    while sent < len(data):
+        end = min(sent + chunk_size, len(data))
+        ser.write(data[sent:end])
+        sent = end
+        deadline_ack = time.time() + 30
+        got_ack = False
+        while time.time() < deadline_ack:
+            b = ser.read(1)
+            if b == b"\x06":
+                got_ack = True
+                break
+        if not got_ack:
+            print("\nTimeout waiting for ACK")
+            return False
+        elapsed = time.time() - t0
+        rate = sent / elapsed / 1024 if elapsed > 0 else 0
+        pct = sent * 100 // len(data)
+        print(
+            f"\r  {sent}/{len(data)} bytes ({pct}%) {rate:.0f} KB/s", end="", flush=True
+        )
+    print()
+
+    # Send CRC32
+    ser.write(struct.pack("<I", crc))
+
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        resp = ser.readline().decode("utf-8", errors="replace").strip()
+        if not resp:
+            continue
+        if resp == "OK":
+            print("Font upload successful!")
+            return True
+        if resp.startswith("ERR:"):
+            print(f"Upload failed: {resp!r}")
+            return False
+    print("Timeout waiting for result")
+    return False
+
+
 def send_list_books_raw(ser: serial.Serial) -> list[str]:
     """Return book list as a list of filenames."""
     drain(ser)
@@ -396,6 +464,12 @@ def main():
         help="Non-interactive: upload an EPUB file then exit",
     )
     parser.add_argument(
+        "--upload-font",
+        metavar="FILE",
+        default=None,
+        help="Non-interactive: upload an MBF font file to the flash partition then exit",
+    )
+    parser.add_argument(
         "--bench",
         metavar="BOOK",
         default=None,
@@ -444,6 +518,16 @@ def main():
             ser.close()
             sys.exit(1)
         ok = upload_epub(ser, fp)
+        ser.close()
+        sys.exit(0 if ok else 1)
+
+    if args.upload_font:
+        fp = Path(args.upload_font)
+        if not fp.exists():
+            print(f"File not found: {fp}", file=sys.stderr)
+            ser.close()
+            sys.exit(1)
+        ok = upload_font(ser, fp)
         ser.close()
         sys.exit(0 if ok else 1)
 
@@ -783,6 +867,15 @@ def main():
                     print(f"File not found: {fp}")
                     continue
                 upload_epub(ser, fp)
+            elif verb == "uploadfont":
+                if not arg:
+                    print("Usage: uploadfont <file.mbf>")
+                    continue
+                fp = Path(arg)
+                if not fp.exists():
+                    print(f"File not found: {fp}")
+                    continue
+                upload_font(ser, fp)
             elif verb == "bench":
                 if not arg:
                     print("Usage: bench <path_or_filename>")

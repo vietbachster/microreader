@@ -1,0 +1,87 @@
+#pragma once
+
+// MBF (Microreader Bitmap Font) binary format — version 1.
+//
+// Each MBF file contains one font at one pixel size, with up to 4 styles
+// (Regular + optional Bold, Italic, BoldItalic).
+//
+// Layout (single-style, style_flags=0):
+//   [MbfHeader]                     32 bytes
+//   [MbfRange × num_ranges]         8 bytes each
+//   [MbfGlyph × num_glyphs]        10 bytes each
+//   [bitmap data]                   variable (1-bit packed, MSB-first)
+//
+// Multi-style (style_flags != 0): additional style sections are appended
+// between the Regular glyph table and the bitmap data. The header fields
+// bold_offset / italic_offset / bold_italic_offset point to MbfStyleSection
+// structs (4 bytes each) followed by their own MbfRange[] + MbfGlyph[] tables.
+// All bitmap_offset values are relative to bitmap_data_offset (shared pool).
+//
+// Multiple sizes (Small/Normal/Large) are separate MBF files loaded into
+// a BitmapFontSet at runtime.
+//
+// Glyph lookup: binary-search ranges by codepoint → index into glyph table.
+// Bitmap data: each glyph has ceil(bitmap_width/8) × bitmap_height bytes.
+// Bit polarity: 1 = white, 0 = black (bit CLEAR = draw pixel).
+
+#include <cstddef>
+#include <cstdint>
+
+namespace microreader {
+
+static constexpr uint32_t kMbfMagic = 0x3146424D;  // "MBF1" little-endian
+static constexpr uint8_t kMbfVersion = 1;
+
+#pragma pack(push, 1)
+
+// File header — 32 bytes, all fields little-endian.
+struct MbfHeader {
+  uint32_t magic;               //  0: must be kMbfMagic
+  uint8_t version;              //  4: must be kMbfVersion
+  uint8_t glyph_height;         //  5: maximum rendered glyph height (px)
+  uint8_t baseline;             //  6: distance from line top to baseline (px)
+  uint8_t y_advance;            //  7: line height / vertical advance (px)
+  uint8_t default_advance;      //  8: fallback xAdvance for missing glyphs
+  uint8_t style_flags;          //  9: bitmask of present styles (bit0=Regular, bit1=Bold, bit2=Italic, bit3=BoldItalic)
+  uint16_t num_ranges;          // 10: number of MbfRange entries (Regular style)
+  uint16_t num_glyphs;          // 12: total glyph count (Regular style)
+  uint16_t reserved2;           // 14
+  uint32_t bitmap_data_offset;  // 16: byte offset from file start to bitmap data (shared by all styles)
+  uint32_t bold_offset;         // 20: file offset to Bold MbfStyleSection (0 = absent)
+  uint32_t italic_offset;       // 24: file offset to Italic MbfStyleSection (0 = absent)
+  uint32_t bold_italic_offset;  // 28: file offset to BoldItalic MbfStyleSection (0 = absent)
+};
+static_assert(sizeof(MbfHeader) == 32, "MbfHeader must be 32 bytes");
+
+// Style section preamble — appears at bold_offset / italic_offset / bold_italic_offset.
+// Immediately followed by MbfRange[num_ranges] then MbfGlyph[num_glyphs].
+struct MbfStyleSection {
+  uint16_t num_ranges;
+  uint16_t num_glyphs;
+};
+static_assert(sizeof(MbfStyleSection) == 4, "MbfStyleSection must be 4 bytes");
+
+// Unicode range — maps a contiguous codepoint block to a slice of the glyph table.
+// 8 bytes each.
+struct MbfRange {
+  uint32_t first_codepoint;    // first Unicode codepoint in this range
+  uint16_t count;              // number of consecutive codepoints
+  uint16_t glyph_table_start;  // index of the first glyph in the glyph table
+};
+static_assert(sizeof(MbfRange) == 8, "MbfRange must be 8 bytes");
+
+// Per-glyph metrics + bitmap location — 10 bytes each.
+struct MbfGlyph {
+  uint32_t bitmap_offset;  // byte offset into bitmap data section
+  uint8_t advance_width;   // horizontal advance (cursor movement)
+  uint8_t bitmap_width;    // bitmap width in pixels (0 for space-like glyphs)
+  uint8_t bitmap_height;   // bitmap height in pixels
+  int8_t x_offset;         // horizontal offset from cursor to bitmap left edge
+  int8_t y_offset;         // vertical offset from baseline to bitmap top (negative = above)
+  uint8_t reserved;
+};
+static_assert(sizeof(MbfGlyph) == 10, "MbfGlyph must be 10 bytes");
+
+#pragma pack(pop)
+
+}  // namespace microreader

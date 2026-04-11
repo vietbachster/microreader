@@ -999,8 +999,8 @@ TEST(XhtmlBody, NestedListIndentation) {
     if (r.text.find("Level 2") != std::string::npos)
       m2 = r.margin_left;
   }
-  EXPECT_EQ(m1, 16u) << "First list level should have 16px indent";
-  EXPECT_EQ(m2, 32u) << "Second list level should have 32px indent";
+  EXPECT_EQ(m1, 0u) << "First list level should have no indent";
+  EXPECT_EQ(m2, 16u) << "Second list level should have 16px indent";
 }
 
 // ---------------------------------------------------------------------------

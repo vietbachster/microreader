@@ -6,6 +6,7 @@
 #include <cstring>
 #include <utility>
 
+#include "../content/BitmapFont.h"
 #include "Font.h"
 
 namespace microreader {
@@ -171,6 +172,52 @@ class DrawBuffer {
     draw_glyphs_(x, y, text, white, scale);
   }
 
+  // Draw a single proportional glyph bitmap at logical (x + x_offset, y + y_offset).
+  // bits: 1-bit packed MSB-first bitmap (MBF polarity: 1=white, 0=black/ink).
+  // Only ink pixels (bit=0) are drawn when invert=false.
+  // Only white pixels (bit=1) are drawn when invert=true.
+  void draw_glyph(int x, int y, const uint8_t* bits, int bitmap_width, int bitmap_height, int x_offset, int y_offset,
+                  bool white) {
+    if (!bits || bitmap_width <= 0 || bitmap_height <= 0)
+      return;
+    const int gx = x + x_offset;
+    const int gy = y + y_offset;
+    const int row_stride = (bitmap_width + 7) / 8;
+
+    for (int row = 0; row < bitmap_height; ++row) {
+      const int ly = gy + row;
+      if (ly < 0 || ly >= kHeight)
+        continue;
+      const uint8_t* row_data = bits + row * row_stride;
+      // Draw only ink pixels (bit=0 in MBF = black).
+      // We need to set them to the requested color (usually black = !white).
+      // Iterate through the row and draw individual ink pixels.
+      for (int col = 0; col < bitmap_width; ++col) {
+        const int lx = gx + col;
+        if (lx < 0 || lx >= kWidth)
+          continue;
+        const bool bit_set = (row_data[col >> 3] >> (7 - (col & 7))) & 1;
+        if (!bit_set) {
+          // Ink pixel — draw it in the requested color
+          set_pixel(lx, ly, white);
+        }
+      }
+    }
+  }
+
+  // Draw proportional text using a BitmapFontSet. Cursor starts at (x, baseline_y)
+  // where baseline_y is the Y position of the text baseline.
+  // Returns the X position after the last character (cursor advance).
+  int draw_text_proportional(int x, int baseline_y, const char* text, size_t len, const BitmapFontSet& fonts,
+                             bool white, FontStyle style = FontStyle::Regular,
+                             FontSize size = FontSize::Normal);
+
+  // Convenience overload for null-terminated strings.
+  int draw_text_proportional(int x, int baseline_y, const char* text, const BitmapFontSet& fonts, bool white,
+                             FontStyle style = FontStyle::Regular, FontSize size = FontSize::Normal) {
+    return draw_text_proportional(x, baseline_y, text, text ? strlen(text) : 0, fonts, white, style, size);
+  }
+
   // Draw a filled circle.
   void draw_circle(int cx, int cy, int r, bool white) {
     if (r <= 0)
@@ -327,5 +374,48 @@ class DrawBuffer {
     }
   }
 };
+
+}  // namespace microreader
+
+namespace microreader {
+
+inline int DrawBuffer::draw_text_proportional(int x, int baseline_y, const char* text, size_t len,
+                                              const BitmapFontSet& fonts, bool white, FontStyle style, FontSize size) {
+  if (!text || len == 0)
+    return x;
+  const char* p = text;
+  const char* end = text + len;
+  int cursor_x = x;
+  while (p < end) {
+    // Decode UTF-8
+    char32_t cp = 0;
+    uint8_t b = static_cast<uint8_t>(*p);
+    if (b < 0x80) {
+      cp = b;
+      ++p;
+    } else if (b < 0xE0 && p + 1 < end) {
+      cp = (static_cast<char32_t>(b & 0x1F) << 6) | (static_cast<uint8_t>(p[1]) & 0x3F);
+      p += 2;
+    } else if (b < 0xF0 && p + 2 < end) {
+      cp = (static_cast<char32_t>(b & 0x0F) << 12) | (static_cast<char32_t>(static_cast<uint8_t>(p[1]) & 0x3F) << 6) |
+           (static_cast<uint8_t>(p[2]) & 0x3F);
+      p += 3;
+    } else if (b < 0xF8 && p + 3 < end) {
+      cp = (static_cast<char32_t>(b & 0x07) << 18) | (static_cast<char32_t>(static_cast<uint8_t>(p[1]) & 0x3F) << 12) |
+           (static_cast<char32_t>(static_cast<uint8_t>(p[2]) & 0x3F) << 6) | (static_cast<uint8_t>(p[3]) & 0x3F);
+      p += 4;
+    } else {
+      ++p;
+      cp = 0xFFFD;
+    }
+
+    GlyphData g = fonts.glyph_data(cp, style, size);
+    if (g.bits) {
+      draw_glyph(cursor_x, baseline_y, g.bits, g.bitmap_width, g.bitmap_height, g.x_offset, g.y_offset, white);
+    }
+    cursor_x += g.advance_width;
+  }
+  return cursor_x;
+}
 
 }  // namespace microreader

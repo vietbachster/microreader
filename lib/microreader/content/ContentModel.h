@@ -19,14 +19,18 @@ enum class FontStyle : uint8_t {
 };
 
 // ---------------------------------------------------------------------------
-// Font size — 3 discrete sizes to avoid dynamic font generation
+// Font size — 5 discrete sizes mapped to pre-rendered bitmap fonts
 // ---------------------------------------------------------------------------
 
 enum class FontSize : uint8_t {
   Small = 0,
   Normal = 1,
   Large = 2,
+  XLarge = 3,
+  XXLarge = 4,
 };
+
+static constexpr int kFontSizeCount = 5;
 
 // ---------------------------------------------------------------------------
 // Text alignment

@@ -341,6 +341,90 @@ def gen_large_chapter():
 
 
 # ---------------------------------------------------------------------------
+# 9. multilingual.epub — 6 chapters in different scripts/languages
+# ---------------------------------------------------------------------------
+def gen_multilingual():
+    opf_path = "OEBPS/content.opf"
+    chapters_data = [
+        ("English", "en", """\
+<h1>Chapter 1 — English</h1>
+<p>It was a bright cold day in April, and the clocks were striking thirteen.
+Winston Smith, his chin nuzzled into his breast in an effort to escape the vile
+wind, slipped quickly through the glass doors of Victory Mansions, though not
+quickly enough to prevent a swirl of gritty dust from entering along with him.</p>
+<p>The hallway smelt of boiled cabbage and old rag mats. At one end of it a
+coloured poster, too large for indoor display, had been tacked to the wall.</p>
+<p>"Who controls the past controls the future. Who controls the present controls
+the past." — George Orwell</p>"""),
+        ("Deutsch", "de", """\
+<h1>Kapitel 2 — Deutsch</h1>
+<p>Alle glücklichen Familien gleichen einander, jede unglückliche Familie ist auf
+ihre eigene Weise unglücklich. Im Hause Oblonskij war alles durcheinandergeraten.</p>
+<p>Die Wörter mit Umlauten: Ärger, Öffnung, Übung, straße. Besondere Zeichen:
+äöüß ÄÖÜ. Zahlen und Satzzeichen: 1, 2, 3 — fertig!</p>
+<p>«Wovon man nicht sprechen kann, darüber muss man schweigen.» — Wittgenstein</p>"""),
+        ("Français", "fr", """\
+<h1>Chapitre 3 — Français</h1>
+<p>Longtemps, je me suis couché de bonne heure. Parfois, à peine ma bougie
+éteinte, mes yeux se fermaient si vite que je n'avais pas le temps de me dire:
+«Je m'endors.»</p>
+<p>Les caractères spéciaux: à â ç é è ê ë î ï ô ù û ü ÿ œ æ. Les guillemets
+français: «Bonjour le monde!» — et les tirets — comme ceci.</p>
+<p>«L'enfer, c'est les autres.» — Jean-Paul Sartre</p>"""),
+        ("Русский", "ru", """\
+<h1>Глава 4 — Русский</h1>
+<p>Все счастливые семьи похожи друг на друга, каждая несчастливая семья
+несчастлива по-своему. Всё смешалось в доме Облонских.</p>
+<p>Широкая электрификация южных губерний даст мощный толчок подъёму
+сельского хозяйства. Съешь ещё этих мягких французских булок да выпей чаю.</p>
+<p>«Красота спасёт мир.» — Фёдор Достоевский</p>"""),
+        ("中文", "zh", """\
+<h1>第五章 — 中文</h1>
+<p>天地玄黄，宇宙洪荒。日月盈昃，辰宿列张。寒来暑往，秋收冬藏。</p>
+<p>人之初，性本善。性相近，习相远。苟不教，性乃迁。教之道，贵以专。</p>
+<p>学而时习之，不亦说乎？有朋自远方来，不亦乐乎？人不知而不愠，不亦君子乎？</p>
+<p>「知之为知之，不知为不知，是知也。」— 孔子</p>"""),
+        ("Mixed", "en", """\
+<h1>Chapter 6 — Mixed Scripts</h1>
+<p>This chapter mixes multiple scripts in a single flow of text.</p>
+<p>English text, then German: Straße und Brücke. Then French: crème brûlée.
+Then Russian: Москва — столица России. Then Chinese: 你好世界 means "hello world".</p>
+<p>Numbers and punctuation: 0123456789 !@#$%^&amp;*() []{}|\\;:'",./&lt;&gt;?</p>
+<p>Typography test: "curly quotes" 'single quotes' — em dash – en dash … ellipsis</p>
+<p>Accented Latin: àáâãäå èéêë ìíîï ñ òóôõö ùúûü ýÿ ðþ</p>
+<p>Greek letters: αβγδεζηθ ΑΒΓΔΕΖΗΘ</p>"""),
+    ]
+    manifest = []
+    spine = []
+    nav_points = []
+    chapter_files = []
+    for i, (title, lang, body) in enumerate(chapters_data, 1):
+        cid = f"ch{i}"
+        fname = f"chapter{i}.xhtml"
+        xhtml = make_xhtml(title, body)
+        chapter_files.append(("OEBPS/" + fname, xhtml, True))
+        manifest.append((cid, fname, "application/xhtml+xml"))
+        spine.append(cid)
+        nav_points.append((title, fname))
+
+    manifest.append(("ncx", "toc.ncx", "application/x-dtbncx+xml"))
+    ncx = make_ncx(nav_points)
+    opf = make_opf(
+        title="Multilingual Test",
+        author="Font PoC",
+        manifest_items=manifest,
+        spine_idrefs=spine,
+        toc_id="ncx",
+    )
+    files = [
+        ("META-INF/container.xml", CONTAINER_XML.format(opf_path=opf_path), False),
+        (opf_path, opf, True),
+        ("OEBPS/toc.ncx", ncx, True),
+    ] + chapter_files
+    write_epub("multilingual.epub", files, opf_path)
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
@@ -353,4 +437,5 @@ if __name__ == "__main__":
     gen_nested_dirs()
     gen_special_chars()
     gen_large_chapter()
+    gen_multilingual()
     print("Done!")

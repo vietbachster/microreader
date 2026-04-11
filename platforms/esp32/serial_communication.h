@@ -43,6 +43,7 @@
 #endif
 #include "esp_log.h"
 #include "esp_rom_crc.h"
+#include "font_partition.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -51,6 +52,7 @@ static constexpr const char* kUpTag = "upload";
 static constexpr uint8_t kLutMagic[4] = {0xDE, 0xAD, 0xBE, 0xEF};
 static constexpr uint8_t kEpubMagic[4] = {'E', 'P', 'U', 'B'};
 static constexpr uint8_t kCmdMagic[4] = {'C', 'M', 'N', 'D'};
+static constexpr uint8_t kFontMagic[4] = {'F', 'O', 'N', 'T'};
 static constexpr uint32_t kMaxPayload = 256;
 static constexpr uint32_t kLutSize = 112;
 
@@ -67,6 +69,9 @@ volatile uint8_t g_serial_buttons = 0;
 enum class SerialCmdType : uint8_t { None = 0, Open, Bench, ImgBench, ImgDecode };
 static char g_cmd_path[256];
 static volatile SerialCmdType g_cmd_type = SerialCmdType::None;
+
+// Set when a font has been uploaded to the partition and needs re-mmap.
+static volatile bool g_font_uploaded = false;
 
 // Call from the main loop. Returns true (and copies into `out`) when a fresh
 // LUT has been received since the last call.
@@ -260,6 +265,99 @@ static void handle_epub_upload() {
 }
 
 // ---------------------------------------------------------------------------
+// Handle a FONT upload — write directly to the spiffs partition (raw flash).
+// Protocol:
+//   [4B] "FONT" magic (already consumed)
+//   [4B] file_size (LE)
+//   payload in 2KB chunks with ACK flow control (same as EPUB)
+//   [4B] CRC32 (LE)
+// ---------------------------------------------------------------------------
+static void handle_font_upload() {
+  // Read file size (4 bytes LE).
+  uint8_t sz_buf[4];
+  if (!serial_read_exact(sz_buf, 4, 2000)) {
+    serial_write("ERR:size\n");
+    return;
+  }
+  uint32_t file_size = sz_buf[0] | (sz_buf[1] << 8) | (sz_buf[2] << 16) | (sz_buf[3] << 24);
+
+  const esp_partition_t* part = FontPartition::find();
+  if (!part) {
+    serial_write("ERR:no_partition\n");
+    return;
+  }
+  if (kFontPartHeaderSize + file_size > part->size) {
+    serial_write("ERR:too_large\n");
+    return;
+  }
+
+  ESP_LOGI(kUpTag, "receiving font (%lu bytes) → spiffs partition", (unsigned long)file_size);
+
+  // Erase needed sectors BEFORE signaling READY, so the host doesn't
+  // start sending while we're busy erasing.
+  size_t total = kFontPartHeaderSize + file_size;
+  size_t erase_size = (total + 0xFFF) & ~0xFFF;
+  if (esp_partition_erase_range(part, 0, erase_size) != ESP_OK) {
+    serial_write("ERR:erase\n");
+    return;
+  }
+
+  // Write the header first (magic + size).
+  uint8_t header[kFontPartHeaderSize];
+  memcpy(header, kFontMagic, 4);
+  memcpy(header + 4, sz_buf, 4);
+  if (esp_partition_write(part, 0, header, sizeof(header)) != ESP_OK) {
+    serial_write("ERR:write_hdr\n");
+    return;
+  }
+
+  // Now signal the host to start sending data.
+  serial_write("READY\n");
+
+  // Receive and write data in chunks.
+  uint32_t crc = 0;
+  uint32_t remaining = file_size;
+  uint32_t flash_offset = kFontPartHeaderSize;
+  uint8_t chunk[2048];
+  static constexpr uint8_t kAck = 0x06;
+
+  while (remaining > 0) {
+    size_t want = remaining < sizeof(chunk) ? remaining : sizeof(chunk);
+    if (!serial_read_exact(chunk, want, 30000)) {
+      ESP_LOGE(kUpTag, "font upload timeout, %lu remaining", (unsigned long)remaining);
+      serial_write("ERR:timeout\n");
+      return;
+    }
+    crc = esp_rom_crc32_le(crc, chunk, want);
+
+    if (esp_partition_write(part, flash_offset, chunk, want) != ESP_OK) {
+      serial_write("ERR:write\n");
+      return;
+    }
+    flash_offset += want;
+    remaining -= want;
+    serial_write_raw(&kAck, 1);
+  }
+
+  // Verify CRC.
+  uint8_t crc_buf[4];
+  if (!serial_read_exact(crc_buf, 4, 2000)) {
+    serial_write("ERR:crc_missing\n");
+    return;
+  }
+  uint32_t expected = crc_buf[0] | (crc_buf[1] << 8) | (crc_buf[2] << 16) | (crc_buf[3] << 24);
+  if (crc != expected) {
+    ESP_LOGE(kUpTag, "font CRC mismatch: got 0x%08lx expected 0x%08lx", (unsigned long)crc, (unsigned long)expected);
+    serial_write("ERR:crc\n");
+    return;
+  }
+
+  ESP_LOGI(kUpTag, "font saved to partition (%lu bytes, CRC OK)", (unsigned long)file_size);
+  g_font_uploaded = true;
+  serial_write("OK\n");
+}
+
+// ---------------------------------------------------------------------------
 // Handle a serial command (after "CMND" magic has been matched).
 //
 // Sub-commands (1 byte after magic):
@@ -402,6 +500,7 @@ static void serial_receiver_task(void* /*arg*/) {
   uint8_t lut_pos = 0;   // progress matching kLutMagic
   uint8_t epub_pos = 0;  // progress matching kEpubMagic
   uint8_t cmd_pos = 0;   // progress matching kCmdMagic
+  uint8_t font_pos = 0;  // progress matching kFontMagic
 
   ESP_LOGI(kLutRxTag, "receiver ready (LUT + EPUB + CMD)");
 
@@ -446,11 +545,26 @@ static void serial_receiver_task(void* /*arg*/) {
         lut_pos = 0;
         epub_pos = 0;
         cmd_pos = 0;
+        font_pos = 0;
         handle_serial_cmd();
         continue;
       }
     } else {
       cmd_pos = (byte == kCmdMagic[0]) ? 1 : 0;
+    }
+
+    // Match FONT magic.
+    if (byte == kFontMagic[font_pos]) {
+      if (++font_pos == 4) {
+        lut_pos = 0;
+        epub_pos = 0;
+        cmd_pos = 0;
+        font_pos = 0;
+        handle_font_upload();
+        continue;
+      }
+    } else {
+      font_pos = (byte == kFontMagic[0]) ? 1 : 0;
     }
   }
 }

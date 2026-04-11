@@ -1,0 +1,739 @@
+#!/usr/bin/env python3
+"""
+Generate MBF (Microreader Bitmap Font) binary from a TTF/OTF font file.
+
+Usage:
+    python tools/generate_font.py <font.ttf> <size_px> -o <output.mbf> [--ranges ...]
+
+Requires: freetype-py (pip install freetype-py)
+"""
+
+import argparse
+import math
+import os
+import struct
+import sys
+import urllib.request
+
+try:
+    import freetype
+except ImportError:
+    print("ERROR: freetype-py not installed. Run: pip install freetype-py")
+    sys.exit(1)
+
+# ---------------------------------------------------------------------------
+# Unicode range presets
+# ---------------------------------------------------------------------------
+
+RANGE_PRESETS = {
+    "ascii": [(0x0020, 0x007E)],  # Basic ASCII (space through ~)
+    "latin1": [(0x00A0, 0x00FF)],  # Latin-1 Supplement
+    "latin-ext-a": [(0x0100, 0x017F)],  # Latin Extended-A
+    "latin-ext-b": [(0x0180, 0x024F)],  # Latin Extended-B
+    "cyrillic": [(0x0400, 0x04FF)],  # Cyrillic
+    "cjk": [(0x4E00, 0x9FFF)],  # CJK Unified Ideographs
+    "greek": [(0x0370, 0x03FF)],  # Greek and Coptic
+    "general-punct": [
+        (0x2000, 0x206F)
+    ],  # General Punctuation (curly quotes, em-dash, ellipsis)
+    "currency": [(0x20A0, 0x20CF)],  # Currency Symbols (€ etc.)
+    "letterlike": [(0x2100, 0x214F)],  # Letterlike Symbols (™ ℃ etc.)
+    "number-forms": [(0x2150, 0x218F)],  # Number Forms (fractions)
+    "arrows": [(0x2190, 0x21FF)],  # Arrows
+    "math-ops": [(0x2200, 0x22FF)],  # Mathematical Operators
+    "misc-symbols": [(0x2600, 0x26FF)],  # Miscellaneous Symbols
+    "combining": [(0x0300, 0x036F)],  # Combining Diacritical Marks
+    "spacing-mod": [(0x02B0, 0x02FF)],  # Spacing Modifier Letters
+    "latin-ext-add": [(0x1E00, 0x1EFF)],  # Latin Extended Additional (Vietnamese etc.)
+    "super-sub": [(0x2070, 0x209F)],  # Superscripts and Subscripts
+}
+
+DEFAULT_RANGES = [
+    "ascii",
+    "latin1",
+    "latin-ext-a",
+    "latin-ext-b",
+    "greek",
+    "cyrillic",
+    "combining",
+    "spacing-mod",
+    "general-punct",
+    "super-sub",
+    "currency",
+    "letterlike",
+    "number-forms",
+    "latin-ext-add",
+]
+
+# ---------------------------------------------------------------------------
+# FreeType glyph rasterization
+# ---------------------------------------------------------------------------
+
+
+def render_glyph(face, codepoint, size):
+    """Render a single glyph. Returns dict with metrics + 1-bit bitmap bytes."""
+    glyph_index = face.get_char_index(codepoint)
+    if glyph_index == 0:
+        return None  # glyph not in font
+
+    face.load_glyph(glyph_index, freetype.FT_LOAD_RENDER | freetype.FT_LOAD_TARGET_MONO)
+
+    bitmap = face.glyph.bitmap
+    width = bitmap.width
+    height = bitmap.rows
+    # Use post-hinting pixel positions from the glyph slot, NOT the 26.6
+    # metrics (which are pre-hinting and can differ by 1-2px after mono
+    # rendering, causing characters like ü to be mis-positioned).
+    x_offset = face.glyph.bitmap_left
+    y_offset = (
+        -face.glyph.bitmap_top
+    )  # bitmap_top = pixels above baseline (positive), negate for MBF convention
+    x_advance = face.glyph.advance.x >> 6  # 26.6 fixed-point → integer pixels
+
+    if width == 0 or height == 0:
+        # Space-like glyph: no bitmap
+        return {
+            "codepoint": codepoint,
+            "bitmap_width": 0,
+            "bitmap_height": 0,
+            "x_offset": 0,
+            "y_offset": 0,
+            "x_advance": x_advance,
+            "bitmap_bytes": b"",
+        }
+
+    # Convert FreeType mono bitmap to MSB-first packed bytes.
+    # FreeType's mono bitmap is already 1-bit packed MSB-first with
+    # pitch = bitmap.pitch bytes per row. But the pitch may differ from
+    # our row stride (ceil(width/8)), so repack row by row.
+    row_stride = math.ceil(width / 8)
+    out = bytearray(row_stride * height)
+
+    ft_buffer = bitmap.buffer
+    ft_pitch = bitmap.pitch
+
+    for y in range(height):
+        for x in range(width):
+            ft_byte_idx = y * ft_pitch + (x >> 3)
+            ft_bit = (ft_buffer[ft_byte_idx] >> (7 - (x & 7))) & 1
+            # FreeType mono: 1=ink, 0=background
+            # MBF: 1=white, 0=black (ink). So INVERT.
+            mbf_bit = 1 - ft_bit
+            byte_idx = y * row_stride + (x >> 3)
+            if mbf_bit:
+                out[byte_idx] |= 0x80 >> (x & 7)
+
+    return {
+        "codepoint": codepoint,
+        "bitmap_width": width,
+        "bitmap_height": height,
+        "x_offset": x_offset,
+        "y_offset": y_offset,
+        "x_advance": x_advance,
+        "bitmap_bytes": bytes(out),
+    }
+
+
+# ---------------------------------------------------------------------------
+# MBF writer
+# ---------------------------------------------------------------------------
+
+
+def render_style_glyphs(face, size, codepoint_ranges):
+    """Render glyphs for one style. Returns (ranges, all_glyphs, all_bitmaps, max_glyph_height).
+
+    ranges: list of (first_cp, count, glyph_table_start)
+    all_glyphs: flat list of glyph dicts
+    all_bitmaps: bytearray of 1-bit bitmap data
+    """
+    face.set_pixel_sizes(0, size)
+
+    ranges = []
+    all_glyphs = []
+    all_bitmaps = bytearray()
+    max_glyph_height = 0
+
+    for range_start, range_end in codepoint_ranges:
+        count = range_end - range_start + 1
+        glyph_table_start = len(all_glyphs)
+        has_any = False
+
+        for cp in range(range_start, range_end + 1):
+            g = render_glyph(face, cp, size)
+            if g is None:
+                all_glyphs.append(
+                    {
+                        "codepoint": cp,
+                        "bitmap_width": 0,
+                        "bitmap_height": 0,
+                        "x_offset": 0,
+                        "y_offset": 0,
+                        "x_advance": 0,
+                        "bitmap_bytes": b"",
+                        "bitmap_offset": 0,
+                    }
+                )
+            else:
+                g["bitmap_offset"] = len(all_bitmaps)
+                all_bitmaps.extend(g["bitmap_bytes"])
+                all_glyphs.append(g)
+                has_any = True
+                if g["bitmap_height"] > max_glyph_height:
+                    max_glyph_height = g["bitmap_height"]
+
+        if has_any:
+            ranges.append((range_start, count, glyph_table_start))
+
+    return ranges, all_glyphs, all_bitmaps, max_glyph_height
+
+
+def _encode_ranges_and_glyphs(ranges, all_glyphs, bitmap_base_offset):
+    """Encode range table + glyph table into bytes. bitmap_base_offset is added
+    to each glyph's bitmap_offset so all offsets are relative to the start of
+    the shared bitmap data section."""
+    buf = bytearray()
+    for first_cp, count, glyph_start in ranges:
+        buf.extend(struct.pack("<IHH", first_cp, count, glyph_start))
+    for g in all_glyphs:
+        bmp_off = g.get("bitmap_offset", 0) + bitmap_base_offset
+        buf.extend(
+            struct.pack(
+                "<IBBBbbB",
+                bmp_off,
+                g["x_advance"] & 0xFF,
+                g["bitmap_width"] & 0xFF,
+                g["bitmap_height"] & 0xFF,
+                g["x_offset"],
+                g["y_offset"],
+                0,
+            )
+        )
+    return buf
+
+
+def build_mbf(face, size, codepoint_ranges):
+    """Build single-style MBF binary. Returns (bytes, stats_dict)."""
+    ranges, all_glyphs, all_bitmaps, max_glyph_height = render_style_glyphs(
+        face, size, codepoint_ranges
+    )
+
+    face.set_pixel_sizes(0, size)
+    ascender = face.size.ascender >> 6
+    descender = face.size.descender >> 6
+    y_advance = ascender - descender + 2
+    baseline = ascender
+    default_advance = size // 2
+
+    num_ranges = len(ranges)
+    num_glyphs = len(all_glyphs)
+    header_size = 32
+    ranges_size = num_ranges * 8
+    glyphs_size = num_glyphs * 10
+    bitmap_data_offset = header_size + ranges_size + glyphs_size
+
+    buf = bytearray()
+    buf.extend(
+        struct.pack(
+            "<IBBBBBBHHHIIII",
+            0x3146424D,
+            1,
+            max_glyph_height & 0xFF,
+            baseline & 0xFF,
+            y_advance & 0xFF,
+            default_advance & 0xFF,
+            0,  # style_flags
+            num_ranges,
+            num_glyphs,
+            0,  # reserved2
+            bitmap_data_offset,
+            0,  # bold_offset
+            0,  # italic_offset
+            0,  # bold_italic_offset
+        )
+    )
+    buf.extend(_encode_ranges_and_glyphs(ranges, all_glyphs, 0))
+    buf.extend(all_bitmaps)
+
+    stats = {
+        "num_ranges": num_ranges,
+        "num_glyphs": num_glyphs,
+        "rendered_glyphs": sum(
+            1 for g in all_glyphs if g["bitmap_width"] > 0 or g["x_advance"] > 0
+        ),
+        "bitmap_bytes": len(all_bitmaps),
+        "total_bytes": len(buf),
+        "glyph_height": max_glyph_height,
+        "baseline": baseline,
+        "y_advance": y_advance,
+    }
+    return bytes(buf), stats
+
+
+def build_multi_style_mbf(faces, size, codepoint_ranges):
+    """Build multi-style MBF from dict of {FontStyle: freetype.Face}.
+
+    faces keys: 'regular' (required), 'bold', 'italic', 'bold_italic' (optional).
+    Returns (bytes, stats_dict).
+    """
+    # Render all styles
+    style_data = {}
+    for style_name, face in faces.items():
+        style_data[style_name] = render_style_glyphs(face, size, codepoint_ranges)
+
+    # Metrics from Regular face
+    reg_face = faces["regular"]
+    reg_face.set_pixel_sizes(0, size)
+    ascender = reg_face.size.ascender >> 6
+    descender = reg_face.size.descender >> 6
+    y_advance = ascender - descender + 2
+    baseline = ascender
+    default_advance = size // 2
+
+    max_glyph_height = max(d[3] for d in style_data.values())
+
+    # Compute layout sizes
+    reg = style_data["regular"]
+    reg_ranges, reg_glyphs, reg_bitmaps, _ = reg
+
+    header_size = 32
+    reg_ranges_size = len(reg_ranges) * 8
+    reg_glyphs_size = len(reg_glyphs) * 10
+    # After regular ranges+glyphs, append style sections for bold/italic/bold_italic
+    cursor = header_size + reg_ranges_size + reg_glyphs_size
+
+    extra_styles = ["bold", "italic", "bold_italic"]
+    style_offsets = {}  # style_name -> file offset
+    style_sections = (
+        {}
+    )  # style_name -> encoded bytes (section header + ranges + glyphs)
+
+    for sname in extra_styles:
+        if sname not in style_data:
+            style_offsets[sname] = 0
+            continue
+        ranges, glyphs, bitmaps, _ = style_data[sname]
+        style_offsets[sname] = cursor
+        # MbfStyleSection: uint16 num_ranges, uint16 num_glyphs (4 bytes)
+        sec = struct.pack("<HH", len(ranges), len(glyphs))
+        # Ranges + glyphs (bitmap offsets will be fixed up later)
+        style_sections[sname] = (sec, ranges, glyphs)
+        cursor += 4 + len(ranges) * 8 + len(glyphs) * 10
+
+    bitmap_data_offset = cursor
+
+    # Now we know where bitmaps start — concatenate all bitmaps and compute
+    # per-style bitmap base offsets
+    all_bitmaps = bytearray()
+    bitmap_bases = {}
+
+    bitmap_bases["regular"] = len(all_bitmaps)
+    all_bitmaps.extend(reg_bitmaps)
+
+    for sname in extra_styles:
+        if sname not in style_data:
+            continue
+        bitmap_bases[sname] = len(all_bitmaps)
+        all_bitmaps.extend(style_data[sname][2])
+
+    # style_flags bitmask
+    style_flags = 0x01  # Regular always
+    if "bold" in style_data:
+        style_flags |= 0x02
+    if "italic" in style_data:
+        style_flags |= 0x04
+    if "bold_italic" in style_data:
+        style_flags |= 0x08
+
+    # Build file
+    buf = bytearray()
+    buf.extend(
+        struct.pack(
+            "<IBBBBBBHHHIIII",
+            0x3146424D,
+            1,  # version
+            max_glyph_height & 0xFF,
+            baseline & 0xFF,
+            y_advance & 0xFF,
+            default_advance & 0xFF,
+            style_flags,
+            len(reg_ranges),
+            len(reg_glyphs),
+            0,  # reserved2
+            bitmap_data_offset,
+            style_offsets.get("bold", 0),
+            style_offsets.get("italic", 0),
+            style_offsets.get("bold_italic", 0),
+        )
+    )
+
+    # Regular ranges + glyphs
+    buf.extend(
+        _encode_ranges_and_glyphs(reg_ranges, reg_glyphs, bitmap_bases["regular"])
+    )
+
+    # Extra style sections
+    for sname in extra_styles:
+        if sname not in style_sections:
+            continue
+        sec_header, ranges, glyphs = style_sections[sname]
+        buf.extend(sec_header)
+        buf.extend(_encode_ranges_and_glyphs(ranges, glyphs, bitmap_bases[sname]))
+
+    # Bitmap data
+    buf.extend(all_bitmaps)
+
+    total_rendered = sum(
+        sum(1 for g in d[1] if g["bitmap_width"] > 0 or g["x_advance"] > 0)
+        for d in style_data.values()
+    )
+    total_glyphs = sum(len(d[1]) for d in style_data.values())
+
+    stats = {
+        "num_styles": len(style_data),
+        "style_names": list(style_data.keys()),
+        "num_ranges": len(reg_ranges),
+        "num_glyphs": total_glyphs,
+        "rendered_glyphs": total_rendered,
+        "bitmap_bytes": len(all_bitmaps),
+        "total_bytes": len(buf),
+        "glyph_height": max_glyph_height,
+        "baseline": baseline,
+        "y_advance": y_advance,
+    }
+    return bytes(buf), stats
+
+
+# ---------------------------------------------------------------------------
+# Noto Serif downloader
+# ---------------------------------------------------------------------------
+
+NOTO_SERIF_URL = (
+    "https://github.com/notofonts/notofonts.github.io/raw/main/"
+    "fonts/NotoSerif/hinted/ttf/NotoSerif-Regular.ttf"
+)
+
+NOTO_SERIF_BOLD_URL = (
+    "https://github.com/notofonts/notofonts.github.io/raw/main/"
+    "fonts/NotoSerif/hinted/ttf/NotoSerif-Bold.ttf"
+)
+
+NOTO_SERIF_ITALIC_URL = (
+    "https://github.com/notofonts/notofonts.github.io/raw/main/"
+    "fonts/NotoSerif/hinted/ttf/NotoSerif-Italic.ttf"
+)
+
+NOTO_SERIF_BOLD_ITALIC_URL = (
+    "https://github.com/notofonts/notofonts.github.io/raw/main/"
+    "fonts/NotoSerif/hinted/ttf/NotoSerif-BoldItalic.ttf"
+)
+
+NOTO_SERIF_CJK_URL = (
+    "https://github.com/notofonts/noto-cjk/raw/main/"
+    "Serif/SubsetOTF/SC/NotoSerifSC-Regular.otf"
+)
+
+
+def ensure_font(font_path, url, name):
+    """Download font if not present."""
+    if os.path.isfile(font_path):
+        return font_path
+    print(f"Downloading {name}...")
+    os.makedirs(os.path.dirname(font_path) or ".", exist_ok=True)
+    urllib.request.urlretrieve(url, font_path)
+    size_kb = os.path.getsize(font_path) / 1024
+    print(f"  Saved: {font_path} ({size_kb:.0f} KB)")
+    return font_path
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+
+def parse_ranges(range_strs):
+    """Parse range specifications into (start, end) tuples."""
+    result = []
+    for s in range_strs:
+        s = s.strip().lower()
+        if s in RANGE_PRESETS:
+            result.extend(RANGE_PRESETS[s])
+        elif "-" in s and s.startswith("0x"):
+            # Hex range: 0x0020-0x007E
+            parts = s.split("-", 1)
+            result.append((int(parts[0], 16), int(parts[1], 16)))
+        elif s.startswith("0x"):
+            # Single codepoint
+            cp = int(s, 16)
+            result.append((cp, cp))
+        else:
+            print(f"WARNING: unknown range '{s}', skipping")
+    # Sort and merge overlapping ranges
+    result.sort()
+    merged = []
+    for start, end in result:
+        if merged and start <= merged[-1][1] + 1:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def main():
+    p = argparse.ArgumentParser(description="Generate MBF bitmap font from TTF/OTF")
+    p.add_argument("font", nargs="?", help="Path to TTF/OTF font file (Regular)")
+    p.add_argument(
+        "size", nargs="?", type=int, default=20, help="Pixel size (default: 20)"
+    )
+    p.add_argument("-o", "--output", required=True, help="Output .mbf file path")
+    p.add_argument(
+        "--ranges",
+        nargs="+",
+        default=DEFAULT_RANGES,
+        help=(
+            f"Unicode ranges (presets: {', '.join(RANGE_PRESETS.keys())}; "
+            "or hex: 0x0020-0x007E)"
+        ),
+    )
+    p.add_argument("--header", help="Also output C++ header with embedded font data")
+    p.add_argument(
+        "--noto-serif",
+        action="store_true",
+        help="Download and use Noto Serif Regular (if no font specified)",
+    )
+    p.add_argument("--bold", help="Path to Bold TTF/OTF font file")
+    p.add_argument("--italic", help="Path to Italic TTF/OTF font file")
+    p.add_argument("--bold-italic", help="Path to BoldItalic TTF/OTF font file")
+    p.add_argument(
+        "--with-styles",
+        action="store_true",
+        help="Auto-download and include Bold, Italic, BoldItalic Noto Serif variants",
+    )
+    p.add_argument(
+        "--bundle",
+        action="store_true",
+        help="Generate 5-size .mbf files + combined FNTS bundle (.mfb)",
+    )
+    p.add_argument(
+        "--bundle-sizes",
+        type=int,
+        nargs="+",
+        default=[20, 22, 24, 26, 28],
+        help="Font sizes for --bundle mode (default: 20 22 24 26 28). "
+        "The second value is 'Normal' (default body text).",
+    )
+    p.add_argument(
+        "--font-name",
+        help="Font family name to embed in the FNTS bundle header "
+        "(default: derived from font filename, e.g. 'Bookerly').",
+    )
+    args = p.parse_args()
+
+    # Resolve font paths
+    tools_dir = os.path.dirname(os.path.abspath(__file__))
+    fonts_cache = os.path.join(tools_dir, ".font-cache")
+
+    if args.font:
+        font_path = args.font
+    else:
+        font_path = os.path.join(fonts_cache, "NotoSerif-Regular.ttf")
+        ensure_font(font_path, NOTO_SERIF_URL, "Noto Serif Regular")
+
+    if not os.path.isfile(font_path):
+        print(f"ERROR: font file not found: {font_path}")
+        sys.exit(1)
+
+    # Resolve style font paths
+    bold_path = args.bold
+    italic_path = args.italic
+    bold_italic_path = args.bold_italic
+
+    if args.with_styles:
+        if not bold_path:
+            bold_path = os.path.join(fonts_cache, "NotoSerif-Bold.ttf")
+            ensure_font(bold_path, NOTO_SERIF_BOLD_URL, "Noto Serif Bold")
+        if not italic_path:
+            italic_path = os.path.join(fonts_cache, "NotoSerif-Italic.ttf")
+            ensure_font(italic_path, NOTO_SERIF_ITALIC_URL, "Noto Serif Italic")
+        if not bold_italic_path:
+            bold_italic_path = os.path.join(fonts_cache, "NotoSerif-BoldItalic.ttf")
+            ensure_font(
+                bold_italic_path, NOTO_SERIF_BOLD_ITALIC_URL, "Noto Serif BoldItalic"
+            )
+
+    # Parse ranges
+    codepoint_ranges = parse_ranges(args.ranges)
+    total_codepoints = sum(e - s + 1 for s, e in codepoint_ranges)
+    print(f"Font: {os.path.basename(font_path)}")
+    print(f"Size: {args.size}px")
+    print(f"Ranges: {len(codepoint_ranges)} blocks, {total_codepoints} codepoints")
+
+    # Check if multi-style
+    has_extra_styles = bold_path or italic_path or bold_italic_path
+
+    if has_extra_styles:
+        faces = {"regular": freetype.Face(font_path)}
+        if bold_path and os.path.isfile(bold_path):
+            faces["bold"] = freetype.Face(bold_path)
+            print(f"Bold: {os.path.basename(bold_path)}")
+        if italic_path and os.path.isfile(italic_path):
+            faces["italic"] = freetype.Face(italic_path)
+            print(f"Italic: {os.path.basename(italic_path)}")
+        if bold_italic_path and os.path.isfile(bold_italic_path):
+            faces["bold_italic"] = freetype.Face(bold_italic_path)
+            print(f"BoldItalic: {os.path.basename(bold_italic_path)}")
+
+        if args.bundle:
+            _generate_bundle(faces, args, codepoint_ranges, multi_style=True)
+            return
+
+        mbf_data, stats = build_multi_style_mbf(faces, args.size, codepoint_ranges)
+    else:
+        face = freetype.Face(font_path)
+
+        if args.bundle:
+            _generate_bundle(
+                {"regular": face}, args, codepoint_ranges, multi_style=False
+            )
+            return
+
+        mbf_data, stats = build_mbf(face, args.size, codepoint_ranges)
+
+    # Write output
+    os.makedirs(os.path.dirname(os.path.abspath(args.output)) or ".", exist_ok=True)
+    with open(args.output, "wb") as f:
+        f.write(mbf_data)
+
+    # Stats
+    print(f"\nGenerated: {args.output}")
+    if "num_styles" in stats:
+        print(f"  Styles:   {stats['num_styles']} ({', '.join(stats['style_names'])})")
+    print(f"  Ranges:   {stats['num_ranges']}")
+    print(
+        f"  Glyphs:   {stats['num_glyphs']} total, {stats['rendered_glyphs']} rendered"
+    )
+    print(f"  Height:   {stats['glyph_height']}px max, baseline={stats['baseline']}px")
+    print(f"  Y-advance: {stats['y_advance']}px")
+    print(f"  Bitmaps:  {stats['bitmap_bytes']} bytes")
+    print(
+        f"  Total:    {stats['total_bytes']} bytes ({stats['total_bytes']/1024:.1f} KB)"
+    )
+
+    # Optional C++ header
+    if args.header:
+        _write_cpp_header(args.header, mbf_data, os.path.basename(args.output))
+        print(f"  Header:   {args.header}")
+
+
+def _generate_bundle(faces, args, codepoint_ranges, multi_style):
+    """Generate Small/Normal/Large .mbf files and a combined FNTS .mfb bundle."""
+    out_dir = os.path.dirname(os.path.abspath(args.output)) or "."
+    os.makedirs(out_dir, exist_ok=True)
+
+    # Names for the font sizes (indexed by position in the list)
+    size_names = [
+        "Small",
+        "Normal",
+        "Large",
+        "XLarge",
+        "XXLarge",
+        "Size5",
+        "Size6",
+        "Size7",
+        "Size8",
+        "Size9",
+    ]
+    sizes = list(zip(size_names, args.bundle_sizes))
+
+    mbf_files = []  # (label, px_size, mbf_bytes, stats)
+
+    for label, px_size in sizes:
+        print(f"\n{'='*40}")
+        print(f"  {label} ({px_size}px)")
+        print(f"{'='*40}")
+        if multi_style:
+            data, stats = build_multi_style_mbf(faces, px_size, codepoint_ranges)
+        else:
+            face = faces["regular"]
+            data, stats = build_mbf(face, px_size, codepoint_ranges)
+
+        out_path = os.path.join(out_dir, f"font-{label.lower()}.mbf")
+        with open(out_path, "wb") as f:
+            f.write(data)
+
+        kb = len(data) / 1024
+        print(f"  Glyphs:   {stats['rendered_glyphs']} rendered")
+        print(f"  Height:   {stats['glyph_height']}px, baseline={stats['baseline']}px")
+        print(f"  File:     {out_path} ({kb:.1f} KB)")
+        mbf_files.append((label, px_size, data, stats))
+
+    # Derive font name: --font-name, or stem of the font file path.
+    if args.font_name:
+        font_name = args.font_name
+    else:
+        font_name = os.path.splitext(os.path.basename(args.font or "font"))[0]
+        # Strip style suffixes like "-Regular", " Regular" etc.
+        for suffix in ["-Regular", " Regular", "-regular"]:
+            if font_name.endswith(suffix):
+                font_name = font_name[: -len(suffix)]
+                break
+
+    # Build FNTS bundle (version 1):
+    #   [4 bytes] "FNTS" magic
+    #   [1 byte]  num_fonts
+    #   [1 byte]  version (1)
+    #   [2 bytes] reserved
+    #   [32 bytes] font_name (null-terminated, zero-padded)
+    #   [num × 4 bytes] sizes (uint32 LE)
+    #   [font data concatenated]
+    num = len(mbf_files)
+    bundle = bytearray()
+    bundle.extend(b"FNTS")
+    bundle.append(num)
+    bundle.append(1)  # version
+    bundle.extend(bytes(2))  # reserved
+    name_bytes = font_name.encode("utf-8")[:31]  # max 31 chars + null
+    bundle.extend(name_bytes)
+    bundle.extend(bytes(32 - len(name_bytes)))  # pad to 32 bytes
+    for _, _, data, _ in mbf_files:
+        bundle.extend(struct.pack("<I", len(data)))
+    for _, _, data, _ in mbf_files:
+        bundle.extend(data)
+
+    bundle_path = os.path.join(out_dir, "font-bundle.mfb")
+    with open(bundle_path, "wb") as f:
+        f.write(bundle)
+
+    print(f"\n{'='*40}")
+    print(f"  FNTS Bundle")
+    print(f"{'='*40}")
+    print(f"  File:   {bundle_path} ({len(bundle)/1024:.1f} KB)")
+    for label, px_size, data, stats in mbf_files:
+        print(
+            f"  {label:7s} ({px_size:2d}px): {len(data)/1024:6.1f} KB, "
+            f"{stats['rendered_glyphs']} glyphs"
+        )
+    print(f"\nUpload to device:")
+    print(f"  python tools/serial_cmd.py --upload-font {bundle_path}")
+
+
+def _write_cpp_header(path, data, name):
+    """Write a C++ header embedding the font data as a constexpr array."""
+    os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
+    var_name = "kFontData_" + name.replace(".", "_").replace("-", "_")
+    with open(path, "w") as f:
+        f.write("#pragma once\n\n")
+        f.write("#include <cstddef>\n")
+        f.write("#include <cstdint>\n\n")
+        f.write(f"// Auto-generated from {name}\n")
+        f.write(f"// Size: {len(data)} bytes\n\n")
+        f.write(f"alignas(4) static constexpr uint8_t {var_name}[] = {{\n")
+        for i in range(0, len(data), 16):
+            chunk = data[i : i + 16]
+            hex_str = ", ".join(f"0x{b:02X}" for b in chunk)
+            f.write(f"    {hex_str},\n")
+        f.write("};\n")
+        f.write(f"static constexpr size_t {var_name}_size = sizeof({var_name});\n")
+
+
+if __name__ == "__main__":
+    main()

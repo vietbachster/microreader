@@ -287,8 +287,12 @@ CssRule CssRule::parse(const char* decl, size_t length, const CssConfig& config)
       } else if (key == "font-size") {
         if (value == "small" || value == "x-small" || value == "xx-small" || value == "smaller")
           rule.font_size = FontSize::Small;
-        else if (value == "large" || value == "x-large" || value == "xx-large" || value == "larger")
+        else if (value == "large" || value == "larger")
           rule.font_size = FontSize::Large;
+        else if (value == "x-large")
+          rule.font_size = FontSize::XLarge;
+        else if (value == "xx-large")
+          rule.font_size = FontSize::XXLarge;
         else if (value == "medium" || value == "normal")
           rule.font_size = FontSize::Normal;
         else {
@@ -297,43 +301,59 @@ CssRule CssRule::parse(const char* decl, size_t length, const CssConfig& config)
           if (value.size() > 1 && value.back() == '%') {
             float pct = std::strtof(value.c_str(), &end);
             if (end != value.c_str()) {
-              if (pct < 85.0f)
+              if (pct < 90.0f)
                 rule.font_size = FontSize::Small;
-              else if (pct > 115.0f)
-                rule.font_size = FontSize::Large;
-              else
+              else if (pct <= 105.0f)
                 rule.font_size = FontSize::Normal;
+              else if (pct <= 115.0f)
+                rule.font_size = FontSize::Large;
+              else if (pct <= 130.0f)
+                rule.font_size = FontSize::XLarge;
+              else
+                rule.font_size = FontSize::XXLarge;
             }
           } else if (value.size() > 2 && value.substr(value.size() - 2) == "em") {
             float em = std::strtof(value.c_str(), &end);
             if (end != value.c_str()) {
-              if (em < 0.85f)
+              if (em < 0.90f)
                 rule.font_size = FontSize::Small;
-              else if (em > 1.15f)
-                rule.font_size = FontSize::Large;
-              else
+              else if (em <= 1.05f)
                 rule.font_size = FontSize::Normal;
+              else if (em <= 1.15f)
+                rule.font_size = FontSize::Large;
+              else if (em <= 1.30f)
+                rule.font_size = FontSize::XLarge;
+              else
+                rule.font_size = FontSize::XXLarge;
             }
           } else if (value.size() > 3 && value.substr(value.size() - 3) == "rem") {
             float rem = std::strtof(value.c_str(), &end);
             if (end != value.c_str()) {
-              if (rem < 0.85f)
+              if (rem < 0.90f)
                 rule.font_size = FontSize::Small;
-              else if (rem > 1.15f)
-                rule.font_size = FontSize::Large;
-              else
+              else if (rem <= 1.05f)
                 rule.font_size = FontSize::Normal;
+              else if (rem <= 1.15f)
+                rule.font_size = FontSize::Large;
+              else if (rem <= 1.30f)
+                rule.font_size = FontSize::XLarge;
+              else
+                rule.font_size = FontSize::XXLarge;
             }
           } else if (value.size() > 2 && value.substr(value.size() - 2) == "pt") {
             float pt = std::strtof(value.c_str(), &end);
             if (end != value.c_str()) {
               float ratio = pt / 12.0f;
-              if (ratio < 0.85f)
+              if (ratio < 0.90f)
                 rule.font_size = FontSize::Small;
-              else if (ratio > 1.15f)
-                rule.font_size = FontSize::Large;
-              else
+              else if (ratio <= 1.05f)
                 rule.font_size = FontSize::Normal;
+              else if (ratio <= 1.15f)
+                rule.font_size = FontSize::Large;
+              else if (ratio <= 1.30f)
+                rule.font_size = FontSize::XLarge;
+              else
+                rule.font_size = FontSize::XXLarge;
             }
           }
         }

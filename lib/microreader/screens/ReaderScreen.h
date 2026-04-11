@@ -3,6 +3,7 @@
 #include <memory>
 
 #include "../Input.h"
+#include "../content/BitmapFont.h"
 #include "../content/Book.h"
 #include "../content/TextLayout.h"
 #include "../content/mrb/MrbConverter.h"
@@ -28,6 +29,18 @@ class ReaderScreen final : public IScreen {
     return path_ != nullptr;
   }
 
+  // Set the proportional bitmap font for rendering. If null, falls back to
+  // the builtin 8×8 bitmap font at 2× scale. The font data must outlive
+  // this screen.
+  void set_font(const BitmapFont* font) {
+    font_set_.set(FontSize::Normal, font);
+  }
+
+  // Set the full font set (Small/Normal/Large). Font data must outlive this screen.
+  void set_fonts(const BitmapFontSet* fonts) {
+    ext_font_set_ = fonts;
+  }
+
   const char* name() const override {
     return "Reader";
   }
@@ -40,9 +53,11 @@ class ReaderScreen final : public IScreen {
   static constexpr int kScale = 2;
   static constexpr int kGlyphW = 8;
   static constexpr int kGlyphH = 8;
-  static constexpr int kPadding = 20;
+  static constexpr int kPadding = 12;
   static constexpr int kParaSpacing = 12;
 
+  BitmapFontSet font_set_;                       // owned set (for single-font set_font() path)
+  const BitmapFontSet* ext_font_set_ = nullptr;  // external set (from set_fonts())
   const char* path_ = nullptr;
   std::string mrb_path_;
   DrawBuffer* buf_ = nullptr;  // set in start(), cleared in stop()

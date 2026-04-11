@@ -82,9 +82,13 @@ struct FixedFont : IFont {
   uint16_t scale_height(FontSize size) const {
     switch (size) {
       case FontSize::Small:
-        return line_height * 3 / 4;
+        return line_height * 9 / 10;  // 90% (20/22)
       case FontSize::Large:
-        return line_height * 5 / 4;
+        return line_height * 11 / 10;  // 110% (24/22)
+      case FontSize::XLarge:
+        return line_height * 12 / 10;  // 120% (26/22)
+      case FontSize::XXLarge:
+        return line_height * 13 / 10;  // 130% (28/22)
       default:
         return line_height;
     }

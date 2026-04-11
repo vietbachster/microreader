@@ -377,11 +377,17 @@ static PageContent assemble_page(const PageOptions& opts, const IFont& font, IPa
 
   uint16_t y = 0;
   uint16_t prev_para = UINT16_MAX;
+  bool is_chapter_start = (start.paragraph == 0 && start.line == 0);
 
   for (auto& item : items) {
     // Paragraph spacing on transitions between different paragraphs
     if (prev_para != UINT16_MAX && item.para_idx != prev_para) {
       y += source.paragraph(item.para_idx).spacing_before.value_or(opts.para_spacing);
+    } else if (prev_para == UINT16_MAX && is_chapter_start) {
+      // First paragraph at chapter start: apply explicit top margin
+      auto sb = source.paragraph(item.para_idx).spacing_before;
+      if (sb.has_value())
+        y += *sb;
     }
 
     switch (item.kind) {
@@ -412,11 +418,11 @@ static PageContent assemble_page(const PageOptions& opts, const IFont& font, IPa
   if (page.text_items.empty() && !page.image_items.empty()) {
     page.vertical_offset = static_cast<uint16_t>(opts.height > y ? (opts.height - y) / 2 : 0);
   }
-  // Sparse text at end of single-page chapter: center on full screen.
-  else if (center_sparse_text && at_chapter_end && !page.text_items.empty() && page.image_items.empty() &&
-           y <= opts.height / 2) {
-    page.vertical_offset = static_cast<uint16_t>((opts.height - y) / 2);
-  }
+  // // Sparse text at end of single-page chapter: center on full screen.
+  // else if (center_sparse_text && at_chapter_end && !page.text_items.empty() && page.image_items.empty() &&
+  //          y <= opts.height / 2) {
+  //   page.vertical_offset = static_cast<uint16_t>((opts.height - y) / 2);
+  // }
 
   return page;
 }
@@ -449,9 +455,19 @@ PageContent layout_page(const IFont& font, const PageOptions& opts, IParagraphSo
   };
   std::vector<PendingInlineImage> pending_inline_images;
 
+  bool is_chapter_start = (start.paragraph == 0 && start.line == 0);
+
   for (size_t pi = start.paragraph; pi < para_count; ++pi) {
     const auto& para = source.paragraph(pi);
-    uint16_t spacing = has_content ? para.spacing_before.value_or(opts.para_spacing) : 0;
+    uint16_t spacing;
+    if (has_content) {
+      spacing = para.spacing_before.value_or(opts.para_spacing);
+    } else if (is_chapter_start && para.spacing_before.has_value()) {
+      // First paragraph at chapter start: respect explicit top margin
+      spacing = *para.spacing_before;
+    } else {
+      spacing = 0;
+    }
 
     switch (para.type) {
       case ParagraphType::Text: {
@@ -851,6 +867,26 @@ PageContent layout_page_backward(const IFont& font, const PageOptions& opts, IPa
 
   PagePosition start_pos = {items.front().para_idx, items.front().line_idx};
   bool at_chapter_end = (start_pos == PagePosition{0, 0} && end.paragraph >= para_count);
+
+  // If backward navigation reached paragraph 0 line 0, account for first
+  // paragraph's top margin in the height budget so assemble_page stays in bounds.
+  if (start_pos.paragraph == 0 && start_pos.line == 0) {
+    auto sb = source.paragraph(0).spacing_before;
+    if (sb.has_value()) {
+      if (total_height + *sb <= page_height) {
+        total_height += *sb;
+      } else {
+        // Top margin doesn't fit — remove items from the front (top of page)
+        // until it does, so the page doesn't overflow.
+        while (!items.empty() && total_height + *sb > page_height) {
+          total_height -= items.front().height;
+          items.erase(items.begin());
+        }
+        if (!items.empty())
+          start_pos = {items.front().para_idx, items.front().line_idx};
+      }
+    }
+  }
 
   return assemble_page(opts, font, source, items, start_pos, end, at_chapter_end, false);
 }

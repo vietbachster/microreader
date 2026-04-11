@@ -35,6 +35,10 @@ class BookSelectScreen final : public IScreen {
     return chosen_;
   }
 
+  void set_reader_font(const BitmapFontSet* fonts) {
+    reader_.set_fonts(fonts);
+  }
+
   void start(DrawBuffer& buf) override;
   void stop() override;
   bool update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& runtime) override;

@@ -827,20 +827,30 @@ TEST(TextLayout, FixedFontSizeScaling) {
             font8.char_width('A', FontStyle::Regular, FontSize::Normal));
   EXPECT_EQ(font8.char_width('A', FontStyle::Regular, FontSize::Large),
             font8.char_width('A', FontStyle::Regular, FontSize::Normal));
+  EXPECT_EQ(font8.char_width('A', FontStyle::Regular, FontSize::XLarge),
+            font8.char_width('A', FontStyle::Regular, FontSize::Normal));
+  EXPECT_EQ(font8.char_width('A', FontStyle::Regular, FontSize::XXLarge),
+            font8.char_width('A', FontStyle::Regular, FontSize::Normal));
 
   // y_advance still scales (line heights can vary without causing overlap).
   EXPECT_LT(font8.y_advance(FontSize::Small), font8.y_advance(FontSize::Normal));
   EXPECT_GT(font8.y_advance(FontSize::Large), font8.y_advance(FontSize::Normal));
+  EXPECT_GT(font8.y_advance(FontSize::XLarge), font8.y_advance(FontSize::Large));
+  EXPECT_GT(font8.y_advance(FontSize::XXLarge), font8.y_advance(FontSize::XLarge));
 
   // Width: always 8 regardless of size
   EXPECT_EQ(font8.char_width('A', FontStyle::Regular, FontSize::Small), 8);
   EXPECT_EQ(font8.char_width('A', FontStyle::Regular, FontSize::Normal), 8);
   EXPECT_EQ(font8.char_width('A', FontStyle::Regular, FontSize::Large), 8);
+  EXPECT_EQ(font8.char_width('A', FontStyle::Regular, FontSize::XLarge), 8);
+  EXPECT_EQ(font8.char_width('A', FontStyle::Regular, FontSize::XXLarge), 8);
 
-  // Line heights: 16*3/4=12, 16, 16*5/4=20
-  EXPECT_EQ(font8.y_advance(FontSize::Small), 12);
+  // Line heights: 16*90%=14, 16, 16*110%=17, 16*120%=19, 16*130%=20
+  EXPECT_EQ(font8.y_advance(FontSize::Small), 14);
   EXPECT_EQ(font8.y_advance(FontSize::Normal), 16);
-  EXPECT_EQ(font8.y_advance(FontSize::Large), 20);
+  EXPECT_EQ(font8.y_advance(FontSize::Large), 17);
+  EXPECT_EQ(font8.y_advance(FontSize::XLarge), 19);
+  EXPECT_EQ(font8.y_advance(FontSize::XXLarge), 20);
 }
 
 // ---------------------------------------------------------------------------
@@ -1106,20 +1116,60 @@ TEST(PageLayout, ImageOnlyWithPaddingCenteredOnFullScreen) {
 }
 
 TEST(PageLayout, SparseTextVerticallyCentered) {
-  // A single short line on a tall page → vertically centered
+  // A single short line on a tall page — no centering (centering was removed)
   Chapter ch;
   TextParagraph tp;
   tp.runs.push_back(microreader::Run("Hi", FontStyle::Regular, false));
   ch.paragraphs.push_back(Paragraph::make_text(std::move(tp)));
 
-  // 16px of text on 200px page → centered
+  // 16px of text on 200px page → NOT centered (flush to top)
   PageOptions opts{200, 200, 0, 0};
   auto page = layout_page(font8, opts, ch, PagePosition(0, 0));
 
   ASSERT_EQ(page.text_items.size(), 1);
   EXPECT_TRUE(page.at_chapter_end);
-  // 16px text on 200px → offset = (200-16)/2 = 92
-  EXPECT_EQ(page.vertical_offset, 92);
+  EXPECT_EQ(page.vertical_offset, opts.effective_padding_top());
+}
+
+TEST(PageLayout, FirstParagraphTopMarginRespected) {
+  // First paragraph with explicit spacing_before (from CSS margin-top)
+  // should push content down at the start of a chapter.
+  Chapter ch;
+  TextParagraph tp;
+  tp.runs.push_back(microreader::Run("Dedication text", FontStyle::Regular, false));
+  auto para = Paragraph::make_text(std::move(tp));
+  para.spacing_before = 100;  // 100px top margin
+  ch.paragraphs.push_back(std::move(para));
+
+  PageOptions opts{200, 400, 10, 8};
+  auto page = layout_page(font8, opts, ch, PagePosition(0, 0));
+
+  ASSERT_EQ(page.text_items.size(), 1);
+  // Text should start at y=100 (the spacing_before), not y=0
+  EXPECT_EQ(page.text_items[0].y_offset, 100);
+}
+
+TEST(PageLayout, FirstParagraphTopMarginNotAppliedMidChapter) {
+  // spacing_before on a paragraph that's NOT at the start of a chapter
+  // should only apply default para_spacing when starting mid-chapter.
+  Chapter ch;
+  TextParagraph tp1;
+  tp1.runs.push_back(microreader::Run("First paragraph with lots of text to fill a page and force a page break somewhere in the middle of the content flow", FontStyle::Regular, false));
+  ch.paragraphs.push_back(Paragraph::make_text(std::move(tp1)));
+
+  TextParagraph tp2;
+  tp2.runs.push_back(microreader::Run("Second paragraph", FontStyle::Regular, false));
+  auto para2 = Paragraph::make_text(std::move(tp2));
+  para2.spacing_before = 100;
+  ch.paragraphs.push_back(std::move(para2));
+
+  // Start from paragraph 1 (not chapter start)
+  PageOptions opts{200, 400, 10, 8};
+  auto page = layout_page(font8, opts, ch, PagePosition(1, 0));
+
+  ASSERT_EQ(page.text_items.size(), 1);
+  // Should NOT have the 100px top margin since we're mid-chapter
+  EXPECT_EQ(page.text_items[0].y_offset, 0);
 }
 
 TEST(PageLayout, FullPageTextNotVerticallyCentered) {

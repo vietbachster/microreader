@@ -28,12 +28,17 @@ void Application::start(DrawBuffer& buf) {
   std::srand(static_cast<unsigned>(std::time(nullptr)));
 #endif
 
+  if (reader_font_)
+    menu_.book_select()->set_reader_font(reader_font_);
+
   screen_mgr_.push(&menu_, buf);
   buf.full_refresh();
 }
 
 void Application::auto_open_book(const char* epub_path, DrawBuffer& buf) {
   auto_reader_.set_path(epub_path);
+  if (reader_font_)
+    auto_reader_.set_fonts(reader_font_);
   screen_mgr_.push(&auto_reader_, buf);
   buf.refresh();
 }

@@ -7,10 +7,12 @@
 #ifndef QEMU_BUILD
 #include "hal/usb_serial_jtag_ll.h"
 #endif
+#include "font_partition.h"
 #include "input.h"
 #include "microreader/Application.h"
 #include "microreader/HeapLog.h"
 #include "microreader/Loop.h"
+#include "microreader/content/BitmapFont.h"
 #include "microreader/content/Book.h"
 #include "microreader/content/mrb/MrbConverter.h"
 #include "microreader/display/DrawBuffer.h"
@@ -80,6 +82,75 @@ extern "C" void app_main(void) {
   ESP_LOGI("mem", "after serial_start: free=%lu largest=%lu", (unsigned long)esp_get_free_heap_size(),
            (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
 
+  // Try to mmap fonts from the spiffs partition (zero-RAM, XIP access).
+  // Expects a v1 FNTS bundle containing up to kFontSizeCount sizes
+  // (Small/Normal/Large/XLarge/XXLarge) with an embedded font name.
+  static FontPartition font_part;
+  static microreader::BitmapFont prop_fonts[microreader::kFontSizeCount];
+  static microreader::BitmapFontSet font_set;
+
+  auto load_fonts = [&]() {
+    for (auto& f : prop_fonts)
+      f = microreader::BitmapFont();
+    font_set = microreader::BitmapFontSet();
+
+    const uint8_t* d = font_part.data;
+    size_t sz = font_part.size;
+
+    if (sz < 40 || memcmp(d, "FNTS", 4) != 0 || d[5] < 1) {
+      ESP_LOGE("font", "Invalid font partition (expected FNTS v1 bundle)");
+      return;
+    }
+
+    // FNTS v1: [FNTS:4][num:1][version:1][res:2][name:32][num×size:4][data...]
+    uint8_t num = d[4];
+    if (num > microreader::kFontSizeCount)
+      num = microreader::kFontSizeCount;
+
+    char font_name[33] = {};
+    memcpy(font_name, d + 8, 32);
+    font_name[32] = '\0';
+    ESP_LOGI("font", "Bundle font: \"%s\" (v%u, %u sizes)", font_name, d[5], num);
+
+    constexpr size_t kSizeTableOff = 8 + 32;
+    uint32_t sizes[microreader::kFontSizeCount] = {};
+    for (int i = 0; i < num; i++) {
+      const uint8_t* p = d + kSizeTableOff + i * 4;
+      sizes[i] = p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24);
+    }
+    size_t off = kSizeTableOff + static_cast<size_t>(num) * 4;
+    for (int i = 0; i < num; i++) {
+      if (off + sizes[i] > sz)
+        break;
+      prop_fonts[i].init(d + off, sizes[i]);
+      off += sizes[i];
+    }
+
+    static constexpr microreader::FontSize kAllSizes[] = {microreader::FontSize::Small, microreader::FontSize::Normal,
+                                                          microreader::FontSize::Large, microreader::FontSize::XLarge,
+                                                          microreader::FontSize::XXLarge};
+    for (int i = 0; i < microreader::kFontSizeCount; i++)
+      font_set.set(kAllSizes[i], &prop_fonts[i]);
+  };
+
+  if (font_part.mmap()) {
+    load_fonts();
+    if (font_set.valid()) {
+      static const char* names[] = {"Small", "Normal", "Large", "XLarge", "XXLarge"};
+      for (int i = 0; i < microreader::kFontSizeCount; i++) {
+        if (prop_fonts[i].valid())
+          ESP_LOGI("font", "%s: %u glyphs, height=%u baseline=%u", names[i], (unsigned)prop_fonts[i].num_glyphs(),
+                   (unsigned)prop_fonts[i].glyph_height(), (unsigned)prop_fonts[i].baseline());
+      }
+      app.set_reader_font(&font_set);
+    } else {
+      ESP_LOGW("font", "no valid Normal font found");
+    }
+  }
+
+  ESP_LOGI("mem", "after font mmap: free=%lu largest=%lu", (unsigned long)esp_get_free_heap_size(),
+           (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+
   app.start(buf);
 
   ESP_LOGI("mem", "after app.start: free=%lu largest=%lu", (unsigned long)esp_get_free_heap_size(),
@@ -89,6 +160,18 @@ extern "C" void app_main(void) {
   input.clear_button(microreader::Button::Power);
 
   while (runtime.should_continue() && app.running()) {
+    // Check if a new font was uploaded via serial.
+    if (g_font_uploaded) {
+      g_font_uploaded = false;
+      if (font_part.mmap()) {
+        load_fonts();
+        if (font_set.valid()) {
+          ESP_LOGI("font", "re-loaded fonts after upload");
+          app.set_reader_font(&font_set);
+        }
+      }
+    }
+
     // Dispatch serial path commands (open book, benchmarks).
     {
       const char* cmd_path = nullptr;

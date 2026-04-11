@@ -4,6 +4,10 @@
 #include <cstring>
 #include <string>
 
+#ifndef ESP_PLATFORM
+#include <chrono>
+#endif
+
 #ifdef ESP_PLATFORM
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -227,7 +231,16 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
   static constexpr int W = DrawBuffer::kWidth;
   static constexpr int H = DrawBuffer::kHeight;
 
-  FixedFont font(kGlyphW * kScale, kGlyphH * kScale + 4);
+#ifdef ESP_PLATFORM
+  int64_t t0 = esp_timer_get_time();
+#else
+  auto t0 = std::chrono::high_resolution_clock::now();
+#endif
+
+  // Use proportional font if available, otherwise fallback to fixed.
+  FixedFont fixed_font(kGlyphW * kScale, kGlyphH * kScale + 4);
+  const BitmapFontSet* fset = ext_font_set_ ? ext_font_set_ : (font_set_.valid() ? &font_set_ : nullptr);
+  IFont& font = fset ? static_cast<IFont&>(const_cast<BitmapFontSet&>(*fset)) : static_cast<IFont&>(fixed_font);
   PageOptions opts(static_cast<uint16_t>(W), static_cast<uint16_t>(H), kPadding, kParaSpacing, Alignment::Start);
 
   page_ = layout_page(font, opts, *chapter_src_, page_pos_,
@@ -259,6 +272,9 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
   // ── Build word list ─────────────────────────────────────────────────────
   struct DrawWord {
     int x, y, len, glyph_advance;
+    FontStyle style;
+    FontSize size;
+    VerticalAlign vertical_align;
     char text[64];
   };
   std::vector<DrawWord> words;
@@ -272,6 +288,9 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
         dw.len = 63;
       std::memcpy(dw.text, w.text, dw.len);
       dw.text[dw.len] = '\0';
+      dw.style = w.style;
+      dw.size = w.size;
+      dw.vertical_align = w.vertical_align;
       dw.glyph_advance = font.char_width(' ', w.style, w.size);
       words.push_back(dw);
     }
@@ -285,7 +304,20 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
   for (const auto& dw : words) {
     if (dw.len == 0)
       continue;
-    buf.draw_text_no_bg(dw.x, dw.y, dw.text, false /*black*/, kScale);
+    if (fset) {
+      // y_offset is line top; draw_text_proportional expects baseline Y.
+      // Use Normal baseline for all sizes so mixed-size text shares one baseline.
+      int baseline_y = dw.y + fset->baseline(FontSize::Normal);
+      // Vertical shift for superscript/subscript.
+      if (dw.vertical_align == VerticalAlign::Super)
+        baseline_y -= fset->y_advance(FontSize::Normal) * 10 / 100;
+      else if (dw.vertical_align == VerticalAlign::Sub)
+        baseline_y += fset->y_advance(FontSize::Normal) * 20 / 100;
+      buf.draw_text_proportional(dw.x, baseline_y, dw.text, static_cast<size_t>(dw.len), *fset, false /*black*/,
+                                 dw.style, dw.size);
+    } else {
+      buf.draw_text_no_bg(dw.x, dw.y, dw.text, false /*black*/, kScale);
+    }
   }
 
   // Horizontal rules.
@@ -302,6 +334,18 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
       buf.fill_rect(itd.x, itd.y, itd.w, itd.h, false);
     }
   }
+
+  // ── Timing ──────────────────────────────────────────────────────────────
+#ifdef ESP_PLATFORM
+  long render_us = (long)(esp_timer_get_time() - t0);
+  ESP_LOGI("perf", "render_page: %ldus (%ld.%ldms) words=%d images=%d", render_us, render_us / 1000,
+           (render_us % 1000) / 100, (int)words.size(), (int)images.size());
+#else
+  auto t1 = std::chrono::high_resolution_clock::now();
+  auto us = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
+  printf("[perf] render_page: %lldus (%.1fms) words=%d images=%d\n", (long long)us, us / 1000.0, (int)words.size(),
+         (int)images.size());
+#endif
 }
 
 bool ReaderScreen::next_page_() {
@@ -321,7 +365,9 @@ bool ReaderScreen::prev_page_() {
   if (page_pos_ == PagePosition{0, 0}) {
     if (chapter_idx_ > 0) {
       load_chapter_(chapter_idx_ - 1);
-      FixedFont font(kGlyphW * kScale, kGlyphH * kScale + 4);
+      const BitmapFontSet* fset = ext_font_set_ ? ext_font_set_ : (font_set_.valid() ? &font_set_ : nullptr);
+      FixedFont fixed_font(kGlyphW * kScale, kGlyphH * kScale + 4);
+      IFont& font = fset ? static_cast<IFont&>(const_cast<BitmapFontSet&>(*fset)) : static_cast<IFont&>(fixed_font);
       PageOptions opts(static_cast<uint16_t>(DrawBuffer::kWidth), static_cast<uint16_t>(DrawBuffer::kHeight), kPadding,
                        kParaSpacing, Alignment::Start);
       auto para_count = static_cast<uint16_t>(chapter_src_->paragraph_count());
@@ -334,7 +380,9 @@ bool ReaderScreen::prev_page_() {
     return false;
   }
 
-  FixedFont font(kGlyphW * kScale, kGlyphH * kScale + 4);
+  const BitmapFontSet* fset2 = ext_font_set_ ? ext_font_set_ : (font_set_.valid() ? &font_set_ : nullptr);
+  FixedFont fixed_font(kGlyphW * kScale, kGlyphH * kScale + 4);
+  IFont& font = fset2 ? static_cast<IFont&>(const_cast<BitmapFontSet&>(*fset2)) : static_cast<IFont&>(fixed_font);
   PageOptions opts(static_cast<uint16_t>(DrawBuffer::kWidth), static_cast<uint16_t>(DrawBuffer::kHeight), kPadding,
                    kParaSpacing, Alignment::Start);
   auto pc = layout_page_backward(font, opts, *chapter_src_, page_pos_, [this](uint16_t key, uint16_t& w, uint16_t& h) {

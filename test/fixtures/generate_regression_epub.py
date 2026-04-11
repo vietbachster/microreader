@@ -446,8 +446,65 @@ def ch_unicode():
     """Chapter 18: Unicode and special characters."""
     return make_xhtml("Unicode", """\
 <h1>18. Unicode &amp; Special Characters</h1>
+
+<h2>Latin-1 Supplement (U+00A0–00FF)</h2>
 <p>German: Ä Ö Ü ä ö ü ß — Straße, Größe, Übung.</p>
-<p>French: é è ê ë à â ç — Ça va? L'élève, crème brûlée.</p>
+<p>French: é è ê ë à â ç î ï ô ù û — Ça va? L'élève, crème brûlée.</p>
+<p>Spanish: ¿Dónde está la biblioteca? ¡Excelente! Año, señor, niño.</p>
+<p>Portuguese: São Paulo, coração, irmã, avô,ções.</p>
+<p>Scandinavian: Ångström, blåbær, Ærø, fjörd, Ölüdeniz.</p>
+<p>Icelandic: Þetta reddast. Ísland, Eyjafjallajökull, Þór, Ævar, Ö.</p>
+<p>Latin-1 symbols: © ® ™ ° ± × ÷ § ¶ « » ¡ ¿ £ ¥ ¢ µ ¹ ² ³ ½ ¼ ¾.</p>
+
+<h2>Latin Extended-A (U+0100–017F)</h2>
+<p>Polish: Łódź, Świętokrzyski, źródło, żółty, ćma, Wrocław, Gdańsk.</p>
+<p>Czech: Příliš žluťoučký kůň úpěl ďábelské ódy. Říp, Ústí, Brně.</p>
+<p>Slovak: Ľúbostný šťastný ďateľ, žriebä, ťava, Nitra, Žilina.</p>
+<p>Hungarian: Tűzoltóság, Székesfehérvár, Győr, ökör, ütő, Ő, Ű.</p>
+<p>Romanian: Văd că după încheierea lucrărilor, ședința s-a încheiat.</p>
+<p>Turkish: İstanbul, Ankara, güneş, öğretmen, çiçek, Ğ ğ İ ı Ş ş.</p>
+<p>Latvian: Rīga, ķēniņš, ļoti, ņemt, ģimene, āboltiņš.</p>
+<p>Lithuanian: Vilnius, Klaipėda, širdis, žmogus, ūkis, čia.</p>
+<p>Croatian: Čakovec, Đurđevac, Šibenik, Žumberak, ćevapi.</p>
+
+<h2>Latin Extended-B (U+0180–024F)</h2>
+<p>African languages: Ɓ ɓ Ɗ ɗ Ƙ ƙ Ɲ ɲ Ŋ ŋ Ɔ ɔ Ʃ ʃ.</p>
+<p>Pinyin tone marks: ǎ ǐ ǒ ǔ ǖ ǘ ǚ ǜ.</p>
+
+<h2>Greek (U+0370–03FF)</h2>
+<p>Ελληνικά: Η γρήγορη αλεπού πηδά πάνω από το τεμπέλικο σκυλί.</p>
+<p>Alphabet: Α Β Γ Δ Ε Ζ Η Θ Ι Κ Λ Μ Ν Ξ Ο Π Ρ Σ Τ Υ Φ Χ Ψ Ω.</p>
+<p>Lowercase: α β γ δ ε ζ η θ ι κ λ μ ν ξ ο π ρ σ τ υ φ χ ψ ω.</p>
+<p>Math/science: π ≈ 3.14159, Σ (sigma), Δx, Ω (ohm), θ = 45°.</p>
+
+<h2>Cyrillic (U+0400–04FF)</h2>
+<p>Russian: Съешь ещё этих мягких французских булок, да выпей чаю.</p>
+<p>Ukrainian: Щасливий їжак, ґанок, єдність. Їжак з'їв яблуко.</p>
+<p>Bulgarian: Шумно поле. Живот, цвят, чудо, ъгъл.</p>
+<p>Serbian Cyrillic: Ђурђевдан, Љубав, Њушка, Ћуприја, Џеп.</p>
+<p>Alphabet: А Б В Г Д Е Ж З И Й К Л М Н О П Р С Т У Ф Х Ц Ч Ш Щ Ъ Ы Ь Э Ю Я.</p>
+
+<h2>Latin Extended Additional (U+1E00–1EFF) — Vietnamese</h2>
+<p>Vietnamese: Tôi yêu Việt Nam. Hà Nội, Sài Gòn, Đà Nẵng.</p>
+<p>Tones: ả ạ ắ ằ ẳ ẵ ặ ế ề ể ễ ệ ỉ ị ỏ ọ ố ồ ổ ỗ ộ ớ ờ ở ỡ ợ ủ ụ ứ ừ ử ữ ự ỳ ỵ ỷ ỹ.</p>
+
+<h2>General Punctuation (U+2000–206F)</h2>
+<p>Dashes: en–dash, em—dash, figure‒dash, horizontal―bar.</p>
+<p>Quotes: "double curly" 'single curly' „German low-high" «guillemets».</p>
+<p>Dots: Ellipsis… Mid·dot. Bullet•list.</p>
+<p>Spaces: thin\u2009space, hair\u200Aspace, en\u2002space, em\u2003space.</p>
+<p>Other: † dagger, ‡ double dagger, ‰ per mille, ′ prime, ″ double prime.</p>
+
+<h2>Currency Symbols (U+20A0–20CF)</h2>
+<p>€ Euro, ₹ Rupee, ₿ Bitcoin, ₺ Lira, ₴ Hryvnia, ₱ Peso, ₩ Won.</p>
+<p>Prices: €12.50, $99.99, £45.00, ¥2500, ₹750, ₩15000.</p>
+
+<h2>Superscripts, Subscripts &amp; Number Forms</h2>
+<p>Superscripts: ⁰ ¹ ² ³ ⁴ ⁵ ⁶ ⁷ ⁸ ⁹ ⁿ.</p>
+<p>Subscripts: ₀ ₁ ₂ ₃ ₄ ₅ ₆ ₇ ₈ ₉.</p>
+<p>Fractions: ½ ⅓ ⅔ ¼ ¾ ⅕ ⅖ ⅗.</p>
+
+<h2>Entities &amp; Misc</h2>
 <p>Entities: &amp; &lt; &gt; &quot; &apos; &mdash; &ndash; &hellip;</p>
 <p>Non-breaking space: word1&nbsp;word2&nbsp;word3 (should not break).</p>
 <p>Thin space: §§\u200942\u2009b (U+2009 thin space).</p>
@@ -873,6 +930,29 @@ def ch_line_height():
 """, css_link="style.css")
 
 
+def ch_mixed_sizes_baseline():
+    """Chapter 41: Mixed font sizes on one line — baseline alignment test."""
+    return make_xhtml("Mixed Size Baseline", """\
+<h1>41. Mixed Font Sizes — Baseline Alignment</h1>
+
+<p>All sizes inline: Normal <span style="font-size: small">Small</span> Normal <span style="font-size: large">Large</span> Normal <span style="font-size: x-large">XLarge</span> Normal <span style="font-size: xx-large">XXLarge</span> Normal.</p>
+
+<p>The bottoms of all words above should sit on the same baseline, regardless of size.</p>
+
+<p>Small to XXLarge ramp: <span style="font-size: small">Abc</span> <span style="font-size: medium">Abc</span> <span style="font-size: large">Abc</span> <span style="font-size: x-large">Abc</span> <span style="font-size: xx-large">Abc</span>.</p>
+
+<p>Numbers at each size: <span style="font-size: small">123</span> <span style="font-size: medium">123</span> <span style="font-size: large">123</span> <span style="font-size: x-large">123</span> <span style="font-size: xx-large">123</span>.</p>
+
+<p>Mixed with bold: <b style="font-size: small">Bold-S</b> Normal <b style="font-size: large">Bold-L</b> Normal <b style="font-size: xx-large">Bold-XXL</b> Normal.</p>
+
+<p>Mixed with italic: <i style="font-size: small">Italic-S</i> Normal <i style="font-size: x-large">Italic-XL</i> Normal.</p>
+
+<p>Sub and sup mixed with sizes: Normal H<sub>2</sub>O and E=mc<sup>2</sup> plus <span style="font-size: large">Large H<sub>2</sub>O</span> and <span style="font-size: x-large">XL E=mc<sup>2</sup></span>.</p>
+
+<p>All five sizes with descenders: <span style="font-size: small">gypsy</span> <span style="font-size: medium">gypsy</span> <span style="font-size: large">gypsy</span> <span style="font-size: x-large">gypsy</span> <span style="font-size: xx-large">gypsy</span>.</p>
+""", css_link="style.css")
+
+
 # ---------------------------------------------------------------------------
 # Image generation
 # ---------------------------------------------------------------------------
@@ -953,6 +1033,7 @@ def main():
         ("ch38", "ch38_ol_start.xhtml",      "38. OL Start Attribute",    ch_ol_start()),
         ("ch39", "ch39_figcaption.xhtml",    "39. Figure & Figcaption",   ch_figure_figcaption()),
         ("ch40", "ch40_line_height.xhtml",   "40. Line Height",           ch_line_height()),
+        ("ch41", "ch41_mixed_baseline.xhtml", "41. Mixed Size Baseline",   ch_mixed_sizes_baseline()),
     ]
 
     # Build manifest and spine
