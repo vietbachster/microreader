@@ -116,7 +116,6 @@ Button3 = up / prev page
 
 - **DisplayQueue**: dual-buffer (ground_truth + target) phase-based animation. Commands progress over N phases before committing.
 - **Canvas**: z-ordered scene graph with damage-rect redraw. Elements: `CanvasRect`, `CanvasCircle`, `CanvasText`.
-- **Font** (`Font.h`): Static 8×8 bitmap font — `detail::kFont8x8[95][8]`, 95 printable ASCII glyphs (0x20–0x7E). Each glyph = 8 bytes, one byte per row, MSB = leftmost pixel. `draw_char()` / `draw_text()` helpers. Fallback font when no proportional font is loaded.
 - **Proportional font system** (`BitmapFont.h`, `BitmapFontFormat.h`, `DrawBuffer.h`):
   - **MBF format**: Custom binary font format. One file per pixel size, each containing up to 4 styles (Regular/Bold/Italic/BoldItalic). Generated from TTF via `tools/generate_font.py`.
   - **BitmapFont**: Reads MBF data via `init(data, size)`. Zero-heap: all pointers reference the input buffer (works with mmap). Implements `IFont`.
@@ -125,8 +124,8 @@ Button3 = up / prev page
   - **Font sizes**: Small=20px, Normal=22px, Large=24px, XLarge=26px, XXLarge=28px (configurable via `--bundle-sizes` in `generate_font.py`). CSS `font-size` maps to `FontSize` enum in `CssParser.h`. HTML `h1`→XXLarge, `h2`→XLarge, `h3`→Large, `small/sub/sup`→Small.
   - **FNTS bundle**: Multi-font bundle format for ESP32 flash partition. Format: `[FNTS:4][num:1][version:1(=1)][reserved:2][font_name:32][num×size:4][data...]`. Font name is null-terminated, zero-padded to 32 bytes. Uploaded as a single blob via `serial_cmd.py --upload-font`.
   - **ESP32 storage**: Fonts stored in spiffs partition (3.375MB), mmapped via `font_partition.h`. Requires FNTS v1 bundle.
-  - **Desktop**: Loads individual `.mbf` files from `sd/fonts/` (font-small.mbf, font-normal.mbf, font-large.mbf, font-xlarge.mbf, font-xxlarge.mbf).
-  - **Generation**: `python tools/generate_font.py --font <path.ttf> --with-styles --bundle -o sd/fonts/font-normal.mbf` generates all 5 sizes + bundle. Use `--font-name Bookerly` to set the embedded font name.
+  - **Desktop**: Loads individual `.mbf` files from `resources/fonts/` (font-small.mbf, font-normal.mbf, font-large.mbf, font-xlarge.mbf, font-xxlarge.mbf).
+  - **Generation**: `python tools/generate_font.py "resources/fonts/Bookerly.ttf" -o resources/fonts/font-normal.mbf --with-styles --bold "resources/fonts/Bookerly Bold.ttf" --italic "resources/fonts/Bookerly Italic.ttf" --bold-italic "resources/fonts/Bookerly Bold Italic.ttf" --bundle --bundle-sizes 20 22 24 26 28 --font-name Bookerly` generates all 5 sizes + bundle.
 - **Input**: `ButtonState` carries `current` + `pressed_latch`. Auto-repeat at hardware layer (5ms sample on ESP32). Screens use `is_pressed()`.
 - **Loop**: `run_loop()` polls input → app.update() → queue.tick() → wait_next_frame().
 - **Logging** (`HeapLog.h`): `MR_LOGI(tag, fmt, ...)` maps to `ESP_LOGI` on device and `printf("[tag] fmt\n")` on desktop. `HEAP_LOG(tag)` logs free heap + largest block (ESP32-only, no-op on desktop). No `ILogger` abstraction — use these macros directly.

@@ -433,21 +433,34 @@ static void handle_serial_cmd() {
       struct dirent* ent;
       while ((ent = readdir(dir)) != nullptr) {
         size_t len = strlen(ent->d_name);
-        if (len > 5 && (strcmp(ent->d_name + len - 5, ".epub") == 0 || strcmp(ent->d_name + len - 4, ".mrb") == 0)) {
+        if (len > 5 && strcmp(ent->d_name + len - 5, ".epub") == 0) {
           char line[280];
           snprintf(line, sizeof(line), "  %s\n", ent->d_name);
           serial_write(line);
         }
       }
       closedir(dir);
+      // Also list converted .mrb files from /sdcard/.microreader/
+      dir = opendir("/sdcard/.microreader");
+      if (dir) {
+        while ((ent = readdir(dir)) != nullptr) {
+          size_t len = strlen(ent->d_name);
+          if (len > 4 && strcmp(ent->d_name + len - 4, ".mrb") == 0) {
+            char line[280];
+            snprintf(line, sizeof(line), "  .microreader/%s\n", ent->d_name);
+            serial_write(line);
+          }
+        }
+        closedir(dir);
+      }
       serial_write("END\n");
       break;
     }
     case 'C': {
-      // Clear all .mrb files from /sdcard/books/
-      DIR* dir = opendir("/sdcard/books");
+      // Clear all .mrb files from /sdcard/.microreader/
+      DIR* dir = opendir("/sdcard/.microreader");
       if (!dir) {
-        serial_write("ERR:no_books_dir\n");
+        serial_write("CLEARED:0\n");
         return;
       }
       int count = 0;
@@ -456,7 +469,7 @@ static void handle_serial_cmd() {
       while ((ent = readdir(dir)) != nullptr) {
         size_t len = strlen(ent->d_name);
         if (len > 4 && strcmp(ent->d_name + len - 4, ".mrb") == 0) {
-          snprintf(path, sizeof(path), "/sdcard/books/%s", ent->d_name);
+          snprintf(path, sizeof(path), "/sdcard/.microreader/%s", ent->d_name);
           if (remove(path) == 0)
             ++count;
         }

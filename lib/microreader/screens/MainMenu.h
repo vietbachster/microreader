@@ -20,7 +20,10 @@ class MainMenu final : public ListMenuScreen {
 
   void set_books_dir(const char* dir) {
     books_dir_ = dir;
-    settings_.set_books_dir(dir);
+  }
+  void set_data_dir(const char* dir) {
+    reader_.set_data_dir(dir);
+    settings_.set_data_dir(dir);
   }
 
   bool has_books_dir() const {
@@ -51,7 +54,7 @@ class MainMenu final : public ListMenuScreen {
   bool on_back() override;
 
  private:
-  static constexpr int kMaxLabelLen = 28;
+  static constexpr int kMaxLabelLen = 220;
 
   const char* books_dir_ = nullptr;
 

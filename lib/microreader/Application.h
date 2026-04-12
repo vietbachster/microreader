@@ -19,6 +19,9 @@ class Application {
   void set_books_dir(const char* dir) {
     menu_.set_books_dir(dir);
   }
+  void set_data_dir(const char* dir) {
+    menu_.set_data_dir(dir);
+  }
 
   // Set the proportional font set for the reader screen. Must outlive the app.
   void set_reader_font(const BitmapFontSet* fonts) {

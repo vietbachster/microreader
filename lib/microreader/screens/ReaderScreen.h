@@ -29,6 +29,9 @@ class ReaderScreen final : public IScreen {
   bool has_path() const {
     return path_ != nullptr;
   }
+  void set_data_dir(const char* dir) {
+    data_dir_ = dir;
+  }
 
   // Set the proportional bitmap font for rendering. If null, falls back to
   // the builtin 8×8 bitmap font at 2× scale. The font data must outlive
@@ -65,7 +68,9 @@ class ReaderScreen final : public IScreen {
   BitmapFontSet font_set_;                       // owned set (for single-font set_font() path)
   const BitmapFontSet* ext_font_set_ = nullptr;  // external set (from set_fonts())
   const char* path_ = nullptr;
+  const char* data_dir_ = nullptr;
   std::string mrb_path_;
+  std::string book_key_;       // sanitized title, used for .mrb/.pos naming
   DrawBuffer* buf_ = nullptr;  // set in start(), cleared in stop()
   Book book_;
   MrbReader mrb_;
@@ -97,6 +102,8 @@ class ReaderScreen final : public IScreen {
   bool next_page_();
   bool prev_page_();
   void load_chapter_(size_t idx);
+  void save_position_();
+  void load_position_();
 };
 
 }  // namespace microreader

@@ -54,6 +54,10 @@ void Application::update(const ButtonState& buttons, uint32_t dt_ms, DrawBuffer&
   buttons_ = buttons;
 
   if (buttons_.is_pressed(Button::Power)) {
+    // Stop the active screen so it can save state (e.g. reading position).
+    if (IScreen* top = screen_mgr_.top())
+      top->stop();
+
     // Draw checkerboard pattern then full refresh before deep sleep.
     constexpr int kBlock = 80;
     const int W = DrawBuffer::kWidth;

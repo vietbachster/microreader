@@ -73,8 +73,12 @@ extern "C" void app_main(void) {
     // Ensure books directory exists.
     mkdir("/sdcard/books", 0775);
 
+    // Data directory for converted books, settings, reading state.
+    mkdir("/sdcard/.microreader", 0775);
+
     // Register the books directory for the selection screen.
     app.set_books_dir("/sdcard/books");
+    app.set_data_dir("/sdcard/.microreader");
   } else {
     MR_LOGI("app", "SD card not available");
   }

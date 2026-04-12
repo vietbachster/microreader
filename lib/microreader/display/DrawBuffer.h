@@ -7,7 +7,7 @@
 #include <utility>
 
 #include "../content/BitmapFont.h"
-#include "Font.h"
+#include "ui_font_small.h"
 
 namespace microreader {
 
@@ -136,40 +136,27 @@ class DrawBuffer {
     }
   }
 
-  // Draw text with the 8×8 bitmap font, including background fill.
+  // Draw text with the UI font, including background fill.
   // white=true  → white background, black glyphs (normal unselected item).
   // white=false → black background, white glyphs (highlighted selected item).
-  void draw_text(int x, int y, const char* text, bool white, int scale = 1) {
+  // The scale parameter is accepted for API compatibility but ignored.
+  void draw_text(int x, int y, const char* text, bool white, int /*scale*/ = 1) {
     if (!text || !*text)
       return;
-    const char* p = text;
-    size_t glyph_count = 0;
-    while (*p) {
-      const uint8_t b = static_cast<uint8_t>(*p);
-      if (b < 0x80)
-        p += 1;
-      else if (b < 0xE0)
-        p += 2;
-      else if (b < 0xF0)
-        p += 3;
-      else
-        p += 4;
-      ++glyph_count;
-    }
-    if (glyph_count == 0)
-      return;
-    const int gw = 8, gh = 8;
-    const int tw = static_cast<int>(glyph_count) * gw * scale;
-    const int th = gh * scale;
-    fill_rect(x, y, tw, th, white);
-    draw_glyphs_(x, y, text, !white, scale);
+    const BitmapFont& f = ui_font_();
+    const int w = static_cast<int>(f.word_width(text, strlen(text), FontStyle::Regular));
+    const int h = static_cast<int>(f.glyph_height());
+    fill_rect(x, y, w, h, white);
+    draw_text_proportional(x, y + static_cast<int>(f.baseline()), text, f, !white);
   }
 
   // Draw text glyphs only (no background fill). Glyph color = white param.
-  void draw_text_no_bg(int x, int y, const char* text, bool white, int scale = 1) {
+  // The scale parameter is accepted for API compatibility but ignored.
+  void draw_text_no_bg(int x, int y, const char* text, bool white, int /*scale*/ = 1) {
     if (!text || !*text)
       return;
-    draw_glyphs_(x, y, text, white, scale);
+    const BitmapFont& f = ui_font_();
+    draw_text_proportional(x, y + static_cast<int>(f.baseline()), text, f, white);
   }
 
   // Draw a single proportional glyph bitmap at logical (x + x_offset, y + y_offset).
@@ -296,34 +283,10 @@ class DrawBuffer {
     return bufs_[active_idx_];
   }
 
-  // ── Internal draw helpers ───────────────────────────────────────────────
-
-  void draw_glyphs_(int x, int y, const char* text, bool white, int scale) {
-    const char* p = text;
-    int gi = 0;
-    while (*p) {
-      const int idx = next_glyph_index(p);
-      const auto& glyph = detail::kFont8x8[idx];
-      const int gx = x + gi * 8 * scale;
-      for (int grow = 0; grow < 8; ++grow) {
-        const uint8_t bits = glyph[grow];
-        if (bits == 0)
-          continue;
-        int col = 0;
-        while (col < 8) {
-          if (!(bits & (0x80u >> col))) {
-            ++col;
-            continue;
-          }
-          const int start = col;
-          while (col < 8 && (bits & (0x80u >> col)))
-            ++col;
-          for (int sr = 0; sr < scale; ++sr)
-            fill_row(y + grow * scale + sr, gx + start * scale, gx + col * scale, white);
-        }
-      }
-      ++gi;
-    }
+  // Returns the shared UI font backed by ui_font_small.h data.
+  static const BitmapFont& ui_font_() {
+    static BitmapFont font(kFontData_ui_small_mbf, sizeof(kFontData_ui_small_mbf));
+    return font;
   }
 
   // Fill a physical horizontal span [x1, x2) on physical row `row`.

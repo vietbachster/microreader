@@ -7,14 +7,22 @@
 
 namespace microreader {
 
+static constexpr int kHeaderY = 15;  // top padding before the title text
+
 void ListMenuScreen::start(DrawBuffer& buf) {
   if (!ui_font_.valid())
     ui_font_.init(kFontData_ui_small_mbf, kFontData_ui_small_mbf_size);
   if (!header_font_.valid())
     header_font_.init(kFontData_ui_header_mbf, kFontData_ui_header_mbf_size);
   chosen_ = nullptr;
+  const int prev_selected = selected_;
   clear_items();
+  on_start_set_selection_ = false;
   on_start();
+  // Restore selection if on_start() didn't explicitly call set_selected()
+  // (e.g. returning from a sub-screen after navigating away).
+  if (!on_start_set_selection_ && prev_selected > 0 && prev_selected < count())
+    selected_ = prev_selected;
   ensure_visible_();
   draw_all_(buf);
 }
@@ -23,7 +31,7 @@ void ListMenuScreen::ensure_visible_() {
   if (!ui_font_.valid() || count() == 0)
     return;
   const int line_h = ui_font_.y_advance() + 8;
-  const int header_h = 35 + (header_font_.valid() ? header_font_.y_advance() : 0) + 8;
+  const int header_h = kHeaderY + (header_font_.valid() ? header_font_.y_advance() : 0) + 8;
   const int visible = (DrawBuffer::kHeight - header_h) / line_h;
   if (visible <= 0)
     return;
@@ -44,7 +52,7 @@ void ListMenuScreen::draw_all_(DrawBuffer& buf) const {
   if (title_ && header_font_.valid()) {
     const size_t title_len = std::strlen(title_);
     const int tw = header_font_.word_width(title_, title_len, FontStyle::Regular);
-    buf.draw_text_proportional((W - tw) / 2, 35 + header_font_.baseline(), title_, header_font_, false);
+    buf.draw_text_proportional((W - tw) / 2, kHeaderY + header_font_.baseline(), title_, header_font_, false);
   }
 
   if (!ui_font_.valid() || n == 0) {
@@ -58,26 +66,55 @@ void ListMenuScreen::draw_all_(DrawBuffer& buf) const {
 
   const int line_h = ui_font_.y_advance() + 8;
   const int baseline = ui_font_.baseline();
-  const int header_h = 35 + (header_font_.valid() ? header_font_.y_advance() : 0) + 8;
+  const int header_h = kHeaderY + (header_font_.valid() ? header_font_.y_advance() : 0) + 8;
   const int visible = (H - header_h) / line_h;
 
   const int end = scroll_offset_ + visible < n ? scroll_offset_ + visible : n;
   const int draw_count = end - scroll_offset_;
   const int total_h = line_h * draw_count;
-  const int items_y = n <= visible ? (H - total_h) / 2 : header_h;
+  const int items_y = n <= visible ? header_h + (H - header_h - total_h) / 2 : header_h;
+
+  static const char kEllipsis[] = "...";
+  const int kMaxItemW = W - 120;
+  const int ellipsis_w = ui_font_.word_width(kEllipsis, 3, FontStyle::Regular);
+  char trunc_buf[260];
 
   for (int i = scroll_offset_; i < end; ++i) {
     const int row = i - scroll_offset_;
-    const size_t len = std::strlen(labels_[i]);
-    const int iw = ui_font_.word_width(labels_[i], len, FontStyle::Regular);
+    const char* label = labels_[i];
+    size_t len = std::strlen(label);
+    int iw = ui_font_.word_width(label, len, FontStyle::Regular);
+
+    // Truncate with "..." if the label is too wide to fit.
+    if (iw > kMaxItemW) {
+      const int budget = kMaxItemW - ellipsis_w;
+      size_t fit = 0;
+      const char* p = label;
+      while (*p) {
+        const uint8_t b = static_cast<uint8_t>(*p);
+        const size_t cb = b < 0x80 ? 1u : b < 0xE0 ? 2u : b < 0xF0 ? 3u : 4u;
+        if (ui_font_.word_width(label, fit + cb, FontStyle::Regular) > budget)
+          break;
+        fit += cb;
+        p += cb;
+      }
+      const size_t copy = fit < 256 ? fit : 256;
+      std::memcpy(trunc_buf, label, copy);
+      std::memcpy(trunc_buf + copy, kEllipsis, 3);
+      trunc_buf[copy + 3] = '\0';
+      label = trunc_buf;
+      len = copy + 3;
+      iw = ui_font_.word_width(label, len, FontStyle::Regular);
+    }
+
     const int ix = (W - iw) / 2;
     const int iy = items_y + row * line_h;
     if (i == selected_) {
       const int bar_h = ui_font_.y_advance();
       buf.fill_rect(ix - 4, iy - 1, iw + 8, bar_h, false);
-      buf.draw_text_proportional(ix, iy + baseline, labels_[i], ui_font_, true);
+      buf.draw_text_proportional(ix, iy + baseline, label, len, ui_font_, true);
     } else {
-      buf.draw_text_proportional(ix, iy + baseline, labels_[i], ui_font_, false);
+      buf.draw_text_proportional(ix, iy + baseline, label, len, ui_font_, false);
     }
   }
 

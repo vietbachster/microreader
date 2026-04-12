@@ -14,13 +14,13 @@ namespace microreader {
 // Button3/Button2 = navigate up/down, Button1 = jump to chapter, Button0 = cancel.
 class ChapterSelectScreen final : public ListMenuScreen {
  public:
-  static constexpr int kMaxLabelLen = 40;
+  static constexpr int kMaxLabelLen = 220;
 
   ChapterSelectScreen() = default;
 
   // Populate the list from a TableOfContents. Call before pushing this screen.
-  // current_chapter selects the matching TOC entry so the user sees their position.
-  void populate(const TableOfContents& toc, uint16_t current_chapter = 0);
+  // current_chapter/current_para select the closest TOC entry to the reading position.
+  void populate(const TableOfContents& toc, uint16_t current_chapter = 0, uint16_t current_para = 0);
 
   const char* name() const override {
     return "Chapters";

@@ -11,8 +11,8 @@ class SettingsScreen final : public ListMenuScreen {
  public:
   SettingsScreen() = default;
 
-  void set_books_dir(const char* dir) {
-    books_dir_ = dir;
+  void set_data_dir(const char* dir) {
+    data_dir_ = dir;
   }
 
   const char* name() const override {
@@ -25,7 +25,7 @@ class SettingsScreen final : public ListMenuScreen {
 
  private:
   BouncingBallDemo bouncing_ball_;
-  const char* books_dir_ = nullptr;
+  const char* data_dir_ = nullptr;
 
   // Item indices (assigned during on_start).
   int idx_bouncing_ball_ = -1;

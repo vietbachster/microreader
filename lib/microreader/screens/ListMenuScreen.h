@@ -45,6 +45,7 @@ class ListMenuScreen : public IScreen {
   }
   void set_selected(int index) {
     selected_ = index;
+    on_start_set_selection_ = true;
   }
   int count() const {
     return static_cast<int>(labels_.size());
@@ -67,6 +68,7 @@ class ListMenuScreen : public IScreen {
   std::vector<const char*> labels_;
   int selected_ = 0;
   int scroll_offset_ = 0;
+  bool on_start_set_selection_ = false;
 
   BitmapFont ui_font_;
   BitmapFont header_font_;

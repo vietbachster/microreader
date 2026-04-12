@@ -20,7 +20,7 @@ void SettingsScreen::on_start() {
   idx_bouncing_ball_ = count();
   add_item(bouncing_ball_.name());
 
-  if (books_dir_) {
+  if (data_dir_) {
     idx_clear_converted_ = count();
     add_item("Clear Converted");
   }
@@ -52,10 +52,10 @@ bool SettingsScreen::on_select(int index) {
 }
 
 void SettingsScreen::clear_converted_() {
-  if (!books_dir_)
+  if (!data_dir_)
     return;
 #ifdef ESP_PLATFORM
-  DIR* d = opendir(books_dir_);
+  DIR* d = opendir(data_dir_);
   if (!d)
     return;
   struct dirent* ent;
@@ -63,7 +63,7 @@ void SettingsScreen::clear_converted_() {
   while ((ent = readdir(d)) != nullptr) {
     size_t len = std::strlen(ent->d_name);
     if (len > 4 && std::strcmp(ent->d_name + len - 4, ".mrb") == 0) {
-      std::snprintf(path, sizeof(path), "%s/%s", books_dir_, ent->d_name);
+      std::snprintf(path, sizeof(path), "%s/%s", data_dir_, ent->d_name);
       std::remove(path);
     }
   }
@@ -71,8 +71,11 @@ void SettingsScreen::clear_converted_() {
 #else
   namespace fs = std::filesystem;
   try {
-    for (const auto& entry : fs::directory_iterator(books_dir_)) {
-      if (entry.is_regular_file() && entry.path().extension() == ".mrb")
+    for (const auto& entry : fs::directory_iterator(data_dir_)) {
+      if (!entry.is_regular_file())
+        continue;
+      auto ext = entry.path().extension();
+      if (ext == ".mrb")
         fs::remove(entry.path());
     }
   } catch (...) {}

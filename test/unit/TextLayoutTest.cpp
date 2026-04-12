@@ -370,16 +370,23 @@ TEST(TextLayout, GermanTextRenderingPipeline) {
     uint16_t measured = font16.word_width(w.text, w.len, FontStyle::Regular);
     EXPECT_EQ(measured, expected[i].codepoints * 16);
 
-    // Simulate ReaderScreen's rendering loop: count glyphs via next_glyph_index
+    // Count UTF-8 codepoints to verify FixedFont width calculation.
     const char* p = w.text;
     const char* end = w.text + w.len;
     int glyph_count = 0;
     while (p < end && *p) {
-      next_glyph_index(p);
+      const uint8_t b = static_cast<uint8_t>(*p);
+      if (b < 0x80)
+        p += 1;
+      else if (b < 0xE0)
+        p += 2;
+      else if (b < 0xF0)
+        p += 3;
+      else
+        p += 4;
       ++glyph_count;
     }
-    EXPECT_EQ(glyph_count, expected[i].codepoints)
-        << "Glyph count from next_glyph_index doesn't match expected codepoints";
+    EXPECT_EQ(glyph_count, expected[i].codepoints) << "Codepoint count doesn't match expected";
 
     // Verify rendered width = glyph_count × 8 × scale (where scale=2, so 16)
     // This matches the rendering: dw.x + ci * 8 * scale

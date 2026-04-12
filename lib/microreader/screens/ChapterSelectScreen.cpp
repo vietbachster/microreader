@@ -4,7 +4,7 @@
 
 namespace microreader {
 
-void ChapterSelectScreen::populate(const TableOfContents& toc, uint16_t current_chapter) {
+void ChapterSelectScreen::populate(const TableOfContents& toc, uint16_t current_chapter, uint16_t current_para) {
   entries_.clear();
   entries_.reserve(toc.entries.size());
   initial_selected_ = 0;
@@ -17,9 +17,12 @@ void ChapterSelectScreen::populate(const TableOfContents& toc, uint16_t current_
     e.label[label_len] = '\0';
     e.chapter_idx = entry.file_idx;
     e.para_index = entry.para_index;
-    // Track the last TOC entry whose chapter_idx <= current_chapter.
-    if (entry.file_idx <= current_chapter)
+    // Select the last TOC entry at or before the current reading position.
+    // For earlier chapters any entry qualifies; for the current chapter
+    // also compare para_index.
+    if (entry.file_idx < current_chapter || (entry.file_idx == current_chapter && entry.para_index <= current_para)) {
       initial_selected_ = static_cast<int>(entries_.size());
+    }
     entries_.push_back(e);
   }
 }

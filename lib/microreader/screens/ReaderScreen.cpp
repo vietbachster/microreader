@@ -9,7 +9,6 @@
 #endif
 
 #ifdef ESP_PLATFORM
-#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_timer.h"
@@ -113,17 +112,88 @@ bool ReaderScreen::decode_image_to_buffer_(uint32_t offset, DrawBuffer& buf, int
 
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Bookmark / key-file helpers (must precede start())
+// ---------------------------------------------------------------------------
+
+// Sanitize an arbitrary string into a safe filename component (lowercase alnum + hyphens).
+static void sanitize_append(std::string& out, const std::string& s) {
+  bool last_dash = !out.empty() && out.back() == '-';
+  for (unsigned char c : s) {
+    if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+      out += static_cast<char>(c);
+      last_dash = false;
+    } else if (c >= 'A' && c <= 'Z') {
+      out += static_cast<char>(c + 32);
+      last_dash = false;
+    } else if (!last_dash) {
+      out += '-';
+      last_dash = true;
+    }
+  }
+}
+
+// Build a stable book key from all available metadata fields.
+// title + author + language together uniquely identify most books (including
+// the same book in different languages or by different authors).
+// Falls back to the epub basename if title is absent.
+static std::string make_book_key(const EpubMetadata& meta, const char* epub_path) {
+  if (!meta.title.empty()) {
+    std::string key;
+    key.reserve(80);
+    sanitize_append(key, meta.title);
+    if (meta.author && !meta.author->empty()) {
+      key += '-';
+      sanitize_append(key, *meta.author);
+    }
+    if (meta.language && !meta.language->empty()) {
+      key += '-';
+      sanitize_append(key, *meta.language);
+    }
+    // Trim trailing dash.
+    while (!key.empty() && key.back() == '-')
+      key.pop_back();
+    if (key.size() > 80)
+      key.resize(80);
+    if (!key.empty())
+      return key;
+  }
+  // Fallback: epub basename.
+  const char* name = epub_path;
+  const char* sep = std::strrchr(epub_path, '/');
+#ifdef _WIN32
+  const char* bsep = std::strrchr(epub_path, '\\');
+  if (bsep && (!sep || bsep > sep))
+    sep = bsep;
+#endif
+  if (sep)
+    name = sep + 1;
+  const char* dot = std::strrchr(name, '.');
+  size_t len = dot ? static_cast<size_t>(dot - name) : std::strlen(name);
+  return std::string(name, len);
+}
+
 ReaderScreen::ReaderScreen(const char* epub_path) : path_(epub_path) {}
 
 void ReaderScreen::start(DrawBuffer& buf) {
   buf_ = &buf;
+  book_key_.clear();
 
-  // Build .mrb path from .epub path (sibling file).
-  mrb_path_ = path_;
-  auto dot = mrb_path_.rfind('.');
-  if (dot != std::string::npos)
-    mrb_path_ = mrb_path_.substr(0, dot);
-  mrb_path_ += ".mrb";
+  // Build .mrb path from epub filename: <data_dir>/<basename>.mrb
+  {
+    const char* name = path_;
+    const char* sep = std::strrchr(path_, '/');
+#ifdef _WIN32
+    const char* bsep = std::strrchr(path_, '\\');
+    if (bsep && (!sep || bsep > sep))
+      sep = bsep;
+#endif
+    if (sep)
+      name = sep + 1;
+    const char* dot = std::strrchr(name, '.');
+    size_t name_len = dot ? static_cast<size_t>(dot - name) : std::strlen(name);
+    mrb_path_ = std::string(data_dir_) + "/" + std::string(name, name_len) + ".mrb";
+  }
 
   bool mrb_ok = mrb_.open(mrb_path_.c_str());
 
@@ -166,16 +236,24 @@ void ReaderScreen::start(DrawBuffer& buf) {
     }
   }
 
+  // Derive a stable book key from MRB metadata (title + author).
+  // This survives epub file renames while staying unique across different books.
+  book_key_ = make_book_key(mrb_.metadata(), path_);
+
   open_ok_ = true;
   chapter_idx_ = 0;
   page_pos_ = PagePosition{0, 0};
+  saved_chapter_idx_ = 0;
+  saved_page_pos_ = PagePosition{0, 0};
   dim_cache_.assign(mrb_.image_count(), ImageDims{});
   // Restore position: if the user selected a chapter from the TOC, jump there;
-  // otherwise restore the saved chapter/page (defaults to 0/{0,0} on first open).
+  // otherwise load saved bookmark from disk (defaults to 0/{0,0} on first open).
   if (chapter_select_.has_pending()) {
     saved_chapter_idx_ = chapter_select_.pending_chapter();
     saved_page_pos_ = PagePosition{chapter_select_.pending_para_index(), 0};
     chapter_select_.clear_pending();
+  } else {
+    load_position_();
   }
   load_chapter_(saved_chapter_idx_);
   if (!chapter_src_) {
@@ -204,6 +282,8 @@ show_error:
 }
 
 void ReaderScreen::stop() {
+  if (open_ok_)
+    save_position_();
   dim_cache_.clear();
   dim_cache_.shrink_to_fit();
   chapter_src_.reset();
@@ -212,6 +292,8 @@ void ReaderScreen::stop() {
   page_ = PageContent{};
   mrb_path_.clear();
   mrb_path_.shrink_to_fit();
+  book_key_.clear();
+  book_key_.shrink_to_fit();
   open_ok_ = false;
   nav_chosen_ = nullptr;
   buf_ = nullptr;
@@ -228,7 +310,7 @@ bool ReaderScreen::update(const ButtonState& buttons, DrawBuffer& buf, IRuntime&
   if (buttons.is_pressed(Button::Button1) && !mrb_.toc().entries.empty()) {
     saved_chapter_idx_ = chapter_idx_;
     saved_page_pos_ = page_pos_;
-    chapter_select_.populate(mrb_.toc(), static_cast<uint16_t>(chapter_idx_));
+    chapter_select_.populate(mrb_.toc(), static_cast<uint16_t>(chapter_idx_), page_pos_.paragraph);
     nav_chosen_ = &chapter_select_;
     return false;
   }
@@ -418,6 +500,37 @@ bool ReaderScreen::prev_page_() {
   });
   page_pos_ = pc.start;
   return true;
+}
+
+// ---------------------------------------------------------------------------
+// Bookmark persistence
+// ---------------------------------------------------------------------------
+
+void ReaderScreen::save_position_() {
+  if (!data_dir_ || book_key_.empty())
+    return;
+  std::string path = std::string(data_dir_) + "/" + book_key_ + ".pos";
+  FILE* f = std::fopen(path.c_str(), "w");
+  if (!f)
+    return;
+  std::fprintf(f, "%u %u %u\n", static_cast<unsigned>(chapter_idx_), static_cast<unsigned>(page_pos_.paragraph),
+               static_cast<unsigned>(page_pos_.line));
+  std::fclose(f);
+}
+
+void ReaderScreen::load_position_() {
+  if (!data_dir_ || book_key_.empty())
+    return;
+  std::string path = std::string(data_dir_) + "/" + book_key_ + ".pos";
+  FILE* f = std::fopen(path.c_str(), "r");
+  if (!f)
+    return;
+  unsigned ch = 0, para = 0, line = 0;
+  if (std::fscanf(f, "%u %u %u", &ch, &para, &line) == 3) {
+    saved_chapter_idx_ = ch;
+    saved_page_pos_ = PagePosition{static_cast<uint16_t>(para), static_cast<uint16_t>(line)};
+  }
+  std::fclose(f);
 }
 
 }  // namespace microreader

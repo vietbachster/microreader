@@ -43,6 +43,11 @@ int main() {
     std::filesystem::create_directories(books_path);
     app.set_books_dir(books_path.c_str());
 
+    // Data directory for converted books, settings, reading state.
+    static std::string data_path = std::filesystem::absolute("sd/.microreader").string();
+    std::filesystem::create_directories(data_path);
+    app.set_data_dir(data_path.c_str());
+
     // Load proportional fonts (5 sizes) if available.
     microreader::BitmapFont prop_fonts[microreader::kFontSizeCount];
     microreader::BitmapFontSet font_set;
@@ -61,7 +66,7 @@ int main() {
         {4, "XXLarge", "xxlarge"},
     };
 
-    static std::string fonts_dir = std::filesystem::absolute("sd/fonts").string();
+    static std::string fonts_dir = std::filesystem::absolute("resources/fonts").string();
     for (const auto& si : kSizes) {
       std::string path = fonts_dir + "/font-" + si.suffix + ".mbf";
       font_data[si.idx] = load_file(path.c_str());
