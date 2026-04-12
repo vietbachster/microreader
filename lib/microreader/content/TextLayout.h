@@ -212,18 +212,25 @@ struct PageContent {
 struct PageOptions {
   uint16_t width = 300;
   uint16_t height = 400;
-  uint16_t padding = 10;
-  uint16_t padding_top = 0;   // 0 = use padding; otherwise separate top padding
+  uint16_t padding_top = 0;
+  uint16_t padding_right = 10;
+  uint16_t padding_bottom = 10;
+  uint16_t padding_left = 10;
   uint16_t para_spacing = 8;  // extra pixels between paragraphs
   Alignment alignment = Alignment::Justify;
+  bool center_text = false;  // vertically center text content within the padded area
 
   PageOptions() = default;
+  // Uniform padding constructor: sets all four sides to pad.
   PageOptions(uint16_t w, uint16_t h, uint16_t pad = 10, uint16_t ps = 8, Alignment a = Alignment::Justify)
-      : width(w), height(h), padding(pad), para_spacing(ps), alignment(a) {}
-
-  uint16_t effective_padding_top() const {
-    return padding_top > 0 ? padding_top : padding;
-  }
+      : width(w),
+        height(h),
+        padding_top(pad),
+        padding_right(pad),
+        padding_bottom(pad),
+        padding_left(pad),
+        para_spacing(ps),
+        alignment(a) {}
 };
 
 // Optional callback for resolving image dimensions lazily at layout time.

@@ -316,7 +316,10 @@ bool export_to_html(Book& book, const IFont& font, const HtmlExportOptions& opts
   PageOptions page_opts;
   page_opts.width = opts.page_width;
   page_opts.height = opts.page_height;
-  page_opts.padding = opts.padding;
+  page_opts.padding_top = opts.padding;
+  page_opts.padding_right = opts.padding;
+  page_opts.padding_bottom = opts.padding;
+  page_opts.padding_left = opts.padding;
   page_opts.para_spacing = opts.para_spacing;
   page_opts.alignment = opts.alignment;
 

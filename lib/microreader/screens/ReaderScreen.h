@@ -62,7 +62,10 @@ class ReaderScreen final : public IScreen {
   static constexpr int kScale = 2;
   static constexpr int kGlyphW = 8;
   static constexpr int kGlyphH = 8;
-  static constexpr int kPadding = 12;
+  static constexpr int kPaddingTop = 6;
+  static constexpr int kPaddingRight = 12;
+  static constexpr int kPaddingBottom = 14;  // extra space for progress indicator
+  static constexpr int kPaddingLeft = 12;
   static constexpr int kParaSpacing = 12;
 
   BitmapFontSet font_set_;                       // owned set (for single-font set_font() path)

@@ -150,6 +150,15 @@ class DrawBuffer {
     draw_text_proportional(x, y + static_cast<int>(f.baseline()), text, f, !white);
   }
 
+  // Draw text centered at (cx, y) using the UI font with background fill.
+  void draw_text_centered(int cx, int y, const char* text, bool white) {
+    if (!text || !*text)
+      return;
+    const BitmapFont& f = ui_font_();
+    const int w = static_cast<int>(f.word_width(text, strlen(text), FontStyle::Regular));
+    draw_text(cx - w / 2, y, text, white);
+  }
+
   // Draw text glyphs only (no background fill). Glyph color = white param.
   // The scale parameter is accepted for API compatibility but ignored.
   void draw_text_no_bg(int x, int y, const char* text, bool white, int /*scale*/ = 1) {

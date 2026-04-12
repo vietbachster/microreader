@@ -342,7 +342,7 @@ static void scale_image(const PageOptions& opts, uint16_t content_width, uint16_
   } else if (img_w > content_width) {
     x_off = (full_width > img_w) ? (full_width - img_w) / 2 : 0;
   } else {
-    x_off = opts.padding + (content_width > img_w ? (content_width - img_w) / 2 : 0);
+    x_off = opts.padding_left + (content_width > img_w ? (content_width - img_w) / 2 : 0);
   }
 }
 
@@ -367,7 +367,7 @@ static uint16_t compute_line_height(const IFont& font, const LayoutLine& line, u
 static PageContent assemble_page(const PageOptions& opts, const IFont& font, IParagraphSource& source,
                                  std::vector<PageItem>& items, PagePosition start, PagePosition end,
                                  bool at_chapter_end, bool center_sparse_text) {
-  const uint16_t content_width = opts.width - 2 * opts.padding;
+  const uint16_t content_width = opts.width - opts.padding_left - opts.padding_right;
   const uint16_t default_y_advance = font.y_advance();
 
   PageContent page;
@@ -399,7 +399,7 @@ static PageContent assemble_page(const PageOptions& opts, const IFont& font, IPa
         break;
       case PageItem::Hr: {
         uint16_t hr_y = y + default_y_advance / 2;
-        page.hr_items.push_back(PageHrItem{opts.padding, hr_y, content_width});
+        page.hr_items.push_back(PageHrItem{opts.padding_left, hr_y, content_width});
         break;
       }
       case PageItem::Empty:
@@ -412,17 +412,21 @@ static PageContent assemble_page(const PageOptions& opts, const IFont& font, IPa
 
   // vertical_offset is an absolute screen Y — where the content block starts.
   // Default: normal top padding keeps content within the padded area.
-  page.vertical_offset = opts.effective_padding_top();
+  page.vertical_offset = opts.padding_top;
 
   // Image-only page: center the image block on the full screen.
   if (page.text_items.empty() && !page.image_items.empty()) {
     page.vertical_offset = static_cast<uint16_t>(opts.height > y ? (opts.height - y) / 2 : 0);
   }
-  // // Sparse text at end of single-page chapter: center on full screen.
-  // else if (center_sparse_text && at_chapter_end && !page.text_items.empty() && page.image_items.empty() &&
-  //          y <= opts.height / 2) {
-  //   page.vertical_offset = static_cast<uint16_t>((opts.height - y) / 2);
-  // }
+  // Text centering: when enabled, shift content down to vertically center it within the padded area.
+  // Only activates when the leftover space is less than one line height (nearly-full pages).
+  else if (opts.center_text && !page.text_items.empty() && page.image_items.empty()) {
+    const uint16_t padded_height =
+        opts.height > opts.padding_top + opts.padding_bottom ? opts.height - opts.padding_top - opts.padding_bottom : 0;
+    if (y < padded_height && (padded_height - y) < default_y_advance) {
+      page.vertical_offset = static_cast<uint16_t>(opts.padding_top + (padded_height - y) / 2);
+    }
+  }
 
   return page;
 }
@@ -433,9 +437,9 @@ static PageContent assemble_page(const PageOptions& opts, const IFont& font, IPa
 
 PageContent layout_page(const IFont& font, const PageOptions& opts, IParagraphSource& source, PagePosition start,
                         const ImageSizeQuery& size_provider) {
-  const uint16_t content_width = opts.width - 2 * opts.padding;
+  const uint16_t content_width = opts.width - opts.padding_left - opts.padding_right;
   const uint16_t default_y_advance = font.y_advance();
-  const uint16_t page_height = opts.height - opts.effective_padding_top() - opts.padding;
+  const uint16_t page_height = opts.height - opts.padding_top - opts.padding_bottom;
   const size_t para_count = source.paragraph_count();
 
   LayoutOptions lo;
@@ -656,7 +660,8 @@ assemble: {
       if (ti.paragraph_index == pii.para_idx) {
         uint16_t baseline_y = ti.y_offset + font.baseline();
         uint16_t img_y = (baseline_y >= pii.height) ? (baseline_y - pii.height) : 0;
-        page.image_items.push_back(PageImageItem{pii.para_idx, pii.key, pii.width, pii.height, opts.padding, img_y});
+        page.image_items.push_back(
+            PageImageItem{pii.para_idx, pii.key, pii.width, pii.height, opts.padding_left, img_y});
         break;
       }
     }
@@ -677,9 +682,9 @@ assemble: {
 
 PageContent layout_page_backward(const IFont& font, const PageOptions& opts, IParagraphSource& source, PagePosition end,
                                  const ImageSizeQuery& size_provider) {
-  const uint16_t content_width = opts.width - 2 * opts.padding;
+  const uint16_t content_width = opts.width - opts.padding_left - opts.padding_right;
   const uint16_t default_y_advance = font.y_advance();
-  const uint16_t page_height = opts.height - opts.effective_padding_top() - opts.padding;
+  const uint16_t page_height = opts.height - opts.padding_top - opts.padding_bottom;
   const size_t para_count = source.paragraph_count();
 
   if (end.paragraph == 0 && end.line == 0) {

@@ -278,7 +278,7 @@ show_error:
   ESP_LOGE("reader", "BOOK_FAIL: %s", path_);
 #endif
   buf.fill(true);
-  buf.draw_text(kPadding, kPadding, "Failed to open book", true, kScale);
+  buf.draw_text(kPaddingLeft, kPaddingTop, "Failed to open book", true, kScale);
 }
 
 void ReaderScreen::stop() {
@@ -351,7 +351,11 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
   FixedFont fixed_font(kGlyphW * kScale, kGlyphH * kScale + 4);
   const BitmapFontSet* fset = ext_font_set_ ? ext_font_set_ : (font_set_.valid() ? &font_set_ : nullptr);
   IFont& font = fset ? static_cast<IFont&>(const_cast<BitmapFontSet&>(*fset)) : static_cast<IFont&>(fixed_font);
-  PageOptions opts(static_cast<uint16_t>(W), static_cast<uint16_t>(H), kPadding, kParaSpacing, Alignment::Start);
+  PageOptions opts(static_cast<uint16_t>(W), static_cast<uint16_t>(H), kPaddingTop, kParaSpacing, Alignment::Start);
+  opts.padding_right = kPaddingRight;
+  opts.padding_bottom = kPaddingBottom;
+  opts.padding_left = kPaddingLeft;
+  opts.center_text = true;
 
   page_ = layout_page(font, opts, *chapter_src_, page_pos_,
                       [this](uint16_t key, uint16_t& w, uint16_t& h) { return resolve_image_size_(key, w, h); });
@@ -391,7 +395,7 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
   for (const auto& item : page_.text_items) {
     for (const auto& w : item.line.words) {
       DrawWord dw;
-      dw.x = kPadding + w.x;
+      dw.x = kPaddingLeft + w.x;
       dw.y = item.y_offset + page_.vertical_offset;
       dw.len = static_cast<int>(w.len);
       if (dw.len > 63)
@@ -445,6 +449,18 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
     }
   }
 
+  // ── Progress percentage ───────────────────────────────────────────────
+  if (mrb_.paragraph_count() > 0) {
+    const bool is_last_chapter = chapter_idx_ + 1 >= mrb_.chapter_count();
+    uint32_t cur = page_pos_.paragraph;
+    for (size_t i = 0; i < chapter_idx_; ++i)
+      cur += mrb_.chapter_paragraph_count(static_cast<uint16_t>(i));
+    int pct = (page_.at_chapter_end && is_last_chapter) ? 100 : static_cast<int>(cur * 100u / mrb_.paragraph_count());
+    char pct_str[8];
+    snprintf(pct_str, sizeof(pct_str), "%d%%", pct);
+    buf.draw_text_centered(W / 2, H - 14, pct_str, true);
+  }
+
   // ── Timing ──────────────────────────────────────────────────────────────
 #ifdef ESP_PLATFORM
   long render_us = (long)(esp_timer_get_time() - t0);
@@ -478,8 +494,12 @@ bool ReaderScreen::prev_page_() {
       const BitmapFontSet* fset = ext_font_set_ ? ext_font_set_ : (font_set_.valid() ? &font_set_ : nullptr);
       FixedFont fixed_font(kGlyphW * kScale, kGlyphH * kScale + 4);
       IFont& font = fset ? static_cast<IFont&>(const_cast<BitmapFontSet&>(*fset)) : static_cast<IFont&>(fixed_font);
-      PageOptions opts(static_cast<uint16_t>(DrawBuffer::kWidth), static_cast<uint16_t>(DrawBuffer::kHeight), kPadding,
-                       kParaSpacing, Alignment::Start);
+      PageOptions opts(static_cast<uint16_t>(DrawBuffer::kWidth), static_cast<uint16_t>(DrawBuffer::kHeight),
+                       kPaddingTop, kParaSpacing, Alignment::Start);
+      opts.padding_right = kPaddingRight;
+      opts.padding_bottom = kPaddingBottom;
+      opts.padding_left = kPaddingLeft;
+      opts.center_text = true;
       auto para_count = static_cast<uint16_t>(chapter_src_->paragraph_count());
       auto pc = layout_page_backward(
           font, opts, *chapter_src_, PagePosition{para_count, 0},
@@ -493,8 +513,12 @@ bool ReaderScreen::prev_page_() {
   const BitmapFontSet* fset2 = ext_font_set_ ? ext_font_set_ : (font_set_.valid() ? &font_set_ : nullptr);
   FixedFont fixed_font(kGlyphW * kScale, kGlyphH * kScale + 4);
   IFont& font = fset2 ? static_cast<IFont&>(const_cast<BitmapFontSet&>(*fset2)) : static_cast<IFont&>(fixed_font);
-  PageOptions opts(static_cast<uint16_t>(DrawBuffer::kWidth), static_cast<uint16_t>(DrawBuffer::kHeight), kPadding,
+  PageOptions opts(static_cast<uint16_t>(DrawBuffer::kWidth), static_cast<uint16_t>(DrawBuffer::kHeight), kPaddingTop,
                    kParaSpacing, Alignment::Start);
+  opts.padding_right = kPaddingRight;
+  opts.padding_bottom = kPaddingBottom;
+  opts.padding_left = kPaddingLeft;
+  opts.center_text = true;
   auto pc = layout_page_backward(font, opts, *chapter_src_, page_pos_, [this](uint16_t key, uint16_t& w, uint16_t& h) {
     return resolve_image_size_(key, w, h);
   });
