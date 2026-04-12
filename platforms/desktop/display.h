@@ -2,6 +2,7 @@
 
 #include <SDL.h>
 
+#include <cstring>
 #include <vector>
 
 #include "microreader/display/DrawBuffer.h"
@@ -22,6 +23,8 @@ class DesktopEmulatorDisplay final : public microreader::IDisplay {
   }
 
   void full_refresh(const uint8_t* pixels, microreader::RefreshMode /*mode*/) override {
+    in_grayscale_mode_ = false;
+    pre_gray_sim_.clear();
     for (int i = 0; i < kPixels; ++i) {
       const int y = i / microreader::DisplayFrame::kPhysicalWidth;
       const int x = i % microreader::DisplayFrame::kPhysicalWidth;
@@ -32,7 +35,9 @@ class DesktopEmulatorDisplay final : public microreader::IDisplay {
     render_();
   }
 
-  void partial_refresh(const uint8_t* new_pixels) override {
+  void partial_refresh(const uint8_t* new_pixels, const uint8_t* /*prev_pixels*/) override {
+    if (in_grayscale_mode_)
+      grayscale_revert_sim_();
     for (int y = 0; y < microreader::DisplayFrame::kPhysicalHeight; ++y) {
       for (int x = 0; x < microreader::DisplayFrame::kPhysicalWidth; ++x) {
         const std::size_t byte_idx = static_cast<std::size_t>(y * microreader::DisplayFrame::kStride + x / 8);
@@ -47,10 +52,81 @@ class DesktopEmulatorDisplay final : public microreader::IDisplay {
     render_();
   }
 
+  // Store BW RAM data for subsequent grayscale_refresh.
+  void write_ram_bw(const uint8_t* data) override {
+    if (gray_bw_.empty())
+      gray_bw_.resize(microreader::DisplayFrame::kPixelBytes);
+    std::memcpy(gray_bw_.data(), data, microreader::DisplayFrame::kPixelBytes);
+  }
+
+  // Store RED RAM data for subsequent grayscale_refresh.
+  void write_ram_red(const uint8_t* data) override {
+    if (gray_red_.empty())
+      gray_red_.resize(microreader::DisplayFrame::kPixelBytes);
+    std::memcpy(gray_red_.data(), data, microreader::DisplayFrame::kPixelBytes);
+  }
+
+  void revert_grayscale(const uint8_t* /*prev_pixels*/) override {
+    if (in_grayscale_mode_)
+      grayscale_revert_sim_();
+  }
+
+  // Apply grayscale: overlay LSB+MSB gray pixels on top of existing BW image.
+  void grayscale_refresh() override {
+    if (gray_bw_.empty() || gray_red_.empty())
+      return;
+    // Save pre-grayscale sim state so we can revert later.
+    pre_gray_sim_ = sim_;
+    in_grayscale_mode_ = true;
+    for (int i = 0; i < kPixels; ++i) {
+      const int y = i / microreader::DisplayFrame::kPhysicalWidth;
+      const int x = i % microreader::DisplayFrame::kPhysicalWidth;
+      const std::size_t byte_idx = static_cast<std::size_t>(y * microreader::DisplayFrame::kStride + x / 8);
+      const uint8_t bit_mask = static_cast<uint8_t>(0x80u >> (x & 7));
+      // Gray planes: cleared to 0x00, ink pixels set bits.
+      // Polarity: bit=0 in MBF glyph = ink, but the buffer was cleared to 0x00 (all ink)
+      // and draw_glyph writes ink pixels as bit-CLEAR. So after rendering:
+      //   bit=0 → gray pixel present (ink was drawn = bit cleared in the 0x00-cleared buffer)
+      //   bit=1 → no gray pixel (nothing drawn there... wait, buffer was 0x00)
+      // Actually: buffer starts 0x00, draw_glyph clears bits for ink. 0x00 has all bits 0.
+      // draw_glyph with white=false clears bits (already 0). With the old firmware,
+      // clearScreen(0x00) + drawing sets bits where gray pixels should be.
+      // Let me just use the same mapping as the old firmware:
+      const bool lsb_bit = (gray_bw_[byte_idx] & bit_mask) != 0;
+      const bool msb_bit = (gray_red_[byte_idx] & bit_mask) != 0;
+      // Only modify pixels that have gray data (at least one bit set).
+      if (lsb_bit || msb_bit) {
+        // 2-bit gray: (MSB<<1)|LSB
+        // 01 = light gray, 10 = dark gray, 11 = darkest gray
+        if (msb_bit && lsb_bit)
+          sim_[i] = 0.35f;  // darkest gray
+        else if (msb_bit)
+          sim_[i] = 0.50f;  // dark gray
+        else
+          sim_[i] = 0.70f;  // light gray
+      }
+    }
+    render_();
+  }
+
  private:
   DesktopRuntime& rt_;
   microreader::Rotation rotation_ = microreader::Rotation::Deg0;
   std::vector<float> sim_;
+  std::vector<float> pre_gray_sim_;  // sim_ snapshot before grayscale overlay
+  bool in_grayscale_mode_ = false;
+  std::vector<uint8_t> gray_bw_;   // LSB plane staged for grayscale_refresh
+  std::vector<uint8_t> gray_red_;  // MSB plane staged for grayscale_refresh
+
+  // Simulate grayscale revert: restore the pre-grayscale BW state.
+  void grayscale_revert_sim_() {
+    in_grayscale_mode_ = false;
+    if (!pre_gray_sim_.empty()) {
+      sim_ = pre_gray_sim_;
+      pre_gray_sim_.clear();
+      render_();
+    }
+  }
 
   // E-ink palette: RGB endpoints for black (s=0) and white (s=1).
   static constexpr uint8_t kBlackR = 0x18, kBlackG = 0x1A, kBlackB = 0x1C;

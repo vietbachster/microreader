@@ -1,15 +1,24 @@
 #pragma once
 
-// MBF (Microreader Bitmap Font) binary format — version 1.
+// MBF (Microreader Bitmap Font) binary format — version 2.
 //
 // Each MBF file contains one font at one pixel size, with up to 4 styles
-// (Regular + optional Bold, Italic, BoldItalic).
+// (Regular + optional Bold, Italic, BoldItalic) and optional 2-bit grayscale
+// data for antialiased rendering on e-ink displays.
 //
 // Layout (single-style, style_flags=0):
-//   [MbfHeader]                     32 bytes
+//   [MbfHeader]                     40 bytes
 //   [MbfRange × num_ranges]         8 bytes each
 //   [MbfGlyph × num_glyphs]        10 bytes each
-//   [bitmap data]                   variable (1-bit packed, MSB-first)
+//   [BW bitmap data]               variable (1-bit packed, MSB-first)
+//   [Gray LSB bitmap data]         variable (same size as BW; absent if gray_lsb_offset=0)
+//   [Gray MSB bitmap data]         variable (same size as BW; absent if gray_msb_offset=0)
+//
+// Grayscale: each glyph has 3 bitmap sections (BW, LSB, MSB) all sharing the
+// same per-glyph bitmap_offset. The offset is relative to bitmap_data_offset
+// for BW, gray_lsb_offset for LSB, gray_msb_offset for MSB.
+// 2-bit gray value = (MSB << 1) | LSB:
+//   0 = white, 1 = light gray, 2 = gray, 3 = dark gray.
 //
 // Multi-style (style_flags != 0): additional style sections are appended
 // between the Regular glyph table and the bitmap data. The header fields
@@ -29,12 +38,12 @@
 
 namespace microreader {
 
-static constexpr uint32_t kMbfMagic = 0x3146424D;  // "MBF1" little-endian
-static constexpr uint8_t kMbfVersion = 1;
+static constexpr uint32_t kMbfMagic = 0x3246424D;  // "MBF2" little-endian
+static constexpr uint8_t kMbfVersion = 2;
 
 #pragma pack(push, 1)
 
-// File header — 32 bytes, all fields little-endian.
+// File header — 40 bytes, all fields little-endian.
 struct MbfHeader {
   uint32_t magic;               //  0: must be kMbfMagic
   uint8_t version;              //  4: must be kMbfVersion
@@ -46,12 +55,14 @@ struct MbfHeader {
   uint16_t num_ranges;          // 10: number of MbfRange entries (Regular style)
   uint16_t num_glyphs;          // 12: total glyph count (Regular style)
   uint16_t reserved2;           // 14
-  uint32_t bitmap_data_offset;  // 16: byte offset from file start to bitmap data (shared by all styles)
+  uint32_t bitmap_data_offset;  // 16: byte offset from file start to BW bitmap data (shared by all styles)
   uint32_t bold_offset;         // 20: file offset to Bold MbfStyleSection (0 = absent)
   uint32_t italic_offset;       // 24: file offset to Italic MbfStyleSection (0 = absent)
   uint32_t bold_italic_offset;  // 28: file offset to BoldItalic MbfStyleSection (0 = absent)
+  uint32_t gray_lsb_offset;     // 32: file offset to grayscale LSB bitmap data (0 = absent)
+  uint32_t gray_msb_offset;     // 36: file offset to grayscale MSB bitmap data (0 = absent)
 };
-static_assert(sizeof(MbfHeader) == 32, "MbfHeader must be 32 bytes");
+static_assert(sizeof(MbfHeader) == 40, "MbfHeader must be 40 bytes");
 
 // Style section preamble — appears at bold_offset / italic_offset / bold_italic_offset.
 // Immediately followed by MbfRange[num_ranges] then MbfGlyph[num_glyphs].

@@ -20,6 +20,9 @@ void SettingsScreen::on_start() {
   idx_bouncing_ball_ = count();
   add_item(bouncing_ball_.name());
 
+  idx_grayscale_demo_ = count();
+  add_item(grayscale_demo_.name());
+
   if (data_dir_) {
     idx_clear_converted_ = count();
     add_item("Clear Converted");
@@ -34,6 +37,10 @@ void SettingsScreen::on_start() {
 bool SettingsScreen::on_select(int index) {
   if (index == idx_bouncing_ball_) {
     chosen_ = &bouncing_ball_;
+    return false;
+  }
+  if (index == idx_grayscale_demo_) {
+    chosen_ = &grayscale_demo_;
     return false;
   }
   if (index == idx_clear_converted_) {

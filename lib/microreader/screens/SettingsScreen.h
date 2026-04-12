@@ -3,6 +3,7 @@
 #include "../Input.h"
 #include "../display/DrawBuffer.h"
 #include "BouncingBallDemo.h"
+#include "GrayscaleDemo.h"
 #include "ListMenuScreen.h"
 
 namespace microreader {
@@ -25,10 +26,12 @@ class SettingsScreen final : public ListMenuScreen {
 
  private:
   BouncingBallDemo bouncing_ball_;
+  GrayscaleDemo grayscale_demo_;
   const char* data_dir_ = nullptr;
 
   // Item indices (assigned during on_start).
   int idx_bouncing_ball_ = -1;
+  int idx_grayscale_demo_ = -1;
   int idx_clear_converted_ = -1;
   int idx_switch_ota_ = -1;
 

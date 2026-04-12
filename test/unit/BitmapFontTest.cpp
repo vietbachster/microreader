@@ -16,7 +16,7 @@ using namespace microreader;
 // Two ranges: [0x3F..0x69] mapped as 3 glyphs, [0x4E16..0x4E16] as 1 glyph
 //
 // Layout:
-//   MbfHeader  (32 bytes)
+//   MbfHeader  (40 bytes)
 //   Range 0    (8 bytes)  — ASCII 0x3F..0x6A (count=43, but we only fill 3 glyphs)
 //   Range 1    (8 bytes)  — CJK  0x4E16..0x4E16 (count=1)
 //   Glyph[0]   '?' idx=0   — 5×7 bitmap, advance=6

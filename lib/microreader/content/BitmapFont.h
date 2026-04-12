@@ -22,12 +22,14 @@ namespace microreader {
 
 // Result of a glyph lookup — points into the MBF data buffer.
 struct GlyphData {
-  const uint8_t* bits;    // pointer to 1-bit packed bitmap (nullptr if no bitmap)
-  uint8_t bitmap_width;   // bitmap width in pixels
-  uint8_t bitmap_height;  // bitmap height in pixels
-  uint8_t advance_width;  // horizontal cursor advance
-  int8_t x_offset;        // offset from cursor to bitmap left edge
-  int8_t y_offset;        // offset from baseline to bitmap top (negative = above)
+  const uint8_t* bits;           // pointer to 1-bit BW packed bitmap (nullptr if no bitmap)
+  const uint8_t* gray_lsb_bits;  // pointer to grayscale LSB plane (nullptr if absent)
+  const uint8_t* gray_msb_bits;  // pointer to grayscale MSB plane (nullptr if absent)
+  uint8_t bitmap_width;          // bitmap width in pixels
+  uint8_t bitmap_height;         // bitmap height in pixels
+  uint8_t advance_width;         // horizontal cursor advance
+  int8_t x_offset;               // offset from cursor to bitmap left edge
+  int8_t y_offset;               // offset from baseline to bitmap top (negative = above)
 };
 
 class BitmapFont : public IFont {
@@ -43,6 +45,8 @@ class BitmapFont : public IFont {
     size_ = 0;
     header_ = nullptr;
     bitmaps_ = nullptr;
+    gray_lsb_bitmaps_ = nullptr;
+    gray_msb_bitmaps_ = nullptr;
     for (auto& s : styles_)
       s = {};
 
@@ -64,6 +68,12 @@ class BitmapFont : public IFont {
     size_ = size;
     header_ = hdr;
     bitmaps_ = data + hdr->bitmap_data_offset;
+
+    // Grayscale planes (optional)
+    if (hdr->gray_lsb_offset != 0 && hdr->gray_lsb_offset < size)
+      gray_lsb_bitmaps_ = data + hdr->gray_lsb_offset;
+    if (hdr->gray_msb_offset != 0 && hdr->gray_msb_offset < size)
+      gray_msb_bitmaps_ = data + hdr->gray_msb_offset;
 
     // Regular style (always present)
     styles_[0].ranges = reinterpret_cast<const MbfRange*>(data + ranges_start);
@@ -121,17 +131,28 @@ class BitmapFont : public IFont {
     if (idx < 0)
       idx = sd.fallback_glyph_idx;
     if (idx < 0)
-      return {nullptr, 0, 0, header_ ? header_->default_advance : static_cast<uint8_t>(0), 0, 0};
+      return {nullptr, nullptr, nullptr, 0, 0, header_ ? header_->default_advance : static_cast<uint8_t>(0), 0, 0};
 
     const MbfGlyph& g = sd.glyphs[idx];
     const uint8_t* bits = nullptr;
-    if (g.bitmap_width > 0 && g.bitmap_height > 0)
+    const uint8_t* lsb = nullptr;
+    const uint8_t* msb = nullptr;
+    if (g.bitmap_width > 0 && g.bitmap_height > 0) {
       bits = bitmaps_ + g.bitmap_offset;
-    return {bits, g.bitmap_width, g.bitmap_height, g.advance_width, g.x_offset, g.y_offset};
+      if (gray_lsb_bitmaps_)
+        lsb = gray_lsb_bitmaps_ + g.bitmap_offset;
+      if (gray_msb_bitmaps_)
+        msb = gray_msb_bitmaps_ + g.bitmap_offset;
+    }
+    return {bits, lsb, msb, g.bitmap_width, g.bitmap_height, g.advance_width, g.x_offset, g.y_offset};
   }
 
   bool has_style(FontStyle style) const {
     return styles_[static_cast<uint8_t>(style)].ranges != nullptr;
+  }
+
+  bool has_grayscale() const {
+    return gray_lsb_bitmaps_ != nullptr;
   }
 
   uint16_t glyph_height() const {
@@ -155,6 +176,8 @@ class BitmapFont : public IFont {
   size_t size_ = 0;
   const MbfHeader* header_ = nullptr;
   const uint8_t* bitmaps_ = nullptr;
+  const uint8_t* gray_lsb_bitmaps_ = nullptr;
+  const uint8_t* gray_msb_bitmaps_ = nullptr;
   StyleData styles_[4] = {};  // indexed by FontStyle enum value
 
   // Resolve a FontStyle to its StyleData, falling back to Regular.
@@ -261,6 +284,11 @@ class BitmapFontSet : public IFont {
   bool valid() const {
     return fonts_[static_cast<uint8_t>(FontSize::Normal)] != nullptr &&
            fonts_[static_cast<uint8_t>(FontSize::Normal)]->valid();
+  }
+
+  bool has_grayscale() const {
+    auto* f = fonts_[static_cast<uint8_t>(FontSize::Normal)];
+    return f && f->has_grayscale();
   }
 
   // ── IFont interface ─────────────────────────────────────────────────────

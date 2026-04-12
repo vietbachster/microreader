@@ -54,7 +54,6 @@ DEFAULT_RANGES = [
     "latin-ext-a",
     "latin-ext-b",
     "greek",
-    "cyrillic",
     "combining",
     "spacing-mod",
     "general-punct",
@@ -71,19 +70,17 @@ DEFAULT_RANGES = [
 
 
 def render_glyph(face, codepoint, size):
-    """Render a single glyph. Returns dict with metrics + 1-bit bitmap bytes."""
+    """Render a single glyph. Returns dict with metrics + BW/LSB/MSB bitmap bytes."""
     glyph_index = face.get_char_index(codepoint)
     if glyph_index == 0:
         return None  # glyph not in font
 
-    face.load_glyph(glyph_index, freetype.FT_LOAD_RENDER | freetype.FT_LOAD_TARGET_MONO)
+    # Render in 8-bit grayscale mode for antialiased output.
+    face.load_glyph(glyph_index, freetype.FT_LOAD_RENDER)
 
     bitmap = face.glyph.bitmap
     width = bitmap.width
     height = bitmap.rows
-    # Use post-hinting pixel positions from the glyph slot, NOT the 26.6
-    # metrics (which are pre-hinting and can differ by 1-2px after mono
-    # rendering, causing characters like ü to be mis-positioned).
     x_offset = face.glyph.bitmap_left
     y_offset = (
         -face.glyph.bitmap_top
@@ -99,29 +96,71 @@ def render_glyph(face, codepoint, size):
             "x_offset": 0,
             "y_offset": 0,
             "x_advance": x_advance,
-            "bitmap_bytes": b"",
+            "bw_bytes": b"",
+            "lsb_bytes": b"",
+            "msb_bytes": b"",
         }
 
-    # Convert FreeType mono bitmap to MSB-first packed bytes.
-    # FreeType's mono bitmap is already 1-bit packed MSB-first with
-    # pitch = bitmap.pitch bytes per row. But the pitch may differ from
-    # our row stride (ceil(width/8)), so repack row by row.
-    row_stride = math.ceil(width / 8)
-    out = bytearray(row_stride * height)
-
+    # Read FreeType buffer and convert to 0-255 grayscale values.
+    # FreeType grayscale: 0=background, 255=ink.
+    # Our convention: 0=black(ink), 255=white.
     ft_buffer = bitmap.buffer
-    ft_pitch = bitmap.pitch
+    ft_pitch = abs(bitmap.pitch)
+
+    # Handle both grayscale (8-bit) and mono (1-bit) pixel modes.
+    pixel_mode = bitmap.pixel_mode
+    pixels = []  # flat list of 0-255 values (0=ink, 255=white) in our convention
+    for y in range(height):
+        for x in range(width):
+            if pixel_mode == 1:  # FT_PIXEL_MODE_MONO
+                byte_idx = y * ft_pitch + (x >> 3)
+                ft_bit = (ft_buffer[byte_idx] >> (7 - (x & 7))) & 1
+                # FreeType mono: 1=ink, 0=background → invert to our convention
+                pixels.append(0 if ft_bit else 255)
+            else:  # FT_PIXEL_MODE_GRAY (8-bit)
+                ft_val = ft_buffer[y * ft_pitch + x]
+                # FreeType grayscale: 0=background, 255=ink → invert
+                pixels.append(255 - ft_val)
+
+    row_stride = math.ceil(width / 8)
+    bw_out = bytearray(row_stride * height)
+    lsb_out = bytearray(row_stride * height)
+    msb_out = bytearray(row_stride * height)
 
     for y in range(height):
         for x in range(width):
-            ft_byte_idx = y * ft_pitch + (x >> 3)
-            ft_bit = (ft_buffer[ft_byte_idx] >> (7 - (x & 7))) & 1
-            # FreeType mono: 1=ink, 0=background
-            # MBF: 1=white, 0=black (ink). So INVERT.
-            mbf_bit = 1 - ft_bit
+            pixel = pixels[y * width + x]
+
+            # BW plane: threshold at 154 (values < 154 are ink)
+            # MBF polarity: 1=white, 0=black(ink)
+            bw_bit = 1 if pixel >= 154 else 0
+
+            # 2-bit grayscale quantization (from old microreader thresholds):
+            #   >=205 -> 0 (white)
+            #   >=154 -> 1 (light gray)
+            #   >=103 -> 2 (gray)
+            #   >= 52 -> 3 (dark gray)
+            #   <  52 -> 0 (white — solid ink pixels, handled by BW plane)
+            if pixel >= 205:
+                gray = 0
+            elif pixel >= 154:
+                gray = 1
+            elif pixel >= 103:
+                gray = 2
+            elif pixel >= 52:
+                gray = 3
+            else:
+                gray = 0
+
             byte_idx = y * row_stride + (x >> 3)
-            if mbf_bit:
-                out[byte_idx] |= 0x80 >> (x & 7)
+            bit_mask = 0x80 >> (x & 7)
+
+            if bw_bit:
+                bw_out[byte_idx] |= bit_mask
+            if gray & 1:  # LSB
+                lsb_out[byte_idx] |= bit_mask
+            if gray & 2:  # MSB
+                msb_out[byte_idx] |= bit_mask
 
     return {
         "codepoint": codepoint,
@@ -130,7 +169,9 @@ def render_glyph(face, codepoint, size):
         "x_offset": x_offset,
         "y_offset": y_offset,
         "x_advance": x_advance,
-        "bitmap_bytes": bytes(out),
+        "bw_bytes": bytes(bw_out),
+        "lsb_bytes": bytes(lsb_out),
+        "msb_bytes": bytes(msb_out),
     }
 
 
@@ -140,17 +181,21 @@ def render_glyph(face, codepoint, size):
 
 
 def render_style_glyphs(face, size, codepoint_ranges):
-    """Render glyphs for one style. Returns (ranges, all_glyphs, all_bitmaps, max_glyph_height).
+    """Render glyphs for one style. Returns (ranges, all_glyphs, bw_bitmaps, lsb_bitmaps, msb_bitmaps, max_glyph_height).
 
     ranges: list of (first_cp, count, glyph_table_start)
     all_glyphs: flat list of glyph dicts
-    all_bitmaps: bytearray of 1-bit bitmap data
+    bw_bitmaps: bytearray of BW 1-bit bitmap data
+    lsb_bitmaps: bytearray of grayscale LSB 1-bit bitmap data
+    msb_bitmaps: bytearray of grayscale MSB 1-bit bitmap data
     """
     face.set_pixel_sizes(0, size)
 
     ranges = []
     all_glyphs = []
-    all_bitmaps = bytearray()
+    bw_bitmaps = bytearray()
+    lsb_bitmaps = bytearray()
+    msb_bitmaps = bytearray()
     max_glyph_height = 0
 
     for range_start, range_end in codepoint_ranges:
@@ -169,13 +214,17 @@ def render_style_glyphs(face, size, codepoint_ranges):
                         "x_offset": 0,
                         "y_offset": 0,
                         "x_advance": 0,
-                        "bitmap_bytes": b"",
+                        "bw_bytes": b"",
+                        "lsb_bytes": b"",
+                        "msb_bytes": b"",
                         "bitmap_offset": 0,
                     }
                 )
             else:
-                g["bitmap_offset"] = len(all_bitmaps)
-                all_bitmaps.extend(g["bitmap_bytes"])
+                g["bitmap_offset"] = len(bw_bitmaps)
+                bw_bitmaps.extend(g["bw_bytes"])
+                lsb_bitmaps.extend(g["lsb_bytes"])
+                msb_bitmaps.extend(g["msb_bytes"])
                 all_glyphs.append(g)
                 has_any = True
                 if g["bitmap_height"] > max_glyph_height:
@@ -184,7 +233,7 @@ def render_style_glyphs(face, size, codepoint_ranges):
         if has_any:
             ranges.append((range_start, count, glyph_table_start))
 
-    return ranges, all_glyphs, all_bitmaps, max_glyph_height
+    return ranges, all_glyphs, bw_bitmaps, lsb_bitmaps, msb_bitmaps, max_glyph_height
 
 
 def _encode_ranges_and_glyphs(ranges, all_glyphs, bitmap_base_offset):
@@ -211,11 +260,15 @@ def _encode_ranges_and_glyphs(ranges, all_glyphs, bitmap_base_offset):
     return buf
 
 
-def build_mbf(face, size, codepoint_ranges):
+def build_mbf(face, size, codepoint_ranges, bw_only=False):
     """Build single-style MBF binary. Returns (bytes, stats_dict)."""
-    ranges, all_glyphs, all_bitmaps, max_glyph_height = render_style_glyphs(
-        face, size, codepoint_ranges
+    ranges, all_glyphs, bw_bitmaps, lsb_bitmaps, msb_bitmaps, max_glyph_height = (
+        render_style_glyphs(face, size, codepoint_ranges)
     )
+
+    if bw_only:
+        lsb_bitmaps = bytearray()
+        msb_bitmaps = bytearray()
 
     face.set_pixel_sizes(0, size)
     ascender = face.size.ascender >> 6
@@ -226,17 +279,21 @@ def build_mbf(face, size, codepoint_ranges):
 
     num_ranges = len(ranges)
     num_glyphs = len(all_glyphs)
-    header_size = 32
+    header_size = 40
     ranges_size = num_ranges * 8
     glyphs_size = num_glyphs * 10
     bitmap_data_offset = header_size + ranges_size + glyphs_size
 
+    bw_size = len(bw_bitmaps)
+    gray_lsb_offset = (bitmap_data_offset + bw_size) if lsb_bitmaps else 0
+    gray_msb_offset = (gray_lsb_offset + len(lsb_bitmaps)) if msb_bitmaps else 0
+
     buf = bytearray()
     buf.extend(
         struct.pack(
-            "<IBBBBBBHHHIIII",
-            0x3146424D,
-            1,
+            "<IBBBBBBHHHIIIIII",
+            0x3246424D,  # MBF2
+            2,
             max_glyph_height & 0xFF,
             baseline & 0xFF,
             y_advance & 0xFF,
@@ -249,10 +306,14 @@ def build_mbf(face, size, codepoint_ranges):
             0,  # bold_offset
             0,  # italic_offset
             0,  # bold_italic_offset
+            gray_lsb_offset,
+            gray_msb_offset,
         )
     )
     buf.extend(_encode_ranges_and_glyphs(ranges, all_glyphs, 0))
-    buf.extend(all_bitmaps)
+    buf.extend(bw_bitmaps)
+    buf.extend(lsb_bitmaps)
+    buf.extend(msb_bitmaps)
 
     stats = {
         "num_ranges": num_ranges,
@@ -260,7 +321,7 @@ def build_mbf(face, size, codepoint_ranges):
         "rendered_glyphs": sum(
             1 for g in all_glyphs if g["bitmap_width"] > 0 or g["x_advance"] > 0
         ),
-        "bitmap_bytes": len(all_bitmaps),
+        "bitmap_bytes": bw_size + len(lsb_bitmaps) + len(msb_bitmaps),
         "total_bytes": len(buf),
         "glyph_height": max_glyph_height,
         "baseline": baseline,
@@ -269,16 +330,22 @@ def build_mbf(face, size, codepoint_ranges):
     return bytes(buf), stats
 
 
-def build_multi_style_mbf(faces, size, codepoint_ranges):
+def build_multi_style_mbf(faces, size, codepoint_ranges, bw_only=False):
     """Build multi-style MBF from dict of {FontStyle: freetype.Face}.
 
     faces keys: 'regular' (required), 'bold', 'italic', 'bold_italic' (optional).
     Returns (bytes, stats_dict).
     """
-    # Render all styles
+    # Render all styles — now returns 6-tuples with 3 bitmap sections
     style_data = {}
     for style_name, face in faces.items():
         style_data[style_name] = render_style_glyphs(face, size, codepoint_ranges)
+
+    if bw_only:
+        # Strip grayscale planes from all styles
+        for key in style_data:
+            r, g, bw, lsb, msb, h = style_data[key]
+            style_data[key] = (r, g, bw, bytearray(), bytearray(), h)
 
     # Metrics from Regular face
     reg_face = faces["regular"]
@@ -289,13 +356,13 @@ def build_multi_style_mbf(faces, size, codepoint_ranges):
     baseline = ascender
     default_advance = size // 2
 
-    max_glyph_height = max(d[3] for d in style_data.values())
+    max_glyph_height = max(d[5] for d in style_data.values())
 
     # Compute layout sizes
     reg = style_data["regular"]
-    reg_ranges, reg_glyphs, reg_bitmaps, _ = reg
+    reg_ranges, reg_glyphs, reg_bw, reg_lsb, reg_msb, _ = reg
 
-    header_size = 32
+    header_size = 40
     reg_ranges_size = len(reg_ranges) * 8
     reg_glyphs_size = len(reg_glyphs) * 10
     # After regular ranges+glyphs, append style sections for bold/italic/bold_italic
@@ -311,7 +378,7 @@ def build_multi_style_mbf(faces, size, codepoint_ranges):
         if sname not in style_data:
             style_offsets[sname] = 0
             continue
-        ranges, glyphs, bitmaps, _ = style_data[sname]
+        ranges, glyphs, bw, lsb, msb, _ = style_data[sname]
         style_offsets[sname] = cursor
         # MbfStyleSection: uint16 num_ranges, uint16 num_glyphs (4 bytes)
         sec = struct.pack("<HH", len(ranges), len(glyphs))
@@ -321,19 +388,28 @@ def build_multi_style_mbf(faces, size, codepoint_ranges):
 
     bitmap_data_offset = cursor
 
-    # Now we know where bitmaps start — concatenate all bitmaps and compute
+    # Now we know where bitmaps start — concatenate all BW bitmaps and compute
     # per-style bitmap base offsets
-    all_bitmaps = bytearray()
+    all_bw = bytearray()
+    all_lsb = bytearray()
+    all_msb = bytearray()
     bitmap_bases = {}
 
-    bitmap_bases["regular"] = len(all_bitmaps)
-    all_bitmaps.extend(reg_bitmaps)
+    bitmap_bases["regular"] = len(all_bw)
+    all_bw.extend(reg_bw)
+    all_lsb.extend(reg_lsb)
+    all_msb.extend(reg_msb)
 
     for sname in extra_styles:
         if sname not in style_data:
             continue
-        bitmap_bases[sname] = len(all_bitmaps)
-        all_bitmaps.extend(style_data[sname][2])
+        bitmap_bases[sname] = len(all_bw)
+        all_bw.extend(style_data[sname][2])
+        all_lsb.extend(style_data[sname][3])
+        all_msb.extend(style_data[sname][4])
+
+    gray_lsb_offset = (bitmap_data_offset + len(all_bw)) if all_lsb else 0
+    gray_msb_offset = (gray_lsb_offset + len(all_lsb)) if all_msb else 0
 
     # style_flags bitmask
     style_flags = 0x01  # Regular always
@@ -348,9 +424,9 @@ def build_multi_style_mbf(faces, size, codepoint_ranges):
     buf = bytearray()
     buf.extend(
         struct.pack(
-            "<IBBBBBBHHHIIII",
-            0x3146424D,
-            1,  # version
+            "<IBBBBBBHHHIIIIII",
+            0x3246424D,  # MBF2
+            2,  # version
             max_glyph_height & 0xFF,
             baseline & 0xFF,
             y_advance & 0xFF,
@@ -363,6 +439,8 @@ def build_multi_style_mbf(faces, size, codepoint_ranges):
             style_offsets.get("bold", 0),
             style_offsets.get("italic", 0),
             style_offsets.get("bold_italic", 0),
+            gray_lsb_offset,
+            gray_msb_offset,
         )
     )
 
@@ -379,8 +457,10 @@ def build_multi_style_mbf(faces, size, codepoint_ranges):
         buf.extend(sec_header)
         buf.extend(_encode_ranges_and_glyphs(ranges, glyphs, bitmap_bases[sname]))
 
-    # Bitmap data
-    buf.extend(all_bitmaps)
+    # Bitmap data: BW, then LSB, then MSB
+    buf.extend(all_bw)
+    buf.extend(all_lsb)
+    buf.extend(all_msb)
 
     total_rendered = sum(
         sum(1 for g in d[1] if g["bitmap_width"] > 0 or g["x_advance"] > 0)
@@ -394,7 +474,7 @@ def build_multi_style_mbf(faces, size, codepoint_ranges):
         "num_ranges": len(reg_ranges),
         "num_glyphs": total_glyphs,
         "rendered_glyphs": total_rendered,
-        "bitmap_bytes": len(all_bitmaps),
+        "bitmap_bytes": len(all_bw) + len(all_lsb) + len(all_msb),
         "total_bytes": len(buf),
         "glyph_height": max_glyph_height,
         "baseline": baseline,
@@ -522,6 +602,11 @@ def main():
         "The second value is 'Normal' (default body text).",
     )
     p.add_argument(
+        "--bw-only",
+        action="store_true",
+        help="Generate BW-only font (no grayscale planes). Use for UI fonts.",
+    )
+    p.add_argument(
         "--font-name",
         help="Font family name to embed in the FNTS bundle header "
         "(default: derived from font filename, e.g. 'Bookerly').",
@@ -586,7 +671,9 @@ def main():
             _generate_bundle(faces, args, codepoint_ranges, multi_style=True)
             return
 
-        mbf_data, stats = build_multi_style_mbf(faces, args.size, codepoint_ranges)
+        mbf_data, stats = build_multi_style_mbf(
+            faces, args.size, codepoint_ranges, bw_only=args.bw_only
+        )
     else:
         face = freetype.Face(font_path)
 
@@ -596,7 +683,9 @@ def main():
             )
             return
 
-        mbf_data, stats = build_mbf(face, args.size, codepoint_ranges)
+        mbf_data, stats = build_mbf(
+            face, args.size, codepoint_ranges, bw_only=args.bw_only
+        )
 
     # Write output
     os.makedirs(os.path.dirname(os.path.abspath(args.output)) or ".", exist_ok=True)
@@ -651,10 +740,14 @@ def _generate_bundle(faces, args, codepoint_ranges, multi_style):
         print(f"  {label} ({px_size}px)")
         print(f"{'='*40}")
         if multi_style:
-            data, stats = build_multi_style_mbf(faces, px_size, codepoint_ranges)
+            data, stats = build_multi_style_mbf(
+                faces, px_size, codepoint_ranges, bw_only=args.bw_only
+            )
         else:
             face = faces["regular"]
-            data, stats = build_mbf(face, px_size, codepoint_ranges)
+            data, stats = build_mbf(
+                face, px_size, codepoint_ranges, bw_only=args.bw_only
+            )
 
         out_path = os.path.join(out_dir, f"font-{label.lower()}.mbf")
         with open(out_path, "wb") as f:

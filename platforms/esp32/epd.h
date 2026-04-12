@@ -39,10 +39,71 @@
 #define CMD_MASTER_ACTIVATION 0x20
 #define CTRL1_NORMAL 0x00
 #define CTRL1_BYPASS_RED 0x40
+#define CMD_GATE_VOLTAGE 0x03
+#define CMD_SOURCE_VOLTAGE 0x04
+#define CMD_WRITE_VCOM 0x2C
+#define CMD_WRITE_LUT 0x32
 #define CMD_AUTO_WRITE_BW_RAM 0x46
 #define CMD_AUTO_WRITE_RED_RAM 0x47
 #define CMD_DEEP_SLEEP 0x10
 #define CMD_WRITE_TEMP 0x1A
+
+// clang-format off
+// ---- Grayscale LUT tables (112 bytes each) ----
+// Layout: 50 bytes VS waveform (5 levels × 10), 50 bytes TP/RP timing (10 groups × 5),
+//         5 bytes frame rate, 1 byte VGH, 3 bytes VSH1/VSH2/VSL, 1 byte VCOM, 2 reserved.
+static const uint8_t kLutGrayscale[] = {
+    // VS waveform: L0 (00=white), L1 (01=light gray), L2 (10=gray), L3 (11=dark gray), L4 (VCOM)
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x54, 0x54, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0xAA, 0xA0, 0xA8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0xA2, 0x22, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // TP/RP timing groups G0..G9
+    0x01, 0x01, 0x01, 0x01, 0x00,
+    0x01, 0x01, 0x01, 0x01, 0x00,
+    0x01, 0x01, 0x01, 0x01, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00,
+    // Frame rate
+    0x8F, 0x8F, 0x8F, 0x8F, 0x8F,
+    // Voltages: VGH, VSH1, VSH2, VSL, VCOM
+    0x17, 0x41, 0xA8, 0x32, 0x30,
+    // Reserved
+    0x00, 0x00,
+};
+
+static const uint8_t kLutGrayscaleRevert[] = {
+    // VS waveform: L0..L4 — drives gray pixels back to BW
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x54, 0x54, 0x54, 0x54, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0xA8, 0xA8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0xFC, 0xFC, 0xFC, 0xFC, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // TP/RP timing groups G0..G9
+    0x01, 0x01, 0x01, 0x01, 0x01,
+    0x01, 0x01, 0x01, 0x01, 0x01,
+    0x01, 0x01, 0x01, 0x01, 0x00,
+    0x01, 0x01, 0x01, 0x01, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00,
+    // Frame rate
+    0x8F, 0x8F, 0x8F, 0x8F, 0x8F,
+    // Voltages: VGH, VSH1, VSH2, VSL, VCOM
+    0x17, 0x41, 0xA8, 0x32, 0x30,
+    // Reserved
+    0x00, 0x00,
+};
+// clang-format on
 
 // ---- Refresh modes (internal) ----
 enum EpdRefreshMode { EPD_FULL_REFRESH, EPD_HALF_REFRESH, EPD_FAST_REFRESH };
@@ -56,6 +117,8 @@ class EInkDisplay : public microreader::IDisplay {
 
   bool isScreenOn = false;
   bool inDeepSleep_ = false;
+  bool in_grayscale_mode_ = false;
+  bool custom_lut_active_ = false;
 
   spi_device_handle_t spi_;
 
@@ -104,6 +167,7 @@ class EInkDisplay : public microreader::IDisplay {
   // ---- microreader::IDisplay ----
 
   void full_refresh(const uint8_t* pixels, microreader::RefreshMode mode) override {
+    in_grayscale_mode_ = false;  // full refresh resets display state
     wakeIfNeeded();
     waitWhileBusy();
     // parts of the screen are not visible so we offset the image
@@ -113,12 +177,52 @@ class EInkDisplay : public microreader::IDisplay {
     refreshDisplay(mode == microreader::RefreshMode::Half ? EPD_HALF_REFRESH : EPD_FULL_REFRESH);
   }
 
-  void partial_refresh(const uint8_t* new_pixels) override {
+  void partial_refresh(const uint8_t* new_pixels, const uint8_t* prev_pixels) override {
+    if (in_grayscale_mode_) {
+      grayscale_revert_();
+      wakeIfNeeded();
+      waitWhileBusy();
+      setRamArea(12, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+      writeRamBuffer(CMD_WRITE_RAM_RED, prev_pixels, BUFFER_SIZE);
+    }
     wakeIfNeeded();
     waitWhileBusy();
     setRamArea(12, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
     writeRamBuffer(CMD_WRITE_RAM_BW, new_pixels, BUFFER_SIZE);
     refreshDisplay(EPD_FAST_REFRESH);
+  }
+
+  void write_ram_bw(const uint8_t* data) override {
+    wakeIfNeeded();
+    waitWhileBusy();
+    setRamArea(12, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+    writeRamBuffer(CMD_WRITE_RAM_BW, data, BUFFER_SIZE);
+  }
+
+  void write_ram_red(const uint8_t* data) override {
+    wakeIfNeeded();
+    waitWhileBusy();
+    setRamArea(12, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+    writeRamBuffer(CMD_WRITE_RAM_RED, data, BUFFER_SIZE);
+  }
+
+  void grayscale_refresh() override {
+    in_grayscale_mode_ = true;
+    setCustomLUT_(kLutGrayscale);
+    refreshDisplay(EPD_FAST_REFRESH);
+    setCustomLUT_(nullptr);  // clear flag; OTP LUT restored on next normal refresh
+  }
+
+  void revert_grayscale(const uint8_t* prev_pixels) override {
+    if (!in_grayscale_mode_)
+      return;
+    grayscale_revert_();
+    // Re-upload the previous BW frame so the controller's RED RAM matches
+    // what was on screen before grayscale, enabling correct partial update.
+    wakeIfNeeded();
+    waitWhileBusy();
+    setRamArea(12, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+    writeRamBuffer(CMD_WRITE_RAM_RED, prev_pixels, BUFFER_SIZE);
   }
 
   void deep_sleep() override {
@@ -245,7 +349,8 @@ class EInkDisplay : public microreader::IDisplay {
         displayMode |= 0xD4;
         break;
       case EPD_FAST_REFRESH:
-        displayMode |= 0x1C;
+        // Skip LUT_LOAD (bit 4) when custom LUT is active so it isn't overwritten by OTP.
+        displayMode |= custom_lut_active_ ? 0x0C : 0x1C;
         break;
     }
 
@@ -330,5 +435,37 @@ class EInkDisplay : public microreader::IDisplay {
   void writeRamBuffer(uint8_t ramBuffer, const uint8_t* data, uint32_t size) {
     sendCommand(ramBuffer);
     sendData(data, size);
+  }
+
+  // Load a custom LUT into the SSD1677's waveform register, or clear the flag.
+  void setCustomLUT_(const uint8_t* lut_data) {
+    if (lut_data) {
+      // Bytes 0..104: waveform + timing + frame rate → CMD_WRITE_LUT (0x32)
+      sendCommand(CMD_WRITE_LUT);
+      sendData(lut_data, 105);
+      // Byte 105: VGH
+      sendCommand(CMD_GATE_VOLTAGE);
+      sendData(lut_data[105]);
+      // Bytes 106..108: VSH1, VSH2, VSL
+      sendCommand(CMD_SOURCE_VOLTAGE);
+      sendData(lut_data[106]);
+      sendData(lut_data[107]);
+      sendData(lut_data[108]);
+      // Byte 109: VCOM
+      sendCommand(CMD_WRITE_VCOM);
+      sendData(lut_data[109]);
+      custom_lut_active_ = true;
+    } else {
+      custom_lut_active_ = false;
+    }
+  }
+
+  // Revert from grayscale mode: the revert LUT reads the {BW,RED} RAM
+  // (still containing LSB/MSB plane data) and drives each pixel back to BW.
+  void grayscale_revert_() {
+    in_grayscale_mode_ = false;
+    setCustomLUT_(kLutGrayscaleRevert);
+    refreshDisplay(EPD_FAST_REFRESH);
+    setCustomLUT_(nullptr);
   }
 };

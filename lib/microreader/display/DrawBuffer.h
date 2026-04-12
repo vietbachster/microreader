@@ -16,6 +16,9 @@ enum class Rotation { Deg0 = 0, Deg90 = 90 };
 // Refresh mode for full-screen updates.
 enum class RefreshMode { Full, Half };
 
+// Which bitmap plane to read from a GlyphData during grayscale rendering.
+enum class GrayPlane { BW, LSB, MSB };
+
 // Physical screen constants and bit-packed pixel helpers (used internally by DrawBuffer).
 struct DisplayFrame {
   // The full size is 800x480 but we only use 788x480 to avoid the hidden areas.
@@ -34,7 +37,28 @@ class IDisplay {
   virtual void full_refresh(const uint8_t* pixels, RefreshMode mode) = 0;
 
   // Partial refresh: new_pixels → BW RAM. Driver tracks previous frame for RED RAM.
-  virtual void partial_refresh(const uint8_t* new_pixels) = 0;
+  // prev_pixels is the previous BW frame (used to restore BW RAM after grayscale revert).
+  virtual void partial_refresh(const uint8_t* new_pixels, const uint8_t* prev_pixels) = 0;
+
+  // Write data to BW RAM only (no refresh). Used for grayscale LSB plane.
+  virtual void write_ram_bw(const uint8_t* data) {
+    (void)data;
+  }
+
+  // Write data to RED RAM only (no refresh). Used for grayscale MSB plane.
+  virtual void write_ram_red(const uint8_t* data) {
+    (void)data;
+  }
+
+  // Trigger a grayscale display refresh using a custom LUT.
+  // Assumes BW RAM and RED RAM have already been written via write_ram_bw/write_ram_red.
+  virtual void grayscale_refresh() {}
+
+  // Revert grayscale overlay and restore prev_pixels into RED RAM.
+  // Must be called while the buffer holding the pre-grayscale BW frame is still valid.
+  virtual void revert_grayscale(const uint8_t* prev_pixels) {
+    (void)prev_pixels;
+  }
 
   // Put the display controller into deep sleep (low-power mode).
   virtual void deep_sleep() {}
@@ -174,6 +198,33 @@ class DrawBuffer {
   // Only white pixels (bit=1) are drawn when invert=true.
   void draw_glyph(int x, int y, const uint8_t* bits, int bitmap_width, int bitmap_height, int x_offset, int y_offset,
                   bool white) {
+    draw_glyph_impl_(inactive_(), x, y, bits, bitmap_width, bitmap_height, x_offset, y_offset, white);
+  }
+
+  // Draw a glyph from a specific grayscale plane into an explicit buffer.
+  void draw_glyph_plane(uint8_t* buf, int x, int y, const GlyphData& g, GrayPlane plane, bool white) {
+    const uint8_t* bits = nullptr;
+    switch (plane) {
+      case GrayPlane::BW:
+        bits = g.bits;
+        break;
+      case GrayPlane::LSB:
+        bits = g.gray_lsb_bits;
+        break;
+      case GrayPlane::MSB:
+        bits = g.gray_msb_bits;
+        break;
+    }
+    if (bits) {
+      // Gray planes use inverted bit polarity: bit=1 means gray pixel present.
+      const bool invert = (plane != GrayPlane::BW);
+      draw_glyph_impl_(buf, x, y, bits, g.bitmap_width, g.bitmap_height, g.x_offset, g.y_offset, white, invert);
+    }
+  }
+
+ private:
+  static void draw_glyph_impl_(uint8_t* buf, int x, int y, const uint8_t* bits, int bitmap_width, int bitmap_height,
+                               int x_offset, int y_offset, bool white, bool invert_select = false) {
     if (!bits || bitmap_width <= 0 || bitmap_height <= 0)
       return;
     const int gx = x + x_offset;
@@ -185,22 +236,27 @@ class DrawBuffer {
       if (ly < 0 || ly >= kHeight)
         continue;
       const uint8_t* row_data = bits + row * row_stride;
-      // Draw only ink pixels (bit=0 in MBF = black).
-      // We need to set them to the requested color (usually black = !white).
-      // Iterate through the row and draw individual ink pixels.
       for (int col = 0; col < bitmap_width; ++col) {
         const int lx = gx + col;
         if (lx < 0 || lx >= kWidth)
           continue;
         const bool bit_set = (row_data[col >> 3] >> (7 - (col & 7))) & 1;
-        if (!bit_set) {
-          // Ink pixel — draw it in the requested color
-          set_pixel(lx, ly, white);
+        if (invert_select ? bit_set : !bit_set) {
+          // Ink pixel — set in buf via physical rotation.
+          const int px = ly;  // Deg90: logical Y → physical X
+          const int py = DisplayFrame::kPhysicalHeight - 1 - lx;
+          const size_t bidx = static_cast<size_t>(py * DisplayFrame::kStride + px / 8);
+          const uint8_t bit = static_cast<uint8_t>(0x80u >> (px & 7));
+          if (white)
+            buf[bidx] |= bit;
+          else
+            buf[bidx] &= static_cast<uint8_t>(~bit);
         }
       }
     }
   }
 
+ public:
   // Draw proportional text using a BitmapFont. Cursor starts at (x, baseline_y)
   // where baseline_y is the Y position of the text baseline.
   // Returns the X position after the last character (cursor advance).
@@ -226,6 +282,40 @@ class DrawBuffer {
     return draw_text_proportional(x, baseline_y, text, text ? strlen(text) : 0, fonts, white, style, size);
   }
 
+  // ── Plane-aware text rendering (for grayscale two-pass) ─────────────────
+
+  // Render text from a specific grayscale plane into an explicit buffer.
+  int draw_text_plane(uint8_t* buf, int x, int baseline_y, const char* text, size_t len, const BitmapFontSet& fonts,
+                      GrayPlane plane, bool white, FontStyle style = FontStyle::Regular,
+                      FontSize size = FontSize::Normal);
+
+  // ── Grayscale display operations ─────────────────────────────────────
+
+  // Write the inactive buffer to BW RAM only (no refresh).
+  void write_ram_bw() {
+    display_.write_ram_bw(inactive_());
+  }
+
+  // Write the inactive buffer to RED RAM only (no refresh).
+  void write_ram_red() {
+    display_.write_ram_red(inactive_());
+  }
+
+  // Trigger grayscale refresh (assumes BW/RED RAM already written).
+  void grayscale_refresh() {
+    display_.grayscale_refresh();
+  }
+
+  // Revert grayscale using the active (displayed) buffer as prev_pixels.
+  void revert_grayscale() {
+    display_.revert_grayscale(active_());
+  }
+
+  // Provide direct access to the inactive buffer for multi-pass rendering.
+  uint8_t* render_buf() {
+    return inactive_();
+  }
+
   // Draw a filled circle.
   void draw_circle(int cx, int cy, int r, bool white) {
     if (r <= 0)
@@ -247,7 +337,7 @@ class DrawBuffer {
 
   // Swap active↔inactive, then do a partial hardware refresh.
   void refresh() {
-    display_.partial_refresh(inactive_());
+    display_.partial_refresh(inactive_(), active_());
     active_idx_ = 1 - active_idx_;
   }
 
@@ -397,6 +487,44 @@ inline int DrawBuffer::draw_text_proportional(int x, int baseline_y, const char*
     if (g.bits) {
       draw_glyph(cursor_x, baseline_y, g.bits, g.bitmap_width, g.bitmap_height, g.x_offset, g.y_offset, white);
     }
+    cursor_x += g.advance_width;
+  }
+  return cursor_x;
+}
+
+inline int DrawBuffer::draw_text_plane(uint8_t* buf, int x, int baseline_y, const char* text, size_t len,
+                                       const BitmapFontSet& fonts, GrayPlane plane, bool white, FontStyle style,
+                                       FontSize size) {
+  const BitmapFont* f = fonts.get(size);
+  if (!text || len == 0 || !f || !f->valid())
+    return x;
+  const char* p = text;
+  const char* end = text + len;
+  int cursor_x = x;
+  while (p < end) {
+    char32_t cp = 0;
+    uint8_t b = static_cast<uint8_t>(*p);
+    if (b < 0x80) {
+      cp = b;
+      ++p;
+    } else if (b < 0xE0 && p + 1 < end) {
+      cp = (static_cast<char32_t>(b & 0x1F) << 6) | (static_cast<uint8_t>(p[1]) & 0x3F);
+      p += 2;
+    } else if (b < 0xF0 && p + 2 < end) {
+      cp = (static_cast<char32_t>(b & 0x0F) << 12) | (static_cast<char32_t>(static_cast<uint8_t>(p[1]) & 0x3F) << 6) |
+           (static_cast<uint8_t>(p[2]) & 0x3F);
+      p += 3;
+    } else if (b < 0xF8 && p + 3 < end) {
+      cp = (static_cast<char32_t>(b & 0x07) << 18) | (static_cast<char32_t>(static_cast<uint8_t>(p[1]) & 0x3F) << 12) |
+           (static_cast<char32_t>(static_cast<uint8_t>(p[2]) & 0x3F) << 6) | (static_cast<uint8_t>(p[3]) & 0x3F);
+      p += 4;
+    } else {
+      ++p;
+      cp = 0xFFFD;
+    }
+
+    GlyphData g = f->glyph_data(cp, style);
+    draw_glyph_plane(buf, cursor_x, baseline_y, g, plane, white);
     cursor_x += g.advance_width;
   }
   return cursor_x;

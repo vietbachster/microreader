@@ -316,14 +316,27 @@ bool ReaderScreen::update(const ButtonState& buttons, DrawBuffer& buf, IRuntime&
   }
 
   bool changed = false;
-  if (buttons.is_pressed(Button::Button2))
+  if (buttons.is_pressed(Button::Button2) || buttons.is_pressed(Button::Up))
     changed = next_page_();
-  if (buttons.is_pressed(Button::Button3))
+  if (buttons.is_pressed(Button::Button3) || buttons.is_pressed(Button::Down))
     changed = prev_page_();
 
   if (changed) {
+    if (grayscale_active_) {
+      buf.revert_grayscale();
+      grayscale_active_ = false;
+    }
     render_page_(buf);
     buf.refresh();
+  }
+
+  // Deferred grayscale: only apply when no nav buttons are held, so rapid
+  // page flipping stays fast and grayscale is applied once the user stops.
+  if (grayscale_pending_ && !buttons.is_down(Button::Button2) && !buttons.is_down(Button::Button3) &&
+      !buttons.is_down(Button::Up) && !buttons.is_down(Button::Down)) {
+    grayscale_pending_ = false;
+    apply_grayscale_(buf);
+    grayscale_active_ = true;
   }
 
   return true;
@@ -383,73 +396,43 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
     images.push_back(itd);
   }
 
-  // ── Build word list ─────────────────────────────────────────────────────
-  struct DrawWord {
-    int x, y, len, glyph_advance;
-    FontStyle style;
-    FontSize size;
-    VerticalAlign vertical_align;
-    char text[64];
-  };
-  std::vector<DrawWord> words;
-  for (const auto& item : page_.text_items) {
-    for (const auto& w : item.line.words) {
-      DrawWord dw;
-      dw.x = kPaddingLeft + w.x;
-      dw.y = item.y_offset + page_.vertical_offset;
-      dw.len = static_cast<int>(w.len);
-      if (dw.len > 63)
-        dw.len = 63;
-      std::memcpy(dw.text, w.text, dw.len);
-      dw.text[dw.len] = '\0';
-      dw.style = w.style;
-      dw.size = w.size;
-      dw.vertical_align = w.vertical_align;
-      dw.glyph_advance = font.char_width(' ', w.style, w.size);
-      words.push_back(dw);
-    }
-  }
+  // Track whether grayscale pass is needed (deferred to update()).
+  grayscale_pending_ = fset && fset->has_grayscale();
 
-  // ── Draw ────────────────────────────────────────────────────────────────
-  // White background.
+  // ── BW rendering ────────────────────────────────────────────────────────
   buf.fill(true);
 
-  // Text words — draw glyphs only (background already white).
-  for (const auto& dw : words) {
-    if (dw.len == 0)
-      continue;
-    if (fset) {
-      // y_offset is line top; draw_text_proportional expects baseline Y.
-      // Use Normal baseline for all sizes so mixed-size text shares one baseline.
-      int baseline_y = dw.y + fset->baseline(FontSize::Normal);
-      // Vertical shift for superscript/subscript.
-      if (dw.vertical_align == VerticalAlign::Super)
-        baseline_y -= fset->y_advance(FontSize::Normal) * 20 / 100;
-      else if (dw.vertical_align == VerticalAlign::Sub)
-        baseline_y += fset->y_advance(FontSize::Normal) * 20 / 100;
-      buf.draw_text_proportional(dw.x, baseline_y, dw.text, static_cast<size_t>(dw.len), *fset, false /*black*/,
-                                 dw.style, dw.size);
-    } else {
-      buf.draw_text_no_bg(dw.x, dw.y, dw.text, false /*black*/, kScale);
+  if (fset) {
+    render_text_(buf, *fset, GrayPlane::BW, false);
+  } else {
+    for (const auto& item : page_.text_items) {
+      for (const auto& w : item.line.words) {
+        if (w.len == 0)
+          continue;
+        char text[64];
+        int tlen = static_cast<int>(w.len);
+        if (tlen > 63)
+          tlen = 63;
+        std::memcpy(text, w.text, tlen);
+        text[tlen] = '\0';
+        buf.draw_text_no_bg(kPaddingLeft + w.x, static_cast<int>(item.y_offset + page_.vertical_offset), text,
+                            false /*black*/, kScale);
+      }
     }
   }
 
-  // Horizontal rules.
   for (const auto& hr : page_.hr_items) {
     buf.fill_rect(static_cast<int>(hr.x_offset), static_cast<int>(hr.y_offset + page_.vertical_offset),
                   static_cast<int>(hr.width), 1, false);
   }
 
-  // Images — decode directly to the display buffer (no intermediate bitmap).
   for (const auto& itd : images) {
     if (!decode_image_to_buffer_(itd.offset, buf, itd.x, itd.y, static_cast<uint16_t>(itd.w),
                                  static_cast<uint16_t>(itd.h))) {
-      // Fallback: black rectangle for failed decodes.
       buf.fill_rect(itd.x, itd.y, itd.w, itd.h, false);
     }
   }
 
-  // ── Progress percentage ───────────────────────────────────────────────
   if (mrb_.paragraph_count() > 0) {
     const bool is_last_chapter = chapter_idx_ + 1 >= mrb_.chapter_count();
     uint32_t cur = page_pos_.paragraph;
@@ -462,16 +445,62 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
   }
 
   // ── Timing ──────────────────────────────────────────────────────────────
+  int n_words = 0;
+  for (const auto& ti : page_.text_items)
+    n_words += static_cast<int>(ti.line.words.size());
+
 #ifdef ESP_PLATFORM
   long render_us = (long)(esp_timer_get_time() - t0);
   ESP_LOGI("perf", "render_page: %ldus (%ld.%ldms) words=%d images=%d", render_us, render_us / 1000,
-           (render_us % 1000) / 100, (int)words.size(), (int)images.size());
+           (render_us % 1000) / 100, n_words, (int)images.size());
 #else
   auto t1 = std::chrono::high_resolution_clock::now();
   auto us = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
-  printf("[perf] render_page: %lldus (%.1fms) words=%d images=%d\n", (long long)us, us / 1000.0, (int)words.size(),
+  printf("[perf] render_page: %lldus (%.1fms) words=%d images=%d\n", (long long)us, us / 1000.0, n_words,
          (int)images.size());
 #endif
+}
+
+void ReaderScreen::render_text_(DrawBuffer& buf, const BitmapFontSet& fset, GrayPlane plane, bool white) {
+  uint8_t* render = buf.render_buf();
+  for (const auto& item : page_.text_items) {
+    for (const auto& w : item.line.words) {
+      if (w.len == 0)
+        continue;
+      int x = kPaddingLeft + w.x;
+      int baseline_y = static_cast<int>(item.y_offset + page_.vertical_offset) + fset.baseline(FontSize::Normal);
+      if (w.vertical_align == VerticalAlign::Super)
+        baseline_y -= fset.y_advance(FontSize::Normal) * 20 / 100;
+      else if (w.vertical_align == VerticalAlign::Sub)
+        baseline_y += fset.y_advance(FontSize::Normal) * 20 / 100;
+      char text[64];
+      int tlen = static_cast<int>(w.len);
+      if (tlen > 63)
+        tlen = 63;
+      std::memcpy(text, w.text, tlen);
+      text[tlen] = '\0';
+      buf.draw_text_plane(render, x, baseline_y, text, static_cast<size_t>(tlen), fset, plane, white, w.style, w.size);
+    }
+  }
+}
+
+void ReaderScreen::apply_grayscale_(DrawBuffer& buf) {
+  const BitmapFontSet* fset = ext_font_set_ ? ext_font_set_ : (font_set_.valid() ? &font_set_ : nullptr);
+  if (!fset || !fset->has_grayscale())
+    return;
+
+  // LSB plane → BW RAM (no refresh)
+  buf.fill(false);
+  render_text_(buf, *fset, GrayPlane::LSB, true);
+  buf.write_ram_bw();
+
+  // MSB plane → RED RAM (no refresh)
+  buf.fill(false);
+  render_text_(buf, *fset, GrayPlane::MSB, true);
+  buf.write_ram_red();
+
+  // Trigger grayscale refresh with custom LUT
+  buf.grayscale_refresh();
 }
 
 bool ReaderScreen::next_page_() {
