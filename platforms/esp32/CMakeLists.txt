@@ -8,9 +8,10 @@ set(lib_sources
     ${LIB}/Application.cpp
     ${LIB}/Loop.cpp
     ${LIB}/screens/BouncingBallDemo.cpp
+    ${LIB}/screens/ListMenuScreen.cpp
     ${LIB}/screens/MainMenu.cpp
     ${LIB}/screens/ReaderScreen.cpp
-    ${LIB}/screens/BookSelectScreen.cpp
+    ${LIB}/screens/SettingsScreen.cpp
     ${LIB}/screens/ChapterSelectScreen.cpp
     ${LIB}/content/ZipReader.cpp
     ${LIB}/content/XmlReader.cpp

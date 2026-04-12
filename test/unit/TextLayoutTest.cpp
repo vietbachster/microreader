@@ -4,7 +4,6 @@
 
 #include "microreader/content/TextLayout.h"
 #include "microreader/display/DrawBuffer.h"
-#include "microreader/display/Font.h"
 
 using namespace microreader;
 
@@ -1154,7 +1153,10 @@ TEST(PageLayout, FirstParagraphTopMarginNotAppliedMidChapter) {
   // should only apply default para_spacing when starting mid-chapter.
   Chapter ch;
   TextParagraph tp1;
-  tp1.runs.push_back(microreader::Run("First paragraph with lots of text to fill a page and force a page break somewhere in the middle of the content flow", FontStyle::Regular, false));
+  tp1.runs.push_back(
+      microreader::Run("First paragraph with lots of text to fill a page and force a page break somewhere in the "
+                       "middle of the content flow",
+                       FontStyle::Regular, false));
   ch.paragraphs.push_back(Paragraph::make_text(std::move(tp1)));
 
   TextParagraph tp2;

@@ -178,6 +178,16 @@ void ReaderScreen::start(DrawBuffer& buf) {
     chapter_select_.clear_pending();
   }
   load_chapter_(saved_chapter_idx_);
+  if (!chapter_src_) {
+    // Fallback to chapter 0 if saved index is invalid.
+    saved_chapter_idx_ = 0;
+    saved_page_pos_ = PagePosition{0, 0};
+    load_chapter_(0);
+  }
+  if (!chapter_src_) {
+    open_ok_ = false;
+    goto show_error;
+  }
   page_pos_ = saved_page_pos_;
   render_page_(buf);
 #ifdef ESP_PLATFORM
@@ -218,7 +228,7 @@ bool ReaderScreen::update(const ButtonState& buttons, DrawBuffer& buf, IRuntime&
   if (buttons.is_pressed(Button::Button1) && !mrb_.toc().entries.empty()) {
     saved_chapter_idx_ = chapter_idx_;
     saved_page_pos_ = page_pos_;
-    chapter_select_.populate(mrb_.toc());
+    chapter_select_.populate(mrb_.toc(), static_cast<uint16_t>(chapter_idx_));
     nav_chosen_ = &chapter_select_;
     return false;
   }

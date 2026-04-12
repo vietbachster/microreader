@@ -1,24 +1,26 @@
 #pragma once
 
+#include <cstdint>
 #include <cstring>
+#include <vector>
 
-#include "../Input.h"
 #include "../content/ContentModel.h"
-#include "../display/DrawBuffer.h"
-#include "IScreen.h"
+#include "ListMenuScreen.h"
 
 namespace microreader {
 
 // Chapter selection screen — lists TOC entries from an MRB file.
+// Built on top of ListMenuScreen for consistent UI and scrolling.
 // Button3/Button2 = navigate up/down, Button1 = jump to chapter, Button0 = cancel.
-class ChapterSelectScreen final : public IScreen {
+class ChapterSelectScreen final : public ListMenuScreen {
  public:
-  static constexpr int kMaxItems = 200;
+  static constexpr int kMaxLabelLen = 40;
 
   ChapterSelectScreen() = default;
 
   // Populate the list from a TableOfContents. Call before pushing this screen.
-  void populate(const TableOfContents& toc);
+  // current_chapter selects the matching TOC entry so the user sees their position.
+  void populate(const TableOfContents& toc, uint16_t current_chapter = 0);
 
   const char* name() const override {
     return "Chapters";
@@ -40,38 +42,22 @@ class ChapterSelectScreen final : public IScreen {
     has_pending_ = false;
   }
 
-  void start(DrawBuffer& buf) override;
-  void stop() override;
-  bool update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& runtime) override;
+ protected:
+  void on_start() override;
+  bool on_select(int index) override;
 
  private:
-  static constexpr int kScale = 2;
-  static constexpr int kGlyphW = 8 * kScale;
-  static constexpr int kGlyphH = 8 * kScale;
-  static constexpr int kLineHeight = kGlyphH + 6;
-  static constexpr int kPadding = 12;
-  static constexpr int kIndentW = kGlyphW * 2;  // pixels per depth level
-  static constexpr int kListY = kPadding + kLineHeight + 4;
-  static constexpr int kVisible = (DrawBuffer::kHeight - kListY) / kLineHeight;
-  static constexpr int kMaxLabelLen = 28;
-
   struct Entry {
     char label[kMaxLabelLen + 1];
     uint16_t chapter_idx;
-    uint8_t depth;
     uint16_t para_index;
   };
-  Entry entries_[kMaxItems] = {};
-  int count_ = 0;
-  int selected_ = 0;
-  int scroll_offset_ = 0;  // index of first visible row
+  std::vector<Entry> entries_;
+  int initial_selected_ = 0;
 
   uint16_t pending_chapter_ = 0;
   uint16_t pending_para_index_ = 0;
   bool has_pending_ = false;
-
-  void draw_all_(DrawBuffer& buf) const;
-  void ensure_visible_();
 };
 
 }  // namespace microreader

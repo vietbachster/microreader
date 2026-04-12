@@ -9,7 +9,6 @@
 #include "../content/mrb/MrbConverter.h"
 #include "../content/mrb/MrbReader.h"
 #include "../display/DrawBuffer.h"
-#include "../display/Font.h"
 #include "ChapterSelectScreen.h"
 #include "IScreen.h"
 

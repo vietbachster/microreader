@@ -54,10 +54,10 @@ int main() {
       const char* suffix;  // filename suffix
     };
     static constexpr SizeInfo kSizes[] = {
-        {0, "Small",   "small"},
-        {1, "Normal",  "normal"},
-        {2, "Large",   "large"},
-        {3, "XLarge",  "xlarge"},
+        {0, "Small",   "small"  },
+        {1, "Normal",  "normal" },
+        {2, "Large",   "large"  },
+        {3, "XLarge",  "xlarge" },
         {4, "XXLarge", "xxlarge"},
     };
 

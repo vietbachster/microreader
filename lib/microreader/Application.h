@@ -8,7 +8,6 @@
 #include "display/DrawBuffer.h"
 #include "screens/IScreen.h"
 #include "screens/MainMenu.h"
-#include "screens/ReaderScreen.h"
 
 namespace microreader {
 

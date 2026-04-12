@@ -7,6 +7,8 @@
 #ifndef QEMU_BUILD
 #include "hal/usb_serial_jtag_ll.h"
 #endif
+#include <cstdio>
+
 #include "font_partition.h"
 #include "input.h"
 #include "microreader/Application.h"

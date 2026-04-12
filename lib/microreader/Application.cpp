@@ -29,7 +29,7 @@ void Application::start(DrawBuffer& buf) {
 #endif
 
   if (reader_font_)
-    menu_.book_select()->set_reader_font(reader_font_);
+    menu_.set_reader_font(reader_font_);
 
   screen_mgr_.push(&menu_, buf);
   buf.full_refresh();
@@ -82,7 +82,7 @@ void Application::update(const ButtonState& buttons, uint32_t dt_ms, DrawBuffer&
     if (!top->update(buttons_, buf, runtime)) {
       // Screen signalled exit.
       if (top == &menu_) {
-        // Menu chose a screen — push it onto the stack.
+        // Menu chose a sub-screen — push it.
         IScreen* chosen = menu_.chosen();
         if (chosen) {
           screen_mgr_.push(chosen, buf);
@@ -91,14 +91,14 @@ void Application::update(const ButtonState& buttons, uint32_t dt_ms, DrawBuffer&
       } else {
         // Check if the exiting screen selected a sub-screen to push.
         IScreen* next = nullptr;
-        auto* book_sel = menu_.book_select();
-        if (top == book_sel)
-          next = book_sel->chosen();
-        else if (top == book_sel->reader())
-          next = book_sel->reader()->chosen();
+        auto* settings = menu_.settings();
+        auto* reader = menu_.reader();
+        if (top == settings)
+          next = settings->chosen();
+        else if (top == reader)
+          next = reader->chosen();
 
         if (next) {
-          // Push the sub-screen (e.g. BookSelect → Reader).
           screen_mgr_.push(next, buf);
           buf.refresh();
         } else {

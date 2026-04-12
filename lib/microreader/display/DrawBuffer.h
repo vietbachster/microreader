@@ -48,18 +48,18 @@ class IDisplay {
 
 // Double-buffered display with simple draw helpers.
 //
-// Uses Deg90 (portrait) rotation: logical 480×800, physical 800×480.
+// Uses Deg90 (portrait) rotation: logical 480×788, physical 788×480.
 // The "inactive" buffer is drawn to; "active" is what's currently displayed.
 // refresh() swaps and does a partial hardware refresh.
 //
-// Scratch buffer loan: scratch_buf1()/scratch_buf2() expose both 48KB buffers
+// Scratch buffer loan: scratch_buf1()/scratch_buf2() expose both ~48KB buffers
 // for callers (e.g. EPUB→MRB conversion). Call reset_after_scratch() when done.
 class DrawBuffer {
  public:
   // Logical portrait dimensions.
-  static constexpr int kWidth = DisplayFrame::kPhysicalHeight;   // 480
-  static constexpr int kHeight = DisplayFrame::kPhysicalWidth;   // 800
-  static constexpr size_t kBufSize = DisplayFrame::kPixelBytes;  // 48000
+  static constexpr int kWidth = DisplayFrame::kPhysicalHeight;
+  static constexpr int kHeight = DisplayFrame::kPhysicalWidth;
+  static constexpr size_t kBufSize = DisplayFrame::kPixelBytes;
 
   explicit DrawBuffer(IDisplay& display) : display_(display) {
     memset(bufs_[0], 0xFF, kBufSize);
@@ -205,14 +205,26 @@ class DrawBuffer {
     }
   }
 
-  // Draw proportional text using a BitmapFontSet. Cursor starts at (x, baseline_y)
+  // Draw proportional text using a BitmapFont. Cursor starts at (x, baseline_y)
   // where baseline_y is the Y position of the text baseline.
   // Returns the X position after the last character (cursor advance).
-  int draw_text_proportional(int x, int baseline_y, const char* text, size_t len, const BitmapFontSet& fonts,
-                             bool white, FontStyle style = FontStyle::Regular,
-                             FontSize size = FontSize::Normal);
+  int draw_text_proportional(int x, int baseline_y, const char* text, size_t len, const BitmapFont& font, bool white,
+                             FontStyle style = FontStyle::Regular);
 
   // Convenience overload for null-terminated strings.
+  int draw_text_proportional(int x, int baseline_y, const char* text, const BitmapFont& font, bool white,
+                             FontStyle style = FontStyle::Regular) {
+    return draw_text_proportional(x, baseline_y, text, text ? strlen(text) : 0, font, white, style);
+  }
+
+  // Overload taking a BitmapFontSet + FontSize — resolves to the appropriate BitmapFont.
+  int draw_text_proportional(int x, int baseline_y, const char* text, size_t len, const BitmapFontSet& fonts,
+                             bool white, FontStyle style = FontStyle::Regular, FontSize size = FontSize::Normal) {
+    const BitmapFont* f = fonts.get(size);
+    return f ? draw_text_proportional(x, baseline_y, text, len, *f, white, style) : x;
+  }
+
+  // Convenience overload for null-terminated strings with BitmapFontSet.
   int draw_text_proportional(int x, int baseline_y, const char* text, const BitmapFontSet& fonts, bool white,
                              FontStyle style = FontStyle::Regular, FontSize size = FontSize::Normal) {
     return draw_text_proportional(x, baseline_y, text, text ? strlen(text) : 0, fonts, white, style, size);
@@ -380,8 +392,8 @@ class DrawBuffer {
 namespace microreader {
 
 inline int DrawBuffer::draw_text_proportional(int x, int baseline_y, const char* text, size_t len,
-                                              const BitmapFontSet& fonts, bool white, FontStyle style, FontSize size) {
-  if (!text || len == 0)
+                                              const BitmapFont& font, bool white, FontStyle style) {
+  if (!text || len == 0 || !font.valid())
     return x;
   const char* p = text;
   const char* end = text + len;
@@ -409,7 +421,7 @@ inline int DrawBuffer::draw_text_proportional(int x, int baseline_y, const char*
       cp = 0xFFFD;
     }
 
-    GlyphData g = fonts.glyph_data(cp, style, size);
+    GlyphData g = font.glyph_data(cp, style);
     if (g.bits) {
       draw_glyph(cursor_x, baseline_y, g.bits, g.bitmap_width, g.bitmap_height, g.x_offset, g.y_offset, white);
     }

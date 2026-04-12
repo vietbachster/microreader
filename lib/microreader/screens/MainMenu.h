@@ -1,69 +1,70 @@
 #pragma once
 
-#include <array>
+#include <cstring>
 
 #include "../Input.h"
 #include "../display/DrawBuffer.h"
-#include "BookSelectScreen.h"
-#include "BouncingBallDemo.h"
-#include "IScreen.h"
+#include "ListMenuScreen.h"
+#include "ReaderScreen.h"
+#include "SettingsScreen.h"
 
 namespace microreader {
 
-// Simple text menu for selecting between screens and triggering actions.
-// Button3/Button2 = navigate up/down, Button1 = select.
-class MainMenu final : public IScreen {
+// Main screen — lists EPUB books from a directory.
+// Button1 = open book, Button0 = settings.
+class MainMenu final : public ListMenuScreen {
  public:
-  static constexpr int kMaxItems = 8;
+  static constexpr int kMaxBooks = 16;
 
   MainMenu() = default;
 
   void set_books_dir(const char* dir) {
-    book_select_.set_books_dir(dir);
+    books_dir_ = dir;
+    settings_.set_books_dir(dir);
+  }
+
+  bool has_books_dir() const {
+    return books_dir_ != nullptr;
+  }
+  const char* books_dir() const {
+    return books_dir_;
   }
 
   const char* name() const override {
-    return "Menu";
+    return "Books";
   }
 
-  IScreen* chosen() const {
-    return chosen_;
+  void set_reader_font(const BitmapFontSet* fonts) {
+    reader_.set_fonts(fonts);
   }
 
-  BookSelectScreen* book_select() {
-    return &book_select_;
+  ReaderScreen* reader() {
+    return &reader_;
+  }
+  SettingsScreen* settings() {
+    return &settings_;
   }
 
-  void start(DrawBuffer& buf) override;
-  void stop() override;
-  bool update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& runtime) override;
+ protected:
+  void on_start() override;
+  bool on_select(int index) override;
+  bool on_back() override;
 
  private:
-  static constexpr int kScale = 2;
-  static constexpr int kGlyphW = 8 * kScale;
-  static constexpr int kGlyphH = 8 * kScale;
-  static constexpr int kLineHeight = kGlyphH + 8;
+  static constexpr int kMaxLabelLen = 28;
 
-  BouncingBallDemo bouncing_ball_;
-  BookSelectScreen book_select_;
+  const char* books_dir_ = nullptr;
 
-  struct Item {
-    const char* label = nullptr;
-    IScreen* target_screen = nullptr;
-    void (*action)(MainMenu& self) = nullptr;
+  struct BookEntry {
+    char path[280];
+    char label[kMaxLabelLen + 1];
   };
-  Item items_[kMaxItems] = {};
-  int count_ = 0;
-  int selected_ = 0;
-  IScreen* chosen_ = nullptr;
+  BookEntry entries_[kMaxBooks] = {};
 
-  void build_items_();
-  void draw_all_(DrawBuffer& buf) const;
+  ReaderScreen reader_;
+  SettingsScreen settings_;
 
-  static void clear_converted_action_(MainMenu& self);
-#ifdef ESP_PLATFORM
-  static void ota_action_(MainMenu& self);
-#endif
+  void scan_directory_();
 };
 
 }  // namespace microreader
