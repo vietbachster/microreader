@@ -53,13 +53,12 @@ class BookSelectScreen final : public IScreen {
   static constexpr int kGlyphH = 8 * kScale;
   static constexpr int kLineHeight = kGlyphH + 8;
   static constexpr int kPadding = 16;
-  static constexpr int kMaxLabelLen = 220;
 
   const char* books_dir_ = nullptr;
 
   struct BookEntry {
     char path[280];
-    char label[kMaxLabelLen + 1];
+    std::string label;
   };
   BookEntry entries_[kMaxBooks] = {};
   int count_ = 0;

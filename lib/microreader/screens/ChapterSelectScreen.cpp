@@ -1,7 +1,5 @@
 #include "ChapterSelectScreen.h"
 
-#include <cstring>
-
 namespace microreader {
 
 void ChapterSelectScreen::populate(const TableOfContents& toc, uint16_t current_chapter, uint16_t current_para) {
@@ -10,11 +8,7 @@ void ChapterSelectScreen::populate(const TableOfContents& toc, uint16_t current_
   initial_selected_ = 0;
   for (const auto& entry : toc.entries) {
     Entry e{};
-    size_t label_len = entry.label.size();
-    if (label_len > kMaxLabelLen)
-      label_len = kMaxLabelLen;
-    std::memcpy(e.label, entry.label.c_str(), label_len);
-    e.label[label_len] = '\0';
+    e.label = entry.label;
     e.chapter_idx = entry.file_idx;
     e.para_index = entry.para_index;
     // Select the last TOC entry at or before the current reading position.
@@ -30,7 +24,7 @@ void ChapterSelectScreen::populate(const TableOfContents& toc, uint16_t current_
 void ChapterSelectScreen::on_start() {
   title_ = !entries_.empty() ? "Chapters" : "No chapters";
   for (auto& e : entries_)
-    add_item(e.label);
+    add_item(e.label.c_str());
   set_selected(initial_selected_);
 }
 

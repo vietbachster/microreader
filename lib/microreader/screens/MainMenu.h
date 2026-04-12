@@ -54,13 +54,11 @@ class MainMenu final : public ListMenuScreen {
   bool on_back() override;
 
  private:
-  static constexpr int kMaxLabelLen = 220;
-
   const char* books_dir_ = nullptr;
 
   struct BookEntry {
     char path[280];
-    char label[kMaxLabelLen + 1];
+    std::string label;
   };
   BookEntry entries_[kMaxBooks] = {};
 

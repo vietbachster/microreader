@@ -30,12 +30,8 @@ void MainMenu::scan_directory_() {
     if (len > 5 && len < 220 && std::strcmp(ent->d_name + len - 5, ".epub") == 0) {
       auto& e = entries_[book_count];
       std::snprintf(e.path, sizeof(e.path), "%s/%s", books_dir_, ent->d_name);
-      size_t name_len = len - 5;
-      if (name_len > kMaxLabelLen)
-        name_len = kMaxLabelLen;
-      std::memcpy(e.label, ent->d_name, name_len);
-      e.label[name_len] = '\0';
-      add_item(e.label);
+      e.label.assign(ent->d_name, len - 5);
+      add_item(e.label.c_str());
       ++book_count;
     }
   }
@@ -55,13 +51,8 @@ void MainMenu::scan_directory_() {
       if (path_str.size() >= sizeof(e.path))
         continue;
       std::memcpy(e.path, path_str.c_str(), path_str.size() + 1);
-      auto stem = entry.path().stem().string();
-      size_t name_len = stem.size();
-      if (name_len > kMaxLabelLen)
-        name_len = kMaxLabelLen;
-      std::memcpy(e.label, stem.c_str(), name_len);
-      e.label[name_len] = '\0';
-      add_item(e.label);
+      e.label = entry.path().stem().string();
+      add_item(e.label.c_str());
       ++book_count;
     }
   } catch (...) {}

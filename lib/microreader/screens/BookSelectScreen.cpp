@@ -29,11 +29,7 @@ void BookSelectScreen::scan_directory_() {
     if (len > 5 && len < 220 && std::strcmp(ent->d_name + len - 5, ".epub") == 0) {
       auto& e = entries_[count_];
       std::snprintf(e.path, sizeof(e.path), "%s/%s", books_dir_, ent->d_name);
-      size_t name_len = len - 5;
-      if (name_len > kMaxLabelLen)
-        name_len = kMaxLabelLen;
-      std::memcpy(e.label, ent->d_name, name_len);
-      e.label[name_len] = '\0';
+      e.label.assign(ent->d_name, len - 5);
       ++count_;
     }
   }
@@ -53,12 +49,7 @@ void BookSelectScreen::scan_directory_() {
       if (path_str.size() >= sizeof(e.path))
         continue;
       std::memcpy(e.path, path_str.c_str(), path_str.size() + 1);
-      auto stem = entry.path().stem().string();
-      size_t name_len = stem.size();
-      if (name_len > kMaxLabelLen)
-        name_len = kMaxLabelLen;
-      std::memcpy(e.label, stem.c_str(), name_len);
-      e.label[name_len] = '\0';
+      e.label = entry.path().stem().string();
       ++count_;
     }
   } catch (...) {}
@@ -72,7 +63,7 @@ void BookSelectScreen::draw_all_(DrawBuffer& buf) const {
   buf.draw_text(kPadding, kPadding, title, true, kScale);
   const int list_y = kPadding + kLineHeight + 4;
   for (int i = 0; i < count_; ++i) {
-    buf.draw_text(kPadding, list_y + i * kLineHeight, entries_[i].label, i != selected_, kScale);
+    buf.draw_text(kPadding, list_y + i * kLineHeight, entries_[i].label.c_str(), i != selected_, kScale);
   }
   (void)W;
 }

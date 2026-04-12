@@ -14,8 +14,6 @@ namespace microreader {
 // Button3/Button2 = navigate up/down, Button1 = jump to chapter, Button0 = cancel.
 class ChapterSelectScreen final : public ListMenuScreen {
  public:
-  static constexpr int kMaxLabelLen = 220;
-
   ChapterSelectScreen() = default;
 
   // Populate the list from a TableOfContents. Call before pushing this screen.
@@ -48,7 +46,7 @@ class ChapterSelectScreen final : public ListMenuScreen {
 
  private:
   struct Entry {
-    char label[kMaxLabelLen + 1];
+    std::string label;
     uint16_t chapter_idx;
     uint16_t para_index;
   };
