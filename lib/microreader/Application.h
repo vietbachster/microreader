@@ -21,7 +21,16 @@ class Application {
   }
   void set_data_dir(const char* dir) {
     menu_.set_data_dir(dir);
+    data_dir_ = dir;
   }
+  // Path to data directory for settings/state persistence
+  const char* data_dir_ = nullptr;
+  // Path to the settings file (cached after set_data_dir)
+  std::string settings_path_;
+  // Save last screen and book info to settings file
+  void save_settings_();
+  // Load last screen and book info from settings file
+  bool load_settings_(std::string& last_screen, std::string& last_book_path);
 
   // Set the proportional font set for the reader screen. Must outlive the app.
   void set_reader_font(const BitmapFontSet* fonts) {
@@ -44,7 +53,6 @@ class Application {
 
   ScreenManager screen_mgr_;
   MainMenu menu_;
-  ReaderScreen auto_reader_;  // used by auto_open_book
   const BitmapFontSet* reader_font_ = nullptr;
 };
 

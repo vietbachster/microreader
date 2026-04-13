@@ -20,17 +20,21 @@ namespace microreader {
 // Button1 = open chapter list (if TOC available).
 class ReaderScreen final : public IScreen {
  public:
+  // Get the current book path
+  std::string get_path() {
+    return path_;
+  }
   ReaderScreen() = default;
-  explicit ReaderScreen(const char* epub_path);
+  explicit ReaderScreen(std::string epub_path) : path_(std::move(epub_path)) {}
 
-  void set_path(const char* epub_path) {
-    path_ = epub_path;
+  void set_path(std::string epub_path) {
+    path_ = std::move(epub_path);
   }
   bool has_path() const {
-    return path_ != nullptr;
+    return !path_.empty();
   }
-  void set_data_dir(const char* dir) {
-    data_dir_ = dir;
+  void set_data_dir(std::string dir) {
+    data_dir_ = std::move(dir);
   }
 
   // Set the proportional bitmap font for rendering. If null, falls back to
@@ -70,8 +74,8 @@ class ReaderScreen final : public IScreen {
 
   BitmapFontSet font_set_;                       // owned set (for single-font set_font() path)
   const BitmapFontSet* ext_font_set_ = nullptr;  // external set (from set_fonts())
-  const char* path_ = nullptr;
-  const char* data_dir_ = nullptr;
+  std::string path_;
+  std::string data_dir_;
   std::string mrb_path_;
   std::string book_key_;       // sanitized title, used for .mrb/.pos naming
   DrawBuffer* buf_ = nullptr;  // set in start(), cleared in stop()

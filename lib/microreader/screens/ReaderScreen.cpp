@@ -39,7 +39,7 @@ bool ReaderScreen::resolve_image_size_(uint16_t key, uint16_t& w, uint16_t& h) {
   }
   // Read source dimensions from the image header via streaming.
   StdioZipFile file;
-  if (!file.open(path_))
+  if (!file.open(path_.c_str()))
     return false;
   ZipEntry entry;
   if (ZipReader::read_local_entry(file, ref.local_header_offset, entry) != ZipError::Ok)
@@ -82,7 +82,7 @@ bool ReaderScreen::resolve_image_size_(uint16_t key, uint16_t& w, uint16_t& h) {
 bool ReaderScreen::decode_image_to_buffer_(uint32_t offset, DrawBuffer& buf, int dest_x, int dest_y, uint16_t max_w,
                                            uint16_t max_h) {
   StdioZipFile file;
-  if (!file.open(path_))
+  if (!file.open(path_.c_str()))
     return false;
   ZipEntry entry;
   if (ZipReader::read_local_entry(file, offset, entry) != ZipError::Ok)
@@ -173,18 +173,16 @@ static std::string make_book_key(const EpubMetadata& meta, const char* epub_path
   return std::string(name, len);
 }
 
-ReaderScreen::ReaderScreen(const char* epub_path) : path_(epub_path) {}
-
 void ReaderScreen::start(DrawBuffer& buf) {
   buf_ = &buf;
   book_key_.clear();
 
   // Build .mrb path from epub filename: <data_dir>/<basename>.mrb
   {
-    const char* name = path_;
-    const char* sep = std::strrchr(path_, '/');
+    const char* name = path_.c_str();
+    const char* sep = std::strrchr(path_.c_str(), '/');
 #ifdef _WIN32
-    const char* bsep = std::strrchr(path_, '\\');
+    const char* bsep = std::strrchr(path_.c_str(), '\\');
     if (bsep && (!sep || bsep > sep))
       sep = bsep;
 #endif
@@ -201,7 +199,7 @@ void ReaderScreen::start(DrawBuffer& buf) {
 #ifdef ESP_PLATFORM
     int64_t open_start = esp_timer_get_time();
 #endif
-    auto err = book_.open(path_, buf.scratch_buf1(), buf.scratch_buf2());
+    auto err = book_.open(path_.c_str(), buf.scratch_buf1(), buf.scratch_buf2());
 #ifdef ESP_PLATFORM
     long open_ms = (long)((esp_timer_get_time() - open_start) / 1000);
     ESP_LOGI("perf", "Book::open: %ldms", open_ms);
@@ -238,7 +236,7 @@ void ReaderScreen::start(DrawBuffer& buf) {
 
   // Derive a stable book key from MRB metadata (title + author).
   // This survives epub file renames while staying unique across different books.
-  book_key_ = make_book_key(mrb_.metadata(), path_);
+  book_key_ = make_book_key(mrb_.metadata(), path_.c_str());
 
   open_ok_ = true;
   chapter_idx_ = 0;
@@ -560,9 +558,9 @@ bool ReaderScreen::prev_page_() {
 // ---------------------------------------------------------------------------
 
 void ReaderScreen::save_position_() {
-  if (!data_dir_ || book_key_.empty())
+  if (data_dir_.empty() || book_key_.empty())
     return;
-  std::string path = std::string(data_dir_) + "/" + book_key_ + ".pos";
+  std::string path = data_dir_ + "/" + book_key_ + ".pos";
   FILE* f = std::fopen(path.c_str(), "w");
   if (!f)
     return;
@@ -572,9 +570,9 @@ void ReaderScreen::save_position_() {
 }
 
 void ReaderScreen::load_position_() {
-  if (!data_dir_ || book_key_.empty())
+  if (data_dir_.empty() || book_key_.empty())
     return;
-  std::string path = std::string(data_dir_) + "/" + book_key_ + ".pos";
+  std::string path = data_dir_ + "/" + book_key_ + ".pos";
   FILE* f = std::fopen(path.c_str(), "r");
   if (!f)
     return;
