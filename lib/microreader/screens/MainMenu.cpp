@@ -22,7 +22,7 @@ void MainMenu::on_start() {
 }
 
 bool MainMenu::on_select(int index) {
-  reader_.set_path(entries_[index].path);
+  reader_.set_path(entries_[index].path.c_str());
   chosen_ = &reader_;
   return false;
 }
@@ -36,42 +36,39 @@ void MainMenu::scan_directory_() {
   if (!books_dir_)
     return;
 
-  int book_count = 0;
+  entries_.clear();
+
+  auto add_book = [this](std::string path, std::string label) {
+    BookEntry e;
+    e.path = std::move(path);
+    e.label = std::move(label);
+    entries_.push_back(std::move(e));
+    add_item(entries_.back().label);
+  };
 
 #ifdef ESP_PLATFORM
   DIR* dir = opendir(books_dir_);
   if (!dir)
     return;
   struct dirent* ent;
-  while ((ent = readdir(dir)) != nullptr && book_count < kMaxBooks) {
+  while ((ent = readdir(dir)) != nullptr) {
     size_t len = std::strlen(ent->d_name);
     if (len > 5 && len < 220 && std::strcmp(ent->d_name + len - 5, ".epub") == 0) {
-      auto& e = entries_[book_count];
-      std::snprintf(e.path, sizeof(e.path), "%s/%s", books_dir_, ent->d_name);
-      e.label.assign(ent->d_name, len - 5);
-      add_item(e.label.c_str());
-      ++book_count;
+      char fullpath[512];
+      std::snprintf(fullpath, sizeof(fullpath), "%s/%s", books_dir_, ent->d_name);
+      add_book(fullpath, std::string(ent->d_name, len - 5));
     }
   }
   closedir(dir);
 #else
   try {
     for (const auto& entry : fs::directory_iterator(books_dir_)) {
-      if (book_count >= kMaxBooks)
-        break;
       if (!entry.is_regular_file())
         continue;
       auto ext = entry.path().extension().string();
       if (ext != ".epub")
         continue;
-      auto& e = entries_[book_count];
-      auto path_str = entry.path().string();
-      if (path_str.size() >= sizeof(e.path))
-        continue;
-      std::memcpy(e.path, path_str.c_str(), path_str.size() + 1);
-      e.label = entry.path().stem().string();
-      add_item(e.label.c_str());
-      ++book_count;
+      add_book(entry.path().string(), entry.path().stem().string());
     }
   } catch (...) {}
 #endif

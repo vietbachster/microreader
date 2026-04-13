@@ -81,8 +81,9 @@ void ListMenuScreen::draw_all_(DrawBuffer& buf) const {
 
   for (int i = scroll_offset_; i < end; ++i) {
     const int row = i - scroll_offset_;
-    const char* label = labels_[i];
-    size_t len = std::strlen(label);
+    const std::string& label_str = labels_[i];
+    const char* label = label_str.c_str();
+    size_t len = label_str.size();
     int iw = ui_font_.word_width(label, len, FontStyle::Regular);
 
     // Truncate with "..." if the label is too wide to fit.

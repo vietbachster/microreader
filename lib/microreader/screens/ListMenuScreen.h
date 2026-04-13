@@ -32,7 +32,7 @@ class ListMenuScreen : public IScreen {
   const char* title_ = nullptr;
   IScreen* chosen_ = nullptr;
 
-  void add_item(const char* label) {
+  void add_item(const std::string& label) {
     labels_.push_back(label);
   }
   void clear_items() {
@@ -65,7 +65,7 @@ class ListMenuScreen : public IScreen {
   }
 
  private:
-  std::vector<const char*> labels_;
+  std::vector<std::string> labels_;
   int selected_ = 0;
   int scroll_offset_ = 0;
   bool on_start_set_selection_ = false;

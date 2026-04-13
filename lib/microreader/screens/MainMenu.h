@@ -14,8 +14,6 @@ namespace microreader {
 // Button1 = open book, Button0 = settings.
 class MainMenu final : public ListMenuScreen {
  public:
-  static constexpr int kMaxBooks = 64;
-
   MainMenu() = default;
 
   void set_books_dir(const char* dir) {
@@ -59,10 +57,10 @@ class MainMenu final : public ListMenuScreen {
   const char* books_dir_ = nullptr;
 
   struct BookEntry {
-    char path[280];
+    std::string path;
     std::string label;
   };
-  BookEntry entries_[kMaxBooks] = {};
+  std::vector<BookEntry> entries_;
 
   ReaderScreen reader_;
   SettingsScreen settings_;
