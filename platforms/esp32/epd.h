@@ -185,6 +185,7 @@ class EInkDisplay : public microreader::IDisplay {
       setRamArea(12, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
       writeRamBuffer(CMD_WRITE_RAM_RED, prev_pixels, BUFFER_SIZE);
     }
+
     wakeIfNeeded();
     waitWhileBusy();
     setRamArea(12, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
@@ -356,6 +357,7 @@ class EInkDisplay : public microreader::IDisplay {
 
     sendCommand(CMD_DISPLAY_UPDATE_CTRL2);
     sendData(displayMode);
+
     sendCommand(CMD_MASTER_ACTIVATION);
 
     const uint32_t t0 = millis();

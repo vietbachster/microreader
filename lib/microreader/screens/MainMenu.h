@@ -14,13 +14,14 @@ namespace microreader {
 // Button1 = open book, Button0 = settings.
 class MainMenu final : public ListMenuScreen {
  public:
-  static constexpr int kMaxBooks = 16;
+  static constexpr int kMaxBooks = 64;
 
   MainMenu() = default;
 
   void set_books_dir(const char* dir) {
     books_dir_ = dir;
   }
+
   void set_data_dir(const char* dir) {
     reader_.set_data_dir(dir);
     settings_.set_data_dir(dir);
@@ -29,6 +30,7 @@ class MainMenu final : public ListMenuScreen {
   bool has_books_dir() const {
     return books_dir_ != nullptr;
   }
+
   const char* books_dir() const {
     return books_dir_;
   }

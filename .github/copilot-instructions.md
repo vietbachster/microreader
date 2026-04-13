@@ -90,8 +90,7 @@ All inherit from `IScreen` (`lib/microreader/screens/IScreen.h`): `name()`, `sta
 
 | Screen | File | Description |
 |--------|------|-------------|
-| `MainMenu` | `MainMenu.h/.cpp` | Main navigation menu. Owns all child screens. Items: Select Book, demos, settings. |
-| `BookSelectScreen` | `BookSelectScreen.h/.cpp` | Lists `.epub`/`.mrb` files from a directory. Up/down navigation (no scroll — flat list via Canvas). Owns a `ReaderScreen`. |
+| `MainMenu` | `MainMenu.h/.cpp` | Main navigation menu. Owns all child screens. |
 | `ReaderScreen` | `ReaderScreen.h/.cpp` | EPUB page viewer. 2×-scaled 8×8 bitmap font (16×16 glyphs). Next/prev page, chapter transitions. |
 | `BouncingBallDemo` | `BouncingBallDemo.h/.cpp` | Bouncing ball + random shapes. |
 

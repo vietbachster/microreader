@@ -14,6 +14,24 @@ namespace fs = std::filesystem;
 
 namespace microreader {
 
+void MainMenu::on_start() {
+  title_ = "Microreader";
+  HEAP_LOG("MainMenu: start enter");
+  scan_directory_();
+  HEAP_LOG("MainMenu: after scan");
+}
+
+bool MainMenu::on_select(int index) {
+  reader_.set_path(entries_[index].path);
+  chosen_ = &reader_;
+  return false;
+}
+
+bool MainMenu::on_back() {
+  chosen_ = &settings_;
+  return false;
+}
+
 void MainMenu::scan_directory_() {
   if (!books_dir_)
     return;
@@ -57,24 +75,6 @@ void MainMenu::scan_directory_() {
     }
   } catch (...) {}
 #endif
-}
-
-void MainMenu::on_start() {
-  title_ = "Microreader";
-  HEAP_LOG("MainMenu: start enter");
-  scan_directory_();
-  HEAP_LOG("MainMenu: after scan");
-}
-
-bool MainMenu::on_select(int index) {
-  reader_.set_path(entries_[index].path);
-  chosen_ = &reader_;
-  return false;
-}
-
-bool MainMenu::on_back() {
-  chosen_ = &settings_;
-  return false;
 }
 
 }  // namespace microreader
