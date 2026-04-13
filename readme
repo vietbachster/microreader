@@ -1,0 +1,2 @@
+#### build ui font
+python tools/generate_font.py resources/fonts/Terminus-Bold.ttf 14 -o resources/fonts/ui-small.mbf --header lib/microreader/display/ui_font_small.h --bw-only
