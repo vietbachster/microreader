@@ -115,6 +115,54 @@ class DrawBuffer {
     fill_col_physical_(inactive_(), ly, DisplayFrame::kPhysicalHeight - x2, DisplayFrame::kPhysicalHeight - x1, white);
   }
 
+  void draw_image(const uint8_t* imageData, uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
+    if (!imageData || w == 0 || h == 0)
+      return;
+
+    if (x >= DisplayFrame::kPhysicalWidth || y >= DisplayFrame::kPhysicalHeight)
+      return;
+
+    const uint16_t imageWidthBytes = static_cast<uint16_t>((w + 7) / 8);
+    const uint16_t max_width = static_cast<uint16_t>(DisplayFrame::kPhysicalWidth - x);
+    const uint16_t draw_width = std::min<uint16_t>(w, max_width);
+    const uint16_t draw_bytes = static_cast<uint16_t>((draw_width + 7) / 8);
+    uint8_t* buf = inactive_();
+
+    const uint16_t dest_offset_x = static_cast<uint16_t>(x / 8);
+    const uint8_t bit_offset = static_cast<uint8_t>(x & 7);
+
+    auto set_pixel_physical = [&](uint16_t px, uint16_t py, bool white) {
+      if (px >= DisplayFrame::kPhysicalWidth || py >= DisplayFrame::kPhysicalHeight)
+        return;
+      size_t idx = static_cast<size_t>(py) * DisplayFrame::kStride + (px / 8);
+      uint8_t bit = static_cast<uint8_t>(0x80u >> (px & 7));
+      if (white)
+        buf[idx] |= bit;
+      else
+        buf[idx] &= static_cast<uint8_t>(~bit);
+    };
+
+    for (uint16_t row = 0; row < h; ++row) {
+      uint16_t destY = y + row;
+      if (destY >= DisplayFrame::kPhysicalHeight)
+        break;
+
+      const size_t destRowStart = static_cast<size_t>(destY) * DisplayFrame::kStride + dest_offset_x;
+      const size_t srcRowStart = static_cast<size_t>(row) * imageWidthBytes;
+
+      if (bit_offset == 0 && (w & 7) == 0) {
+        const uint16_t copy_bytes = std::min<uint16_t>(imageWidthBytes, draw_bytes);
+        memcpy(buf + destRowStart, imageData + srcRowStart, copy_bytes);
+      } else {
+        for (uint16_t col = 0; col < draw_width; ++col) {
+          const size_t src_byte = srcRowStart + (col / 8);
+          const uint8_t src_bit = static_cast<uint8_t>((imageData[src_byte] >> (7 - (col & 7))) & 1);
+          set_pixel_physical(static_cast<uint16_t>(x + col), destY, src_bit != 0);
+        }
+      }
+    }
+  }
+
   // Set a single logical pixel.
   void set_pixel(int lx, int ly, bool white) {
     if (lx < 0 || lx >= kWidth || ly < 0 || ly >= kHeight)

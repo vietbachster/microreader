@@ -4,6 +4,7 @@
 #include <ctime>
 
 #include "HeapLog.h"
+#include "microreader/resources/bebop_image.h"
 
 #ifdef ESP_PLATFORM
 #include "esp_random.h"
@@ -79,23 +80,13 @@ void Application::update(const ButtonState& buttons, uint32_t dt_ms, DrawBuffer&
     // Save last screen and book info
     save_settings_();
 
-    // Draw checkerboard pattern then full refresh before deep sleep.
-    constexpr int kBlock = 80;
-    const int W = DrawBuffer::kWidth;
-    const int H = DrawBuffer::kHeight;
-    buf.fill(true);
-    for (int row = 0; row < H; ++row) {
-      const int tile_y = row / kBlock;
-      int col = 0;
-      while (col < W) {
-        const int tile_x = col / kBlock;
-        const bool white = ((tile_x ^ tile_y) & 1) == 0;
-        const int tile_end = (tile_x + 1) * kBlock;
-        const int span_end = tile_end < W ? tile_end : W;
-        buf.fill_row(row, col, span_end, white);
-        col = span_end;
-      }
-    }
+    // draw sleeping screen before powering down
+    buf.draw_image(bebop_image, 0, 0, BEBOP_IMAGE_WIDTH, BEBOP_IMAGE_HEIGHT);
+
+    // add sleeping... text below the image
+    const char* sleep_text = "sleeping...";
+    buf.draw_text_centered(DrawBuffer::kWidth / 2, DrawBuffer::kHeight - 24, sleep_text, true);
+
     buf.full_refresh(RefreshMode::Full);
     buf.deep_sleep();
     running_ = false;
