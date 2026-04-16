@@ -1,6 +1,7 @@
 #include "TextLayout.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 
 namespace microreader {
@@ -301,6 +302,7 @@ struct PageItem {
   uint16_t line_idx;       // for TextLine
   LayoutLine layout_line;  // for TextLine
   uint16_t height;
+  uint16_t baseline = 0;  // baseline distance from top of line to baseline
   // Image fields (only for Image kind)
   uint16_t img_key = 0;
   uint16_t img_w = 0, img_h = 0;
@@ -392,7 +394,8 @@ static PageContent assemble_page(const PageOptions& opts, const IFont& font, IPa
 
     switch (item.kind) {
       case PageItem::TextLine:
-        page.text_items.push_back(PageTextItem{item.para_idx, item.line_idx, std::move(item.layout_line), y});
+        page.text_items.push_back(
+            PageTextItem{item.para_idx, item.line_idx, std::move(item.layout_line), y, item.height, item.baseline});
         break;
       case PageItem::Image:
         page.image_items.push_back(PageImageItem{item.para_idx, item.img_key, item.img_w, item.img_h, item.img_x, y});
@@ -418,13 +421,51 @@ static PageContent assemble_page(const PageOptions& opts, const IFont& font, IPa
   if (page.text_items.empty() && !page.image_items.empty()) {
     page.vertical_offset = static_cast<uint16_t>(opts.height > y ? (opts.height - y) / 2 : 0);
   }
-  // Text centering: when enabled, shift content down to vertically center it within the padded area.
-  // Only activates when the leftover space is less than one line height (nearly-full pages).
+  // Text adjustment: when enabled, spread lines to fill the padded area on nearly-full text pages.
+  // This avoids centering small gaps and instead keeps the last line aligned with bottom padding.
   else if (opts.center_text && !page.text_items.empty() && page.image_items.empty()) {
     const uint16_t padded_height =
         opts.height > opts.padding_top + opts.padding_bottom ? opts.height - opts.padding_top - opts.padding_bottom : 0;
-    if (y < padded_height && (padded_height - y) < default_y_advance) {
-      page.vertical_offset = static_cast<uint16_t>(opts.padding_top + (padded_height - y) / 2);
+    if (y < padded_height && (padded_height - y) < default_y_advance && page.text_items.size() > 1) {
+      uint32_t lines_height = 0;
+      for (const auto& ti : page.text_items)
+        lines_height += ti.height;
+
+      int32_t total_gap = static_cast<int32_t>(padded_height) - static_cast<int32_t>(lines_height);
+      int32_t gap_count = static_cast<int32_t>(page.text_items.size() - 1);
+      int32_t base_gap = total_gap / gap_count;
+      int32_t extra = total_gap % gap_count;
+      if (extra < 0) {
+        base_gap -= 1;
+        extra += gap_count;
+      }
+
+      std::vector<int32_t> gaps(gap_count, base_gap);
+      for (int32_t i = gap_count - extra; i < gap_count; ++i)
+        gaps[i] += 1;
+
+      int32_t y_acc = 0;
+      for (size_t i = 0; i < page.text_items.size(); ++i) {
+        page.text_items[i].y_offset = static_cast<uint16_t>(y_acc);
+        if (i < page.text_items.size() - 1) {
+          y_acc += page.text_items[i].height + gaps[i];
+        } else {
+          y_acc += page.text_items[i].height;
+        }
+      }
+
+      const PageTextItem& last_item = page.text_items.back();
+      int32_t standard_descent = static_cast<int32_t>(default_y_advance) - static_cast<int32_t>(font.baseline());
+      int32_t target_baseline = static_cast<int32_t>(padded_height) - standard_descent;
+      int32_t delta =
+          target_baseline - (static_cast<int32_t>(last_item.y_offset) + static_cast<int32_t>(last_item.baseline));
+      if (delta != 0) {
+        for (size_t i = 0; i < page.text_items.size(); ++i) {
+          page.text_items[i].y_offset =
+              static_cast<uint16_t>(static_cast<int32_t>(page.text_items[i].y_offset) + delta);
+        }
+      }
+      page.vertical_offset = opts.padding_top;
     }
   }
 
@@ -481,7 +522,7 @@ PageContent layout_page(const IFont& font, const PageOptions& opts, IParagraphSo
             goto assemble;
           }
           y += spacing + default_y_advance;
-          items.push_back(PageItem{PageItem::Empty, static_cast<uint16_t>(pi), 0, {}, default_y_advance});
+          items.push_back(PageItem{PageItem::Empty, static_cast<uint16_t>(pi), 0, {}, default_y_advance, 0});
           has_content = true;
           end_pos = {static_cast<uint16_t>(pi + 1), 0};
           continue;
@@ -518,6 +559,7 @@ PageContent layout_page(const IFont& font, const PageOptions& opts, IParagraphSo
                                        0,
                                        {},
                                        promo_h,
+                                       0,
                                        img.key,
                                        promo_w,
                                        promo_h,
@@ -562,12 +604,18 @@ PageContent layout_page(const IFont& font, const PageOptions& opts, IParagraphSo
 
           // Emit inline_extra as an invisible spacer before the first line
           if (!placed_any_line && inline_extra > 0) {
-            items.push_back(PageItem{PageItem::Empty, static_cast<uint16_t>(pi), 0, {}, inline_extra});
+            items.push_back(PageItem{PageItem::Empty, static_cast<uint16_t>(pi), 0, {}, inline_extra, 0});
           }
 
+          uint16_t line_baseline = font.baseline();
+          for (const auto& w : lines[li].words) {
+            uint16_t b = font.baseline(w.size);
+            if (b > line_baseline)
+              line_baseline = b;
+          }
           y += above + line_h;
           items.push_back(PageItem{PageItem::TextLine, static_cast<uint16_t>(pi), static_cast<uint16_t>(li),
-                                   std::move(lines[li]), line_h});
+                                   std::move(lines[li]), line_h, line_baseline});
           has_content = true;
           has_text_or_image = true;
           placed_any_line = true;
@@ -604,7 +652,7 @@ PageContent layout_page(const IFont& font, const PageOptions& opts, IParagraphSo
 
         y += spacing + img_h;
         items.push_back(
-            PageItem{PageItem::Image, static_cast<uint16_t>(pi), 0, {}, img_h, para.image.key, img_w, img_h, x_off});
+            PageItem{PageItem::Image, static_cast<uint16_t>(pi), 0, {}, img_h, 0, para.image.key, img_w, img_h, x_off});
         has_content = true;
         has_text_or_image = true;
         end_pos = {static_cast<uint16_t>(pi + 1), 0};
@@ -622,7 +670,7 @@ PageContent layout_page(const IFont& font, const PageOptions& opts, IParagraphSo
           break;
         }
         y += spacing + default_y_advance;
-        items.push_back(PageItem{PageItem::Hr, static_cast<uint16_t>(pi), 0, {}, default_y_advance});
+        items.push_back(PageItem{PageItem::Hr, static_cast<uint16_t>(pi), 0, {}, default_y_advance, 0});
         has_content = true;
         end_pos = {static_cast<uint16_t>(pi + 1), 0};
         break;
@@ -740,7 +788,7 @@ PageContent layout_page_backward(const IFont& font, const PageOptions& opts, IPa
             break;
           }
           total_height += h + inter_spacing;
-          items.push_back(PageItem{PageItem::Empty, static_cast<uint16_t>(pi), 0, {}, h});
+          items.push_back(PageItem{PageItem::Empty, static_cast<uint16_t>(pi), 0, {}, h, 0});
           break;
         }
 
@@ -787,9 +835,15 @@ PageContent layout_page_backward(const IFont& font, const PageOptions& opts, IPa
             break;
           }
 
+          uint16_t line_baseline = font.baseline();
+          for (const auto& w : lines[li].words) {
+            uint16_t b = font.baseline(w.size);
+            if (b > line_baseline)
+              line_baseline = b;
+          }
           total_height += line_h + sp;
           items.push_back(PageItem{PageItem::TextLine, static_cast<uint16_t>(pi), static_cast<uint16_t>(li),
-                                   std::move(lines[li]), line_h});
+                                   std::move(lines[li]), line_h, line_baseline});
           first_item_of_para = false;
           if (li == 0)
             collected_line_zero = true;
@@ -807,6 +861,7 @@ PageContent layout_page_backward(const IFont& font, const PageOptions& opts, IPa
                                    0,
                                    {},
                                    promo_h,
+                                   0,
                                    inline_img_key,
                                    promo_w,
                                    promo_h,
@@ -835,7 +890,7 @@ PageContent layout_page_backward(const IFont& font, const PageOptions& opts, IPa
 
         total_height += img_h + inter_spacing;
         items.push_back(
-            PageItem{PageItem::Image, static_cast<uint16_t>(pi), 0, {}, img_h, para.image.key, img_w, img_h, x_off});
+            PageItem{PageItem::Image, static_cast<uint16_t>(pi), 0, {}, img_h, 0, para.image.key, img_w, img_h, x_off});
         break;
       }
 
@@ -846,7 +901,7 @@ PageContent layout_page_backward(const IFont& font, const PageOptions& opts, IPa
           break;
         }
         total_height += h + inter_spacing;
-        items.push_back(PageItem{PageItem::Hr, static_cast<uint16_t>(pi), 0, {}, h});
+        items.push_back(PageItem{PageItem::Hr, static_cast<uint16_t>(pi), 0, {}, h, 0});
         break;
       }
 

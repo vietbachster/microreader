@@ -196,7 +196,9 @@ struct PageTextItem {
   uint16_t paragraph_index;
   uint16_t line_index;
   LayoutLine line;
-  uint16_t y_offset;  // pixel offset from page top
+  uint16_t y_offset;      // pixel offset from page top
+  uint16_t height = 0;    // line height in pixels
+  uint16_t baseline = 0;  // baseline distance from top of line to baseline
 };
 
 struct PageContent {

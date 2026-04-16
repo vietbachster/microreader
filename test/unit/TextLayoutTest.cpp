@@ -426,6 +426,50 @@ TEST(PageLayout, SingleParagraphFitsOnePage) {
   EXPECT_EQ(page.end.paragraph, 1);
 }
 
+TEST(PageLayout, SpreadLinesToBottomPadding) {
+  Chapter ch;
+  for (int i = 0; i < 4; ++i) {
+    TextParagraph tp;
+    tp.runs.push_back(microreader::Run("Line", FontStyle::Regular, false));
+    ch.paragraphs.push_back(Paragraph::make_text(std::move(tp)));
+  }
+
+  PageOptions opts(200, 86, 10, 0);
+  opts.center_text = true;
+  auto page = layout_page(font8, opts, ch, PagePosition(0, 0));
+
+  EXPECT_EQ(page.text_items.size(), 4);
+  EXPECT_EQ(page.vertical_offset, opts.padding_top);
+
+  uint16_t padded_height = opts.height - opts.padding_top - opts.padding_bottom;
+  uint16_t standard_descent = font8.y_advance(FontSize::Normal) - font8.baseline(FontSize::Normal);
+  uint16_t expected_baseline = padded_height - standard_descent;
+  uint16_t actual_baseline = page.text_items.back().y_offset + font8.baseline(FontSize::Normal);
+  EXPECT_EQ(actual_baseline, expected_baseline);
+}
+
+TEST(PageLayout, SpreadLinesAlignsBottomWithMixedLineHeights) {
+  Chapter ch;
+  const uint8_t line_height_pct[] = {100, 110, 120, 130, 100};
+  for (uint8_t pct : line_height_pct) {
+    TextParagraph tp;
+    tp.runs.push_back(microreader::Run("Line", FontStyle::Regular, false));
+    tp.line_height_pct = pct;
+    ch.paragraphs.push_back(Paragraph::make_text(std::move(tp)));
+  }
+
+  // Total content height = 16 + 17 + 19 + 20 + 16 = 88px.
+  // Make the page slightly taller so the branch is used, but not enough for full centering.
+  PageOptions opts(200, 111, 10, 0);
+  opts.center_text = true;
+  auto page = layout_page(font8, opts, ch, PagePosition(0, 0));
+
+  ASSERT_EQ(page.text_items.size(), 5);
+  uint16_t padded_height = opts.height - opts.padding_top - opts.padding_bottom;
+  uint16_t last_bottom = page.text_items.back().y_offset + page.text_items.back().height;
+  EXPECT_EQ(last_bottom, padded_height);
+}
+
 TEST(PageLayout, MultipleParagraphsFitOnePage) {
   Chapter ch;
   for (int i = 0; i < 3; ++i) {
