@@ -483,6 +483,10 @@ bool ReaderScreen::is_open_ok() const {
   return open_ok_;
 }
 
+size_t ReaderScreen::current_chapter_index() const {
+  return chapter_idx_;
+}
+
 void ReaderScreen::render_text_(DrawBuffer& buf, const BitmapFontSet& fset, GrayPlane plane, bool white) {
   uint8_t* render = buf.render_buf();
   for (const auto& item : page_.text_items) {

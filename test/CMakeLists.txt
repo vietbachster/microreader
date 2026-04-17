@@ -136,6 +136,7 @@ add_executable(microreader_tests
     unit/StreamingPipelineTest.cpp
     unit/NavigationTest.cpp
     unit/DitherComparisonTest.cpp
+    unit/stb_image_write.cpp
 )
 target_link_libraries(microreader_tests PRIVATE
     microreader_content

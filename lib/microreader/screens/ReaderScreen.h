@@ -53,6 +53,7 @@ class ReaderScreen final : public IScreen {
   bool render_current_page(DrawBuffer& buf);
   bool next_page_and_render(DrawBuffer& buf);
   bool is_open_ok() const;
+  size_t current_chapter_index() const;
 
   const char* name() const override {
     return "Reader";
