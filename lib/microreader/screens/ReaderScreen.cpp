@@ -459,6 +459,30 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
 #endif
 }
 
+bool ReaderScreen::render_current_page(DrawBuffer& buf) {
+  if (!open_ok_)
+    return false;
+  render_page_(buf);
+  return true;
+}
+
+bool ReaderScreen::next_page_and_render(DrawBuffer& buf) {
+  if (!open_ok_)
+    return false;
+  if (!next_page_())
+    return false;
+  if (grayscale_active_) {
+    buf.revert_grayscale();
+    grayscale_active_ = false;
+  }
+  render_page_(buf);
+  return true;
+}
+
+bool ReaderScreen::is_open_ok() const {
+  return open_ok_;
+}
+
 void ReaderScreen::render_text_(DrawBuffer& buf, const BitmapFontSet& fset, GrayPlane plane, bool white) {
   uint8_t* render = buf.render_buf();
   for (const auto& item : page_.text_items) {
@@ -466,11 +490,11 @@ void ReaderScreen::render_text_(DrawBuffer& buf, const BitmapFontSet& fset, Gray
       if (w.len == 0)
         continue;
       int x = kPaddingLeft + w.x;
-      int baseline_y = static_cast<int>(item.y_offset + page_.vertical_offset) + fset.baseline(FontSize::Normal);
+      int baseline_y = static_cast<int>(item.y_offset + page_.vertical_offset) + item.baseline;
       if (w.vertical_align == VerticalAlign::Super)
-        baseline_y -= fset.y_advance(FontSize::Normal) * 20 / 100;
+        baseline_y -= fset.y_advance(w.size) * 20 / 100;
       else if (w.vertical_align == VerticalAlign::Sub)
-        baseline_y += fset.y_advance(FontSize::Normal) * 20 / 100;
+        baseline_y += fset.y_advance(w.size) * 20 / 100;
       char text[64];
       int tlen = static_cast<int>(w.len);
       if (tlen > 63)

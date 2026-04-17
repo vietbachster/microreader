@@ -49,6 +49,11 @@ class ReaderScreen final : public IScreen {
     ext_font_set_ = fonts;
   }
 
+  // Export helpers.
+  bool render_current_page(DrawBuffer& buf);
+  bool next_page_and_render(DrawBuffer& buf);
+  bool is_open_ok() const;
+
   const char* name() const override {
     return "Reader";
   }

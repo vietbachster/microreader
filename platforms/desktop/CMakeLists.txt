@@ -53,7 +53,6 @@ add_library(microreader_content STATIC
     ${CONTENT_DIR}/PngDecoder.cpp
     ${CONTENT_DIR}/Book.cpp
     ${CONTENT_DIR}/TextLayout.cpp
-    ${CONTENT_DIR}/HtmlExporter.cpp
     ${CONTENT_DIR}/mrb/MrbWriter.cpp
     ${CONTENT_DIR}/mrb/MrbReader.cpp
     ${CONTENT_DIR}/mrb/MrbConverter.cpp
@@ -94,3 +93,10 @@ target_link_libraries(microreader_desktop PRIVATE
 )
 # Prevent SDL_main.h from renaming main() so we keep a plain console entry point.
 target_compile_definitions(microreader_desktop PRIVATE SDL_MAIN_HANDLED)
+
+add_executable(microreader_html_exporter
+    ${CMAKE_CURRENT_SOURCE_DIR}/html_exporter.cpp
+)
+target_link_libraries(microreader_html_exporter PRIVATE
+    microreader_core
+)

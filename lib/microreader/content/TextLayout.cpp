@@ -577,12 +577,20 @@ PageContent layout_page(const IFont& font, const PageOptions& opts, IParagraphSo
         auto lines = layout_paragraph(font, lo, para.text);
         lo.first_line_extra_indent = 0;
 
-        // Extra spacing so inline image doesn't overlap previous content
-        const uint16_t baseline_off = font.baseline();
+        // Extra spacing so inline image doesn't overlap previous content.
+        // Use the actual first line baseline, not the default font baseline,
+        // because the first line may use mixed font sizes or line-height scaling.
         uint16_t inline_extra = 0;
-        if (has_inline_img && inline_img_h > baseline_off) {
-          inline_extra = inline_img_h - baseline_off;
-          if (y + spacing + inline_extra + default_y_advance > page_height && has_content) {
+        if (has_inline_img && !lines.empty()) {
+          uint16_t first_line_baseline = font.baseline();
+          for (const auto& w : lines[0].words) {
+            uint16_t b = font.baseline(w.size);
+            if (b > first_line_baseline)
+              first_line_baseline = b;
+          }
+          if (inline_img_h > first_line_baseline)
+            inline_extra = inline_img_h - first_line_baseline;
+          if (inline_extra > 0 && y + spacing + inline_extra + default_y_advance > page_height && has_content) {
             end_pos = {static_cast<uint16_t>(pi), 0};
             goto assemble;
           }
@@ -702,11 +710,13 @@ assemble: {
   bool is_first_page = (start.paragraph == 0 && start.line == 0);
   auto page = assemble_page(opts, font, source, items, start, end_pos, at_chapter_end, is_first_page);
 
-  // Post-process: place inline images relative to first text line baseline
+  // Post-process: place inline images relative to first text line baseline.
+  // Use the actual line baseline, not the default font baseline, because
+  // mixed font sizes / line-height adjustments may change the baseline position.
   for (auto& pii : pending_inline_images) {
     for (auto& ti : page.text_items) {
       if (ti.paragraph_index == pii.para_idx) {
-        uint16_t baseline_y = ti.y_offset + font.baseline();
+        uint16_t baseline_y = ti.y_offset + ti.baseline;
         uint16_t img_y = (baseline_y >= pii.height) ? (baseline_y - pii.height) : 0;
         page.image_items.push_back(
             PageImageItem{pii.para_idx, pii.key, pii.width, pii.height, opts.padding_left, img_y});

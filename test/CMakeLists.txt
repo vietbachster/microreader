@@ -64,7 +64,6 @@ add_library(microreader_content STATIC
     ${LIB_DIR}/content/PngDecoder.cpp
     ${LIB_DIR}/content/Book.cpp
     ${LIB_DIR}/content/TextLayout.cpp
-    ${LIB_DIR}/content/HtmlExporter.cpp
     ${LIB_DIR}/content/mrb/MrbWriter.cpp
     ${LIB_DIR}/content/mrb/MrbReader.cpp
     ${LIB_DIR}/content/mrb/MrbConverter.cpp
@@ -73,6 +72,25 @@ target_include_directories(microreader_content PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/../lib
 )
 target_link_libraries(microreader_content PUBLIC miniz)
+
+# ---------------------------------------------------------------------------
+# Platform-agnostic core library used by tests needing screens / reader logic
+# ---------------------------------------------------------------------------
+add_library(microreader_core STATIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/microreader/Application.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/microreader/Loop.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/microreader/screens/BouncingBallDemo.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/microreader/screens/GrayscaleDemo.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/microreader/screens/ListMenuScreen.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/microreader/screens/MainMenu.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/microreader/screens/ReaderScreen.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/microreader/screens/SettingsScreen.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/microreader/screens/ChapterSelectScreen.cpp
+)
+target_include_directories(microreader_core PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/../lib
+)
+target_link_libraries(microreader_core PUBLIC microreader_content)
 
 # ---------------------------------------------------------------------------
 # Fast unit tests (no real EPUB files, runs in milliseconds)
@@ -121,6 +139,7 @@ add_executable(microreader_tests
 )
 target_link_libraries(microreader_tests PRIVATE
     microreader_content
+    microreader_core
     gtest
     gtest_main
 )

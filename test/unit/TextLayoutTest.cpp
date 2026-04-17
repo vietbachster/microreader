@@ -1482,6 +1482,43 @@ TEST(PageLayout, InlineImageNoOverlapWithText) {
   }
 }
 
+TEST(PageLayout, InlineImageDoesNotIntersectPreviousTextLines) {
+  Chapter ch;
+  TextParagraph tp1;
+  tp1.runs.push_back(microreader::Run("Previous line with some text", FontStyle::Regular, false));
+  tp1.runs.push_back(microreader::Run(" more text", FontStyle::Regular, microreader::FontSize::Large));
+  ch.paragraphs.push_back(Paragraph::make_text(std::move(tp1)));
+
+  TextParagraph tp2;
+  tp2.runs.push_back(
+      microreader::Run("Inline image paragraph starts here", FontStyle::Regular, microreader::FontSize::Normal));
+  tp2.inline_image = ImageRef(42, 80, 75);
+  tp2.runs.push_back(microreader::Run(" and continues with more text to wrap onto the next line", FontStyle::Regular,
+                                      microreader::FontSize::Large));
+  tp2.line_height_pct = 130;
+  ch.paragraphs.push_back(Paragraph::make_text(std::move(tp2)));
+
+  PageOptions opts(300, 160, 0, 8);
+  auto page = layout_page(font8, opts, ch, PagePosition(0, 0));
+
+  ASSERT_EQ(page.image_items.size(), 1u);
+  const auto& img = page.image_items[0];
+  uint16_t img_top = img.y_offset;
+  uint16_t img_bot = img.y_offset + img.height;
+
+  EXPECT_GE(img_top, 0u) << "Inline image must not start above the page top";
+
+  for (const auto& ti : page.text_items) {
+    if (ti.paragraph_index >= img.paragraph_index)
+      continue;
+
+    uint16_t text_top = ti.y_offset;
+    uint16_t text_bot = static_cast<uint16_t>(ti.y_offset + ti.height);
+    EXPECT_LE(text_bot, img_top) << "Inline image at y=" << img_top << " overlaps previous text line spanning ["
+                                 << text_top << ", " << text_bot << ")";
+  }
+}
+
 // ===================================================================
 // layout_page_backward() tests
 // ===================================================================
