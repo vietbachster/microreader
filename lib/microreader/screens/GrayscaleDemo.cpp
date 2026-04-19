@@ -75,14 +75,15 @@ bool GrayscaleDemo::update(const ButtonState& buttons, DrawBuffer& buf, IRuntime
   if (buttons.is_pressed(Button::Button0))
     return false;
 
+  // Access display's grayscale state via DrawBuffer
+  bool is_gray = buf.display().in_grayscale_mode();
   if (buttons.is_pressed(Button::Button1)) {
-    if (grayscale_on_) {
-      draw_bw_(buf);
-      buf.refresh();
-      grayscale_on_ = false;
+    if (is_gray) {
+      // draw_bw_(buf);
+      // buf.refresh();
+      buf.revert_grayscale();
     } else {
       apply_grayscale_(buf);
-      grayscale_on_ = true;
     }
     return true;
   }
@@ -97,10 +98,14 @@ bool GrayscaleDemo::update(const ButtonState& buttons, DrawBuffer& buf, IRuntime
     moved = true;
   }
 
+  if (buttons.is_pressed(Button::Up)) {
+    draw_bw_(buf);
+    buf.full_refresh();
+  }
+
   if (moved) {
     draw_bw_(buf);
     buf.refresh();  // partial BW refresh (auto-reverts grayscale if active)
-    grayscale_on_ = false;
   }
 
   return true;

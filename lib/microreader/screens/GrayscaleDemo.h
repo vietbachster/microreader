@@ -34,8 +34,7 @@ class GrayscaleDemo final : public IScreen {
   static constexpr int kRectH = 80;
   static constexpr int kSpacing = 20;
 
-  int offset_y_ = 0;           // vertical offset controlled by up/down
-  bool grayscale_on_ = false;  // toggle state
+  int offset_y_ = 0;  // vertical offset controlled by up/down
 
   void draw_bw_(DrawBuffer& buf) const;
   void apply_grayscale_(DrawBuffer& buf) const;

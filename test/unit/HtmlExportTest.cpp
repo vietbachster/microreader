@@ -199,9 +199,10 @@ static std::vector<fs::path> discover_epubs(const fs::path& dir) {
 
 static bool export_book_to_html(const fs::path& epub_path, const fs::path& output_root, const BitmapFontSet& font_set) {
   struct TestDisplay : IDisplay {
-    void full_refresh(const uint8_t* pixels, RefreshMode mode) override {
+    void full_refresh(const uint8_t* pixels, RefreshMode mode, bool turnOffScreen) override {
       (void)pixels;
       (void)mode;
+      (void)turnOffScreen;
     }
     void partial_refresh(const uint8_t* new_pixels, const uint8_t* prev_pixels) override {
       (void)new_pixels;

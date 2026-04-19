@@ -87,7 +87,7 @@ void Application::update(const ButtonState& buttons, uint32_t dt_ms, DrawBuffer&
     const char* sleep_text = "sleeping...";
     buf.draw_text_centered(DrawBuffer::kWidth / 2, DrawBuffer::kHeight - 24, sleep_text, true);
 
-    buf.full_refresh(RefreshMode::Full);
+    buf.full_refresh(RefreshMode::Full, true);  // turnOffScreen=true to power down immediately after refresh
     buf.deep_sleep();
     running_ = false;
     return;

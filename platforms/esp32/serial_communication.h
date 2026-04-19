@@ -55,9 +55,11 @@ static constexpr uint8_t kCmdMagic[4] = {'C', 'M', 'N', 'D'};
 static constexpr uint8_t kFontMagic[4] = {'F', 'O', 'N', 'T'};
 static constexpr uint32_t kMaxPayload = 256;
 static constexpr uint32_t kLutSize = 112;
+static constexpr uint32_t kLutFrameSize = 113;  // 1 byte type + 112 bytes LUT
 
 // LUT state: shared between receiver task and main loop.
 static uint8_t g_lut_buf[kLutSize];
+static uint8_t g_lut_type = 0;
 static volatile bool g_lut_pending = false;
 
 // Button injection: OR'd into next poll_buttons before clearing.
@@ -75,10 +77,13 @@ static volatile bool g_font_uploaded = false;
 
 // Call from the main loop. Returns true (and copies into `out`) when a fresh
 // LUT has been received since the last call.
-inline bool serial_lut_take(uint8_t* out) {
+// Returns true and sets *type_out if a new LUT is available.
+inline bool serial_lut_take(uint8_t* out, uint8_t* type_out = nullptr) {
   if (!g_lut_pending)
     return false;
   memcpy(out, g_lut_buf, kLutSize);
+  if (type_out)
+    *type_out = g_lut_type;
   g_lut_pending = false;
   return true;
 }
@@ -142,12 +147,12 @@ static void handle_lut_frame() {
   }
   const uint32_t length =
       (uint32_t)len_buf[0] | ((uint32_t)len_buf[1] << 8) | ((uint32_t)len_buf[2] << 16) | ((uint32_t)len_buf[3] << 24);
-  if (length == 0 || length > kMaxPayload) {
-    ESP_LOGW(kLutRxTag, "invalid length: %lu", length);
+  if (length != kLutFrameSize) {
+    ESP_LOGW(kLutRxTag, "invalid LUT frame size: %lu (expected %u)", length, kLutFrameSize);
     return;
   }
 
-  uint8_t payload[kMaxPayload];
+  uint8_t payload[kLutFrameSize];
   if (!serial_read_exact(payload, length, 2000)) {
     ESP_LOGW(kLutRxTag, "timeout reading payload");
     return;
@@ -167,8 +172,9 @@ static void handle_lut_frame() {
     return;
   }
 
-  ESP_LOGI(kLutRxTag, "OK: received %lu-byte LUT (CRC 0x%08lX)", length, calc_crc);
-  memcpy(g_lut_buf, payload, kLutSize);
+  g_lut_type = payload[0];
+  memcpy(g_lut_buf, payload + 1, kLutSize);
+  ESP_LOGI(kLutRxTag, "OK: received LUT type %u (%lu bytes, CRC 0x%08lX)", g_lut_type, length, calc_crc);
   g_lut_pending = true;
 }
 

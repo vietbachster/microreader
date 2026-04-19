@@ -34,7 +34,7 @@ class IDisplay {
   virtual ~IDisplay() = default;
 
   // Full physical refresh. Both BW and RED RAM are set to `pixels`.
-  virtual void full_refresh(const uint8_t* pixels, RefreshMode mode) = 0;
+  virtual void full_refresh(const uint8_t* pixels, RefreshMode mode, bool turnOffScreen = false) = 0;
 
   // Partial refresh: new_pixels → BW RAM. Driver tracks previous frame for RED RAM.
   // prev_pixels is the previous BW frame (used to restore BW RAM after grayscale revert).
@@ -68,6 +68,11 @@ class IDisplay {
   virtual void set_rotation(Rotation r) {
     (void)r;
   }
+
+  // Query if display is currently in grayscale mode.
+  virtual bool in_grayscale_mode() const {
+    return false;
+  }
 };
 
 // Double-buffered display with simple draw helpers.
@@ -89,6 +94,13 @@ class DrawBuffer {
     memset(bufs_[0], 0xFF, kBufSize);
     memset(bufs_[1], 0xFF, kBufSize);
     display_.set_rotation(Rotation::Deg90);
+  }
+
+  IDisplay& display() {
+    return display_;
+  }
+  const IDisplay& display() const {
+    return display_;
   }
 
   // ── Draw helpers (logical portrait coordinates) ─────────────────────────
@@ -390,8 +402,8 @@ class DrawBuffer {
   }
 
   // Call full hardware refresh using the current inactive buffer, then sync both.
-  void full_refresh(RefreshMode mode = RefreshMode::Half) {
-    display_.full_refresh(inactive_(), mode);
+  void full_refresh(RefreshMode mode = RefreshMode::Half, bool turnOffScreen = false) {
+    display_.full_refresh(inactive_(), mode, turnOffScreen);
     memcpy(bufs_[active_idx_], bufs_[1 - active_idx_], kBufSize);
     active_idx_ = 1 - active_idx_;
   }

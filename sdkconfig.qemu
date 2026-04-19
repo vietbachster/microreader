@@ -1,7 +1,0 @@
-# QEMU-specific sdkconfig overrides.
-# Layered on top of sdkconfig.defaults by [env:esp32c3-qemu].
-# Route ESP_LOGx console to UART0 (QEMU simulates UART0; USB-Serial-JTAG is not emulated).
-CONFIG_ESP_CONSOLE_UART_DEFAULT=y
-CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=n
-CONFIG_ESP_CONSOLE_UART_NUM=0
-CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200

@@ -53,53 +53,69 @@
 // Layout: 50 bytes VS waveform (5 levels × 10), 50 bytes TP/RP timing (10 groups × 5),
 //         5 bytes frame rate, 1 byte VGH, 3 bytes VSH1/VSH2/VSL, 1 byte VCOM, 2 reserved.
 static const uint8_t kLutGrayscale[] = {
-    // VS waveform: L0 (00=white), L1 (01=light gray), L2 (10=gray), L3 (11=dark gray), L4 (VCOM)
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x54, 0x54, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0xAA, 0xA0, 0xA8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0xA2, 0x22, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    // TP/RP timing groups G0..G9
-    0x01, 0x01, 0x01, 0x01, 0x00,
-    0x01, 0x01, 0x01, 0x01, 0x00,
-    0x01, 0x01, 0x01, 0x01, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00,
+    // VS L0–L3 (voltage patterns per transition)
+    // Black → Black: [VSS → VSS → VSS → VSS → VSS → VSS → VSS → VSS]
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    // Black → White: [VSH1 → VSL → VSL → VSL → VSL → VSL → VSL → VSH1 → VSH1 → VSH1 → VSH1 → VSS]
+    0x6A,0xA9,0x54,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    // White → Black: [VSL → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSL → VSL → VSL → VSL → VSL → VSL → VSL → VSL → VSL → VSL → VSS]
+    0x95,0x55,0x6A,0xAA,0xA8,0x00,0x00,0x00,0x00,0x00,
+    // White → White: [VSL → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSL → VSL → VSL → VSL → VSL → VSL → VSS → VSS → VSS → VSS → VSS → VSS → VSS]
+    0x95,0x56,0xAA,0x80,0x00,0x00,0x00,0x00,0x00,0x00,
+    // L4 VCOM: [VSS → VSS → VSS → VSS → VSS → VSS → VSS → VSS]
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+
+    // TP/RP groups
+    0x01,0x01,0x01,0x01,0x01,  // G0: A=1 B=1 C=1 D=1 RP=1 (8 frames)
+    0x01,0x01,0x01,0x01,0x00,  // G1: A=1 B=1 C=1 D=1 RP=0 (4 frames)
+    0x01,0x01,0x01,0x01,0x00,  // G2: A=1 B=1 C=1 D=1 RP=0 (4 frames)
+    0x01,0x01,0x01,0x01,0x00,  // G3: A=1 B=1 C=1 D=1 RP=0 (4 frames)
+    0x01,0x01,0x01,0x01,0x00,  // G4: A=1 B=1 C=1 D=1 RP=0 (4 frames)
+    0x00,0x00,0x00,0x00,0x00,  // G5: A=0 B=0 C=0 D=0 RP=0
+    0x00,0x00,0x00,0x00,0x00,  // G6: A=0 B=0 C=0 D=0 RP=0
+    0x00,0x00,0x00,0x00,0x00,  // G7: A=0 B=0 C=0 D=0 RP=0
+    0x00,0x00,0x00,0x00,0x00,  // G8: A=0 B=0 C=0 D=0 RP=0
+    0x00,0x00,0x00,0x00,0x00,  // G9: A=0 B=0 C=0 D=0 RP=0
+
     // Frame rate
-    0x8F, 0x8F, 0x8F, 0x8F, 0x8F,
-    // Voltages: VGH, VSH1, VSH2, VSL, VCOM
-    0x17, 0x41, 0xA8, 0x32, 0x30,
+    0x88,0x88,0x88,0x88,0x88,
+
+    // Voltages (VGH, VSH1, VSH2, VSL, VCOM)
+    0x17,0x41,0x8E,0x3A,0x30,
     // Reserved
     0x00, 0x00,
 };
 
 static const uint8_t kLutGrayscaleRevert[] = {
-    // VS waveform: L0..L4 — drives gray pixels back to BW
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x54, 0x54, 0x54, 0x54, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0xA8, 0xA8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0xFC, 0xFC, 0xFC, 0xFC, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    // TP/RP timing groups G0..G9
-    0x01, 0x01, 0x01, 0x01, 0x01,
-    0x01, 0x01, 0x01, 0x01, 0x01,
-    0x01, 0x01, 0x01, 0x01, 0x00,
-    0x01, 0x01, 0x01, 0x01, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00,
+    // VS L0–L3 (voltage patterns per transition)
+    // Black → Black: [VSS]
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    // Black → White: [VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSS]
+    0x55,0x55,0x55,0x55,0x55,0x00,0x00,0x00,0x00,0x00,
+    // White → Black: [VSH1 → VSH1 → VSL → VSL → VSH1 → VSH1 → VSL → VSL → VSH1 → VSH1 → VSL → VSL → VSH1 → VSH1 → VSL → VSL → VSL → VSL → VSL → VSL → VSS]
+    0x5A,0x5A,0x5A,0x5A,0xAA,0x00,0x00,0x00,0x00,0x00,
+    // White → White: [VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSS]
+    0x55,0x55,0x55,0x55,0x55,0x00,0x00,0x00,0x00,0x00,
+    // L4 VCOM: [VSS]
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+
+    // TP/RP groups
+    0x01,0x01,0x01,0x01,0x00,  // G0: A=1 B=1 C=1 D=1 RP=0 (4 frames)
+    0x01,0x01,0x01,0x01,0x00,  // G1: A=1 B=1 C=1 D=1 RP=0 (4 frames)
+    0x01,0x01,0x01,0x01,0x00,  // G2: A=1 B=1 C=1 D=1 RP=0 (4 frames)
+    0x01,0x01,0x01,0x01,0x00,  // G3: A=1 B=1 C=1 D=1 RP=0 (4 frames)
+    0x01,0x01,0x01,0x01,0x00,  // G4: A=1 B=1 C=1 D=1 RP=0 (4 frames)
+    0x01,0x00,0x00,0x00,0x00,  // G5: A=1 B=0 C=0 D=0 RP=0 (1 frames)
+    0x00,0x00,0x00,0x00,0x00,  // G6: A=0 B=0 C=0 D=0 RP=0
+    0x00,0x00,0x00,0x00,0x00,  // G7: A=0 B=0 C=0 D=0 RP=0
+    0x00,0x00,0x00,0x00,0x00,  // G8: A=0 B=0 C=0 D=0 RP=0
+    0x00,0x00,0x00,0x00,0x00,  // G9: A=0 B=0 C=0 D=0 RP=0
+
     // Frame rate
-    0x8F, 0x8F, 0x8F, 0x8F, 0x8F,
-    // Voltages: VGH, VSH1, VSH2, VSL, VCOM
-    0x17, 0x41, 0xA8, 0x32, 0x30,
+    0x88,0x88,0x88,0x88,0x88,
+
+    // Voltages (VGH, VSH1, VSH2, VSL, VCOM)
+    0x17,0x4B,0x8E,0x3A,0x30,
     // Reserved
     0x00, 0x00,
 };
@@ -119,6 +135,27 @@ class EInkDisplay : public microreader::IDisplay {
   bool inDeepSleep_ = false;
   bool in_grayscale_mode_ = false;
   bool custom_lut_active_ = false;
+  bool in_grayscale_mode() const override {
+    return in_grayscale_mode_;
+  }
+
+  // Custom grayscale LUT buffer (112 bytes, matches kLutSize in serial_communication.h)
+  uint8_t custom_grayscale_lut_[112] = {};
+  bool has_custom_grayscale_lut_ = false;
+
+  // Custom grayscale revert LUT buffer (112 bytes)
+  uint8_t custom_grayscale_revert_lut_[112] = {};
+  bool has_custom_grayscale_revert_lut_ = false;
+  // Set a custom grayscale revert LUT (112 bytes)
+  void set_grayscale_revert_lut(const uint8_t* lut) {
+    memcpy(custom_grayscale_revert_lut_, lut, 112);
+    has_custom_grayscale_revert_lut_ = true;
+  }
+
+  // Clear the custom grayscale revert LUT (revert to default)
+  void clear_grayscale_revert_lut() {
+    has_custom_grayscale_revert_lut_ = false;
+  }
 
   spi_device_handle_t spi_;
 
@@ -166,7 +203,7 @@ class EInkDisplay : public microreader::IDisplay {
 
   // ---- microreader::IDisplay ----
 
-  void full_refresh(const uint8_t* pixels, microreader::RefreshMode mode) override {
+  void full_refresh(const uint8_t* pixels, microreader::RefreshMode mode, bool turnOffScreen) override {
     in_grayscale_mode_ = false;  // full refresh resets display state
     wakeIfNeeded();
     waitWhileBusy();
@@ -174,7 +211,7 @@ class EInkDisplay : public microreader::IDisplay {
     setRamArea(12, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
     writeRamBuffer(CMD_WRITE_RAM_BW, pixels, BUFFER_SIZE);
     writeRamBuffer(CMD_WRITE_RAM_RED, pixels, BUFFER_SIZE);
-    refreshDisplay(mode == microreader::RefreshMode::Half ? EPD_HALF_REFRESH : EPD_FULL_REFRESH);
+    refreshDisplay(mode == microreader::RefreshMode::Half ? EPD_HALF_REFRESH : EPD_FULL_REFRESH, turnOffScreen);
   }
 
   void partial_refresh(const uint8_t* new_pixels, const uint8_t* prev_pixels) override {
@@ -207,9 +244,24 @@ class EInkDisplay : public microreader::IDisplay {
     writeRamBuffer(CMD_WRITE_RAM_RED, data, BUFFER_SIZE);
   }
 
+  // Set a custom grayscale LUT (112 bytes)
+  void set_grayscale_lut(const uint8_t* lut) {
+    memcpy(custom_grayscale_lut_, lut, 112);
+    has_custom_grayscale_lut_ = true;
+  }
+
+  // Clear the custom grayscale LUT (revert to default)
+  void clear_grayscale_lut() {
+    has_custom_grayscale_lut_ = false;
+  }
+
   void grayscale_refresh() override {
     in_grayscale_mode_ = true;
-    setCustomLUT_(kLutGrayscale);
+    if (has_custom_grayscale_lut_) {
+      setCustomLUT_(custom_grayscale_lut_);
+    } else {
+      setCustomLUT_(kLutGrayscale);
+    }
     refreshDisplay(EPD_FAST_REFRESH);
     setCustomLUT_(nullptr);  // clear flag; OTP LUT restored on next normal refresh
   }
@@ -318,7 +370,7 @@ class EInkDisplay : public microreader::IDisplay {
     delay(20);
   }
 
-  void refreshDisplay(EpdRefreshMode mode) {
+  void refreshDisplay(EpdRefreshMode mode, bool turnOffScreen = false) {
     sendCommand(CMD_DISPLAY_UPDATE_CTRL1);
     sendData(mode == EPD_FAST_REFRESH ? CTRL1_NORMAL : CTRL1_BYPASS_RED);
 
@@ -338,6 +390,11 @@ class EInkDisplay : public microreader::IDisplay {
     if (!isScreenOn) {
       isScreenOn = true;
       displayMode |= 0xC0;  // CLOCK_ON + ANALOG_ON (power up for first refresh)
+    }
+
+    if (turnOffScreen) {
+      isScreenOn = false;
+      displayMode |= 0x03;  // Set ANALOG_OFF_PHASE and CLOCK_OFF bits
     }
 
     switch (mode) {
@@ -466,7 +523,11 @@ class EInkDisplay : public microreader::IDisplay {
   // (still containing LSB/MSB plane data) and drives each pixel back to BW.
   void grayscale_revert_() {
     in_grayscale_mode_ = false;
-    setCustomLUT_(kLutGrayscaleRevert);
+    if (has_custom_grayscale_revert_lut_) {
+      setCustomLUT_(custom_grayscale_revert_lut_);
+    } else {
+      setCustomLUT_(kLutGrayscaleRevert);
+    }
     refreshDisplay(EPD_FAST_REFRESH);
     setCustomLUT_(nullptr);
   }

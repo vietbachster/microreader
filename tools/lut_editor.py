@@ -127,6 +127,12 @@ def build_frame(payload: bytes) -> bytes:
 
 
 class LUTEditor:
+    LUT_TYPE_OPTIONS = [
+        ("Normal", 0),
+        ("Revert", 1),
+        ("Custom", 2),
+    ]
+
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("SSD1677 LUT Editor")
@@ -152,6 +158,9 @@ class LUTEditor:
             "VSL": 0x2A,
             "VCOM": 0x30,
         }
+
+        # LUT type (default: Normal)
+        self.lut_type_var = tk.StringVar(value=self.LUT_TYPE_OPTIONS[0][0])
 
         # UI widget holders
         self.voltage_widgets: Dict[int, dict] = {}
@@ -193,6 +202,11 @@ class LUTEditor:
 
         self.root.after(50, _set_sash)
 
+    @staticmethod
+    def build_lut_with_type(lut_type: int, lut_bytes: bytes) -> bytes:
+        """Prepend 1-byte LUT type to LUT payload."""
+        return bytes([lut_type]) + lut_bytes
+
     def _build_left(self, parent: ttk.Frame):
         parent.rowconfigure(0, weight=1)
         parent.columnconfigure(0, weight=1)
@@ -223,6 +237,21 @@ class LUTEditor:
             text="Voltage patterns are per-transition · Timing groups are global",
             font=("", 9, "italic"),
         ).pack()
+
+        # LUT Type selector
+        lut_type_row = ttk.Frame(inner)
+        lut_type_row.pack(fill=tk.X, padx=10, pady=(2, 6))
+        ttk.Label(lut_type_row, text="LUT Type:", font=("", 10, "bold")).pack(
+            side=tk.LEFT
+        )
+        lut_type_combo = ttk.Combobox(
+            lut_type_row,
+            textvariable=self.lut_type_var,
+            values=[x[0] for x in self.LUT_TYPE_OPTIONS],
+            state="readonly",
+            width=10,
+        )
+        lut_type_combo.pack(side=tk.LEFT, padx=8)
 
         # Voltage patterns
         vf = ttk.LabelFrame(
@@ -374,7 +403,9 @@ class LUTEditor:
                 text=voltage,
                 bg=VOLTAGE_COLORS[voltage],
             )
-            btn.bind("<Button-1>", lambda e, t=trans_idx, v=idx: self._cycle_voltage(t, v))
+            btn.bind(
+                "<Button-1>", lambda e, t=trans_idx, v=idx: self._cycle_voltage(t, v)
+            )
 
         widgets["add_btn"].config(state="disabled" if len(pattern) >= 40 else "normal")
         widgets["rem_btn"].config(state="disabled" if len(pattern) <= 1 else "normal")
@@ -659,10 +690,18 @@ class LUTEditor:
         if not port:
             messagebox.showerror("No port", "Select a COM port first.")
             return
-        lut = encode_lut(
+        lut_bytes = encode_lut(
             self.voltage_patterns, self.timing_groups, self.frame_rate, self.voltages
         )
-        frame = build_frame(lut)
+        # Get LUT type from dropdown
+        lut_type_name = self.lut_type_var.get()
+        lut_type = 0
+        for name, val in self.LUT_TYPE_OPTIONS:
+            if name == lut_type_name:
+                lut_type = val
+                break
+        payload = self.build_lut_with_type(lut_type, lut_bytes)
+        frame = build_frame(payload)
         baud = int(self.baud_var.get())
         threading.Thread(
             target=self._do_send, args=(port, baud, frame), daemon=True

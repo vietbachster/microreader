@@ -93,10 +93,3 @@ target_link_libraries(microreader_desktop PRIVATE
 )
 # Prevent SDL_main.h from renaming main() so we keep a plain console entry point.
 target_compile_definitions(microreader_desktop PRIVATE SDL_MAIN_HANDLED)
-
-add_executable(microreader_html_exporter
-    ${CMAKE_CURRENT_SOURCE_DIR}/html_exporter.cpp
-)
-target_link_libraries(microreader_html_exporter PRIVATE
-    microreader_core
-)

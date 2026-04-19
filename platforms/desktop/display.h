@@ -22,7 +22,7 @@ class DesktopEmulatorDisplay final : public microreader::IDisplay {
     rt_.apply_rotation(r);
   }
 
-  void full_refresh(const uint8_t* pixels, microreader::RefreshMode /*mode*/) override {
+  void full_refresh(const uint8_t* pixels, microreader::RefreshMode /*mode*/, bool /*turnOffScreen*/) override {
     in_grayscale_mode_ = false;
     pre_gray_sim_.clear();
     for (int i = 0; i < kPixels; ++i) {
@@ -107,6 +107,10 @@ class DesktopEmulatorDisplay final : public microreader::IDisplay {
       }
     }
     render_();
+  }
+
+  bool in_grayscale_mode() const override {
+    return in_grayscale_mode_;
   }
 
  private:

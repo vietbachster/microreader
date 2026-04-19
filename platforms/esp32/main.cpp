@@ -178,6 +178,25 @@ extern "C" void app_main(void) {
       }
     }
 
+    // Check if a new grayscale LUT was uploaded via serial.
+    uint8_t lut_buf[112];
+    uint8_t lut_type = 0;
+    if (serial_lut_take(lut_buf, &lut_type)) {
+      switch (lut_type) {
+        case 0:
+          epd.set_grayscale_lut(lut_buf);
+          ESP_LOGI("epd", "Custom grayscale LUT set via serial (type=0)");
+          break;
+        case 1:
+          epd.set_grayscale_revert_lut(lut_buf);
+          ESP_LOGI("epd", "Custom grayscale REVERT LUT set via serial (type=1)");
+          break;
+        default:
+          ESP_LOGI("epd", "Received LUT with unknown type %u", lut_type);
+          break;
+      }
+    }
+
     // Dispatch serial path commands (open book, benchmarks).
     {
       const char* cmd_path = nullptr;
