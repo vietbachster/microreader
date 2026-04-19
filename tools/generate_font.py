@@ -15,6 +15,13 @@ import struct
 import sys
 import urllib.request
 
+# For PNG output
+try:
+    from PIL import Image
+except ImportError:
+    Image = None
+    # PNG output will be skipped if Pillow is not installed
+
 try:
     import freetype
 except ImportError:
@@ -127,30 +134,49 @@ def render_glyph(face, codepoint, size):
     lsb_out = bytearray(row_stride * height)
     msb_out = bytearray(row_stride * height)
 
+    # Also build a 5-level grayscale image for PNG output (0=white, 1=light, 2=gray, 3=dark, 4=black)
+    grayscale5 = [0] * (width * height)
+
     for y in range(height):
         for x in range(width):
             pixel = pixels[y * width + x]
+            pixel = (
+                pixel / 255
+            ) ** 1.6 * 255  # adjust the gamma to make the 5-level quantization look better
 
             # BW plane: threshold at 154 (values < 154 are ink)
             # MBF polarity: 1=white, 0=black(ink)
             bw_bit = 1 if pixel >= 154 else 0
 
-            # 2-bit grayscale quantization (from old microreader thresholds):
+            # 5-level grayscale quantization for PNG:
             #   >=205 -> 0 (white)
             #   >=154 -> 1 (light gray)
             #   >=103 -> 2 (gray)
             #   >= 52 -> 3 (dark gray)
-            #   <  52 -> 0 (white — solid ink pixels, handled by BW plane)
+            #   <  52 -> 4 (black)
             if pixel >= 205:
-                gray = 0
+                gray5 = 0
             elif pixel >= 154:
-                gray = 1
+                gray5 = 1
             elif pixel >= 103:
-                gray = 2
+                gray5 = 2
             elif pixel >= 52:
-                gray = 3
+                gray5 = 3
             else:
-                gray = 0
+                gray5 = 4
+            grayscale5[y * width + x] = gray5
+
+            # 2-bit grayscale quantization for MBF planes (use all 4 levels):
+            if pixel >= 205:
+                gray = 0  # white
+            elif pixel >= 154:
+                gray = 1  # light gray
+            elif pixel >= 103:
+                gray = 2  # gray
+            elif pixel >= 52:
+                gray = 3  # dark gray
+            else:
+                gray = 0  # black (map to darkest)
 
             byte_idx = y * row_stride + (x >> 3)
             bit_mask = 0x80 >> (x & 7)
@@ -172,6 +198,7 @@ def render_glyph(face, codepoint, size):
         "bw_bytes": bytes(bw_out),
         "lsb_bytes": bytes(lsb_out),
         "msb_bytes": bytes(msb_out),
+        "grayscale5": grayscale5,
     }
 
 
@@ -707,6 +734,31 @@ def main():
         f"  Total:    {stats['total_bytes']} bytes ({stats['total_bytes']/1024:.1f} KB)"
     )
 
+    # Write PNGs for a few sample characters (A, B, C, a, b, c, 0, 1, 2)
+    if Image is not None:
+        try:
+            sample_chars = ["A", "B", "C", "a", "b", "c", "0", "1", "2"]
+            face = freetype.Face(font_path)
+            face.set_pixel_sizes(0, args.size)
+            out_dir = os.path.dirname(os.path.abspath(args.output)) or "."
+            for ch in sample_chars:
+                cp = ord(ch)
+                g = render_glyph(face, cp, args.size)
+                if g is None or g["bitmap_width"] == 0 or g["bitmap_height"] == 0:
+                    continue
+                arr = g["grayscale5"]
+                # Map 0-4 to 8-bit grayscale: 0=white, 1=light, 2=gray, 3=dark, 4=black
+                palette = [255, 200, 140, 80, 0]
+                img = Image.new("L", (g["bitmap_width"], g["bitmap_height"]))
+                img.putdata([palette[v] for v in arr])
+                png_path = os.path.join(out_dir, f"sample_{ch}_gray5.png")
+                img.save(png_path)
+                print(f"  Sample PNG: {png_path}")
+        except Exception as e:
+            print(f"  [PNG sample error: {e}]")
+    else:
+        print("  [Pillow not installed: skipping PNG samples]")
+
     # Optional C++ header
     if args.header:
         _write_cpp_header(args.header, mbf_data, os.path.basename(args.output))
@@ -743,6 +795,7 @@ def _generate_bundle(faces, args, codepoint_ranges, multi_style):
             data, stats = build_multi_style_mbf(
                 faces, px_size, codepoint_ranges, bw_only=args.bw_only
             )
+            face = faces["regular"]
         else:
             face = faces["regular"]
             data, stats = build_mbf(
@@ -758,6 +811,118 @@ def _generate_bundle(faces, args, codepoint_ranges, multi_style):
         print(f"  Height:   {stats['glyph_height']}px, baseline={stats['baseline']}px")
         print(f"  File:     {out_path} ({kb:.1f} KB)")
         mbf_files.append((label, px_size, data, stats))
+
+        # Write a single PNG with all A-Z, a-z, 0-9, ä, Ä for this size, no labels
+        if Image is not None:
+            try:
+                # Build sample character list: A-Z, a-z, 0-9, ä, Ä
+                sample_chars = [chr(c) for c in range(ord("A"), ord("Z") + 1)]
+                sample_chars += [chr(c) for c in range(ord("a"), ord("z") + 1)]
+                sample_chars += [chr(c) for c in range(ord("0"), ord("9") + 1)]
+                sample_chars += ["ä", "Ä"]
+                face.set_pixel_sizes(0, px_size)
+                glyph_imgs = []
+                glyph_sizes = []
+                bw_imgs = []
+                lsb_imgs = []
+                msb_imgs = []
+                palette = [255, 200, 140, 80, 0]
+                max_h = 0
+                for ch in sample_chars:
+                    cp = ord(ch)
+                    g = render_glyph(face, cp, px_size)
+                    if g is None or g["bitmap_width"] == 0 or g["bitmap_height"] == 0:
+                        glyph_imgs.append(None)
+                        glyph_sizes.append((0, 0))
+                        bw_imgs.append(None)
+                        lsb_imgs.append(None)
+                        msb_imgs.append(None)
+                        continue
+                    arr = g["grayscale5"]
+                    img = Image.new("L", (g["bitmap_width"], g["bitmap_height"]))
+                    img.putdata([palette[v] for v in arr])
+                    glyph_imgs.append(img)
+                    glyph_sizes.append((g["bitmap_width"], g["bitmap_height"]))
+
+                    # BW, LSB, MSB bitmaps
+                    # Unpack bits to 0/255 images
+                    def unpack_bitmap(bits, w, h):
+                        row_stride = math.ceil(w / 8)
+                        arr = []
+                        for y in range(h):
+                            for x in range(w):
+                                byte_idx = y * row_stride + (x >> 3)
+                                bit_mask = 0x80 >> (x & 7)
+                                v = 255 if (bits[byte_idx] & bit_mask) else 0
+                                arr.append(v)
+                        return arr
+
+                    bw_arr = unpack_bitmap(
+                        g["bw_bytes"], g["bitmap_width"], g["bitmap_height"]
+                    )
+                    lsb_arr = unpack_bitmap(
+                        g["lsb_bytes"], g["bitmap_width"], g["bitmap_height"]
+                    )
+                    msb_arr = unpack_bitmap(
+                        g["msb_bytes"], g["bitmap_width"], g["bitmap_height"]
+                    )
+                    bw_img = Image.new("L", (g["bitmap_width"], g["bitmap_height"]))
+                    lsb_img = Image.new("L", (g["bitmap_width"], g["bitmap_height"]))
+                    msb_img = Image.new("L", (g["bitmap_width"], g["bitmap_height"]))
+                    bw_img.putdata(bw_arr)
+                    lsb_img.putdata(lsb_arr)
+                    msb_img.putdata(msb_arr)
+                    bw_imgs.append(bw_img)
+                    lsb_imgs.append(lsb_img)
+                    msb_imgs.append(msb_img)
+                    if g["bitmap_height"] > max_h:
+                        max_h = g["bitmap_height"]
+
+                # Compose into one image, with 4px padding between glyphs
+                pad = 4
+                total_w = sum(w for w, h in glyph_sizes) + pad * (len(sample_chars) + 1)
+                total_h = max_h
+                out_img = Image.new("L", (total_w, total_h), 255)
+                bw_out_img = Image.new("L", (total_w, total_h), 255)
+                lsb_out_img = Image.new("L", (total_w, total_h), 255)
+                msb_out_img = Image.new("L", (total_w, total_h), 255)
+
+                # Draw glyphs
+                x = pad
+                for i in range(len(sample_chars)):
+                    img = glyph_imgs[i]
+                    bw_img = bw_imgs[i]
+                    lsb_img = lsb_imgs[i]
+                    msb_img = msb_imgs[i]
+                    w, h = glyph_sizes[i]
+                    if img is not None:
+                        y = (max_h - h) // 2
+                        out_img.paste(img, (x, y))
+                        bw_out_img.paste(bw_img, (x, y))
+                        lsb_out_img.paste(lsb_img, (x, y))
+                        msb_out_img.paste(msb_img, (x, y))
+                    x += w + pad
+
+                png_path = os.path.join(
+                    out_dir, f"sample_all_{label.lower()}_gray5.png"
+                )
+                out_img.save(png_path)
+                print(f"  Sample PNG: {png_path}")
+
+                # Export BW, LSB, MSB layers as separate PNGs
+                bw_path = os.path.join(out_dir, f"sample_all_{label.lower()}_bw.png")
+                lsb_path = os.path.join(out_dir, f"sample_all_{label.lower()}_lsb.png")
+                msb_path = os.path.join(out_dir, f"sample_all_{label.lower()}_msb.png")
+                bw_out_img.save(bw_path)
+                lsb_out_img.save(lsb_path)
+                msb_out_img.save(msb_path)
+                print(f"  BW PNG:   {bw_path}")
+                print(f"  LSB PNG:  {lsb_path}")
+                print(f"  MSB PNG:  {msb_path}")
+            except Exception as e:
+                print(f"  [PNG sample error: {e}]")
+        else:
+            print("  [Pillow not installed: skipping PNG samples]")
 
     # Derive font name: --font-name, or stem of the font file path.
     if args.font_name:

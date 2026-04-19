@@ -56,8 +56,8 @@ static const uint8_t kLutGrayscale[] = {
     // VS L0–L3 (voltage patterns per transition)
     // Black → Black: [VSS → VSS → VSS → VSS → VSS → VSS → VSS → VSS]
     0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
-    // Black → White: [VSH1 → VSL → VSL → VSL → VSL → VSL → VSL → VSH1 → VSH1 → VSH1 → VSH1 → VSS]
-    0x6A,0xA9,0x54,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    // Black → White: [VSH1 → VSL → VSL → VSL → VSL → VSL → VSL → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSS → VSS]
+    0x6A,0xA9,0x55,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
     // White → Black: [VSL → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSL → VSL → VSL → VSL → VSL → VSL → VSL → VSL → VSL → VSL → VSS]
     0x95,0x55,0x6A,0xAA,0xA8,0x00,0x00,0x00,0x00,0x00,
     // White → White: [VSL → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSH1 → VSL → VSL → VSL → VSL → VSL → VSL → VSS → VSS → VSS → VSS → VSS → VSS → VSS]
