@@ -470,6 +470,132 @@ TEST(PageLayout, SpreadLinesAlignsBottomWithMixedLineHeights) {
   EXPECT_EQ(last_bottom, padded_height);
 }
 
+// Spreading: page with a block image followed by two text lines.
+// The gap between the image and the first text line should absorb most of the slack
+// (weight 8), while the gap between the two text lines gets little (weight 1 if same
+// paragraph, weight 3 if different paragraphs).
+TEST(PageLayout, SpreadWithImagePrefersImageTextGap) {
+  // Layout: image (50px) + text line + text line in the same paragraph.
+  // page_height = 83, padded = 83 (no padding).
+  // Items: image(50) + text(16) + text(16) = 82px. slack = 1.
+  // Gaps: image→text1 (weight 8), text1→text2 (weight 1, same para). total_weight=9.
+  // Extra space goes almost entirely to the image→text gap.
+  // With slack=1, base_per_unit=0, leftover=1 → last 1 unit gets +1.
+  // gap[0]=0 (8 units, all 0 except last which gets +1 if unit index ≥ 8)
+  // Actually units_used: for gap[0], w=0..7 → units 0..7. leftover=1, total_weight-leftover=8.
+  //   unit 0..7: units_used 0..7, all < 8 → 0. gap[0]=0.
+  //   for gap[1], w=0: units_used=8 ≥ 8 → 1. gap[1]=1.
+  // So image→text gap=0, text→text gap=1. Slack goes to the intra-para gap!
+  // That seems wrong, let me design a test where image boundary wins.
+  // Use slack=9 so that: base_per_unit=1, leftover=0.
+  //   gap[0] = 8*1 = 8, gap[1] = 1*1 = 1. Image→text gets 8, text→text gets 1.
+  // page_height: 50 + 16 + 16 + 8 + 1 = 91px of content needed to make slack=9 at height 91.
+  // Actually we want y=82 (no spacing), padded_height=91. height=91+0padding=91.
+  Chapter ch;
+  ch.paragraphs.push_back(Paragraph::make_image(1, 200, 50));  // 200x50 image
+  TextParagraph tp;
+  tp.runs.push_back(microreader::Run("Line one two three", FontStyle::Regular, false));
+  tp.runs.push_back(microreader::Run(" more words here x", FontStyle::Regular, true));  // breaking run → 2 lines
+  ch.paragraphs.push_back(Paragraph::make_text(std::move(tp)));
+
+  // page height=91 (no padding, no para_spacing). Content = image(50) + line(16) + line(16) = 82.
+  // slack = 91 - 82 = 9. weights: gap[0]=8 (image→text), gap[1]=1 (same para).
+  // Expected: gap[0]=8, gap[1]=1.
+  PageOptions opts(200, 91, 0, 0);
+  opts.center_text = true;
+  auto page = layout_page(font8, opts, ch, PagePosition(0, 0));
+
+  ASSERT_EQ(page.image_items.size(), 1u);
+  ASSERT_GE(page.text_items.size(), 2u);
+
+  // The image should be at y=0.
+  EXPECT_EQ(page.image_items[0].y_offset, 0u);
+
+  // After spreading: image→text1 gap gets 8px, text1→text2 gap gets 1px.
+  // text_item[0].y_offset = 50 + 8 = 58
+  // text_item[1].y_offset = 58 + 16 + 1 = 75
+  // Then fine-tune baseline: last text baseline = 75 + font8.baseline() = 75+12=87.
+  // target_baseline = padded_height(91) - standard_descent(16-12=4) = 87. delta=0.
+  EXPECT_EQ(page.text_items[0].y_offset, 58u) << "Image→text gap should be 8px";
+  EXPECT_EQ(page.text_items[1].y_offset, 75u) << "Text→text gap should be 1px";
+}
+
+TEST(PageLayout, SpreadWithHrPrefersHrTextGap) {
+  // HR followed by two text lines. HR boundary gap (weight 8) should absorb most slack.
+  // HR item uses default_y_advance=16px slot. Two text lines × 16px = 32px.
+  // Total = 48px. page_height = 57 → slack = 9. weights: hr→text1 (8), text1→text2 (3, diff para).
+  // total_weight=11. base_per_unit=0, leftover=9.
+  // gap[0]: 8 units, units 0..7 < 11-9=2 → first 2 get 0, next 6 get 1 → gap[0]=6.
+  // gap[1]: 3 units, units 8..10 ≥ 2 → all get 1 → gap[1]=3.
+  // Actually: total_weight=11, leftover=9, total_weight-leftover=2.
+  //   unit 0: units_used=0 < 2 → +0; unit 1: 1 < 2 → +0; units 2..10 ≥ 2 → +1.
+  //   gap[0]: w=0..7 → units 0..7 → 0+0+1+1+1+1+1+1 = 6. gap[0]=6.
+  //   gap[1]: w=0..2 → units 8..10 → 1+1+1 = 3. gap[1]=3.
+  Chapter ch;
+  ch.paragraphs.push_back(Paragraph::make_hr());
+  TextParagraph tp1;
+  tp1.runs.push_back(microreader::Run("First text", FontStyle::Regular, false));
+  ch.paragraphs.push_back(Paragraph::make_text(std::move(tp1)));
+  TextParagraph tp2;
+  tp2.runs.push_back(microreader::Run("Second text", FontStyle::Regular, false));
+  ch.paragraphs.push_back(Paragraph::make_text(std::move(tp2)));
+
+  // HR slot = 16px, text1 = 16px, text2 = 16px. Total = 48. page_height = 57. slack = 9.
+  PageOptions opts(200, 57, 0, 0);
+  opts.center_text = true;
+  auto page = layout_page(font8, opts, ch, PagePosition(0, 0));
+
+  ASSERT_GE(page.text_items.size(), 2u);
+
+  // hr_item[0].y_offset (center of HR slot) = 0 + 16/2 = 8.
+  // After spread: HR slot top stays at 0, center = 8.
+  EXPECT_EQ(page.hr_items[0].y_offset, 8u) << "HR center should be at y=8";
+
+  // text[0].y_offset = 16 + 6 = 22 (HR slot 16 + gap 6).
+  EXPECT_EQ(page.text_items[0].y_offset, 22u) << "First text should be at y=22";
+
+  // text[1].y_offset = 22 + 16 + 3 = 41.
+  EXPECT_EQ(page.text_items[1].y_offset, 41u) << "Second text should be at y=41";
+}
+
+TEST(PageLayout, SpreadNoOpWhenTooMuchSlack) {
+  // If slack >= one default line height, spreading should NOT activate.
+  Chapter ch;
+  TextParagraph tp;
+  tp.runs.push_back(microreader::Run("Short", FontStyle::Regular, false));
+  ch.paragraphs.push_back(Paragraph::make_text(std::move(tp)));
+
+  // 16px of text, 200px page → slack = 184 >= 16 → no spreading. Flush to top.
+  PageOptions opts(200, 200, 0, 0);
+  opts.center_text = true;
+  auto page = layout_page(font8, opts, ch, PagePosition(0, 0));
+
+  ASSERT_EQ(page.text_items.size(), 1u);
+  EXPECT_EQ(page.text_items[0].y_offset, 0u) << "No spreading when too much slack";
+}
+
+TEST(PageLayout, SpreadDisabledWhenCenterTextFalse) {
+  // When center_text=false, spreading never fires even if page is nearly full.
+  Chapter ch;
+  for (int i = 0; i < 4; ++i) {
+    TextParagraph tp;
+    tp.runs.push_back(microreader::Run("Line", FontStyle::Regular, false));
+    ch.paragraphs.push_back(Paragraph::make_text(std::move(tp)));
+  }
+
+  // Same setup as SpreadLinesToBottomPadding but center_text=false.
+  PageOptions opts(200, 86, 10, 0);
+  opts.center_text = false;
+  auto page = layout_page(font8, opts, ch, PagePosition(0, 0));
+
+  ASSERT_EQ(page.text_items.size(), 4u);
+  // y_offsets should be 0, 16, 32, 48 (no spreading)
+  EXPECT_EQ(page.text_items[0].y_offset, 0u);
+  EXPECT_EQ(page.text_items[1].y_offset, 16u);
+  EXPECT_EQ(page.text_items[2].y_offset, 32u);
+  EXPECT_EQ(page.text_items[3].y_offset, 48u);
+}
+
 TEST(PageLayout, MultipleParagraphsFitOnePage) {
   Chapter ch;
   for (int i = 0; i < 3; ++i) {
@@ -1375,7 +1501,8 @@ TEST(PageLayout, InlineImageBottomAlignsWithBaseline) {
   // First text line y_offset
   ASSERT_FALSE(page.text_items.empty());
   uint16_t first_line_top = page.text_items[0].y_offset;
-  uint16_t baseline_y = first_line_top + font8.baseline();  // 12px from line top
+  // ti.baseline includes the inline_extra space above the text within the item
+  uint16_t baseline_y = first_line_top + page.text_items[0].baseline;
 
   // Image bottom should equal baseline
   uint16_t img_bottom = img.y_offset + img.height;
@@ -1430,7 +1557,8 @@ TEST(PageLayout, TallInlineImageExtendsAboveFirstLine) {
   const auto& img = page.image_items[0];
 
   uint16_t first_line_top = page.text_items[0].y_offset;
-  uint16_t baseline_y = first_line_top + font8.baseline();  // 12px
+  // ti.baseline includes the inline_extra space above the text within the item
+  uint16_t baseline_y = first_line_top + page.text_items[0].baseline;
 
   // Image bottom aligns with baseline
   EXPECT_EQ(img.y_offset + img.height, baseline_y);
