@@ -86,17 +86,7 @@ TEST_P(ZipStreamingTest, AllXhtmlEntriesMatch) {
   printf("  [%s] %zu XHTML entries — ZIP STREAMING OK\n", filename.c_str(), tested);
 }
 
-#ifdef SMOKE_TESTS_ONLY
-INSTANTIATE_TEST_SUITE_P(SmokeBooks, ZipStreamingTest, ::testing::ValuesIn(test_books::get_smoke_books()),
-                         [](const ::testing::TestParamInfo<std::string>& info) {
-                           return test_books::epub_test_name(info.param);
-                         });
-#else
-INSTANTIATE_TEST_SUITE_P(AllBooks, ZipStreamingTest, ::testing::ValuesIn(test_books::get_curated_books()),
-                         [](const ::testing::TestParamInfo<std::string>& info) {
-                           return test_books::epub_test_name(info.param);
-                         });
-#endif
+INSTANTIATE_EPUB_TESTS(ZipStreamingTest);
 
 // ===========================================================================
 // Level 2: parse_chapter_streaming paragraphs vs parse_chapter
@@ -228,14 +218,4 @@ TEST_P(ChapterStreamingTest, ParagraphsMatch) {
          total_paras);
 }
 
-#ifdef SMOKE_TESTS_ONLY
-INSTANTIATE_TEST_SUITE_P(SmokeBooks, ChapterStreamingTest, ::testing::ValuesIn(test_books::get_smoke_books()),
-                         [](const ::testing::TestParamInfo<std::string>& info) {
-                           return test_books::epub_test_name(info.param);
-                         });
-#else
-INSTANTIATE_TEST_SUITE_P(AllBooks, ChapterStreamingTest, ::testing::ValuesIn(test_books::get_curated_books()),
-                         [](const ::testing::TestParamInfo<std::string>& info) {
-                           return test_books::epub_test_name(info.param);
-                         });
-#endif
+INSTANTIATE_EPUB_TESTS(ChapterStreamingTest);

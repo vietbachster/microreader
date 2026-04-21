@@ -2,7 +2,9 @@
 
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <string>
+#include <vector>
 
 #include "microreader/content/mrb/MrbConverter.h"
 #include "microreader/content/mrb/MrbReader.h"
@@ -508,3 +510,64 @@ TEST_F(MrbFormatTest, BookReopenSameInstance) {
   EXPECT_NE(count_a, count_b);
 }
 #endif
+
+// ---------------------------------------------------------------------------
+// Corruption / robustness: MrbReader::open() must fail gracefully.
+// ---------------------------------------------------------------------------
+
+// Opening a nonexistent file should return false.
+TEST_F(MrbFormatTest, OpenNonexistentFile) {
+  MrbReader reader;
+  EXPECT_FALSE(reader.open("/nonexistent/path/does_not_exist.mrb"));
+}
+
+// Opening an empty file (0 bytes) should return false.
+TEST_F(MrbFormatTest, OpenEmptyFile) {
+  // Create a zero-byte file at tmp_path_.
+  { std::ofstream f(tmp_path_, std::ios::binary); }
+
+  MrbReader reader;
+  EXPECT_FALSE(reader.open(tmp_path_.c_str()));
+}
+
+// Opening a file with wrong magic bytes should return false.
+TEST_F(MrbFormatTest, OpenWrongMagic) {
+  {
+    std::ofstream f(tmp_path_, std::ios::binary);
+    // Write 32 bytes of garbage (wrong magic).
+    const char junk[32] = "THIS IS NOT A VALID MRB FILE!!!";
+    f.write(junk, 32);
+  }
+
+  MrbReader reader;
+  EXPECT_FALSE(reader.open(tmp_path_.c_str()));
+}
+
+// Opening a truncated-but-valid-header file should return false.
+TEST_F(MrbFormatTest, OpenTruncatedAfterHeader) {
+  // First write a valid MRB with one paragraph.
+  {
+    MrbWriter writer;
+    ASSERT_TRUE(writer.open(tmp_path_.c_str()));
+    writer.begin_chapter();
+    ASSERT_TRUE(writer.write_paragraph(make_text("hello")));
+    writer.end_chapter();
+    ASSERT_TRUE(writer.finish({}, {}));
+  }
+
+  // Read the file into memory, then write it back truncated to just the header.
+  {
+    std::ifstream in(tmp_path_, std::ios::binary);
+    std::vector<uint8_t> buf((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    in.close();
+    ASSERT_GT(buf.size(), 32u);  // must be larger than just the header
+
+    // Truncate to 32 bytes (just the MrbHeader).
+    buf.resize(32);
+    std::ofstream out(tmp_path_, std::ios::binary | std::ios::trunc);
+    out.write(reinterpret_cast<const char*>(buf.data()), buf.size());
+  }
+
+  MrbReader reader;
+  EXPECT_FALSE(reader.open(tmp_path_.c_str()));
+}

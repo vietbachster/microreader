@@ -4,10 +4,6 @@
 #include <cstring>
 #include <string>
 
-#ifndef ESP_PLATFORM
-#include <chrono>
-#endif
-
 #ifdef ESP_PLATFORM
 #include "esp_log.h"
 #include "esp_system.h"
@@ -354,8 +350,6 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
 
 #ifdef ESP_PLATFORM
   int64_t t0 = esp_timer_get_time();
-#else
-  auto t0 = std::chrono::high_resolution_clock::now();
 #endif
 
   // Use proportional font if available, otherwise fallback to fixed.
@@ -451,11 +445,6 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
   long render_us = (long)(esp_timer_get_time() - t0);
   ESP_LOGI("perf", "render_page: %ldus (%ld.%ldms) words=%d images=%d", render_us, render_us / 1000,
            (render_us % 1000) / 100, n_words, (int)images.size());
-#else
-  auto t1 = std::chrono::high_resolution_clock::now();
-  auto us = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
-  printf("[perf] render_page: %lldus (%.1fms) words=%d images=%d\n", (long long)us, us / 1000.0, n_words,
-         (int)images.size());
 #endif
 }
 

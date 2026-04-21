@@ -497,6 +497,138 @@ TEST_F(XmlTest, MediumBufferWithLongText) {
 }
 
 // ---------------------------------------------------------------------------
+// Buffer-boundary edge cases: XML tokens split across buffer refill points.
+// These tests exercise the advance/refill logic in XmlReader::next_event()
+// by choosing a buffer size that forces a refill inside the token being parsed.
+// ---------------------------------------------------------------------------
+
+// Helper macro: collect all Text events from the fixture into `collected_`
+// until a non-Text event lands in `terminator_`.  Uses the protected next()
+// accessor that every TEST_F in this suite can call directly.
+#define COLLECT_TEXT(collected_, terminator_)   \
+  do {                                          \
+    while (true) {                              \
+      auto _ev = next();                        \
+      if (_ev.type == XmlEventType::Text)       \
+        (collected_) += to_string(_ev.content); \
+      else {                                    \
+        (terminator_) = _ev;                    \
+        break;                                  \
+      }                                         \
+    }                                           \
+  } while (0)
+
+// Two adjacent elements: the second forces a buffer refill after the first.
+// "<img src=\"long-attr-value\"/>" is 28 bytes; buf=28 fits it exactly,
+// so parsing "<br/>" requires a refill.
+TEST_F(XmlTest, AttributeValueSplitAcrossBuffer) {
+  const char* xml = "<img src=\"long-attr-value\"/><br/>";
+  open(xml, 28);
+
+  auto ev = next();
+  EXPECT_EQ(ev.type, XmlEventType::StartElement);
+  EXPECT_EQ(ev.name, "img");
+  EXPECT_EQ(to_string(ev.attrs.get("src")), "long-attr-value");
+  EXPECT_EQ(next().type, XmlEventType::EndElement);
+
+  // Buffer refill happens here.
+  ev = next();
+  EXPECT_EQ(ev.type, XmlEventType::StartElement);
+  EXPECT_EQ(ev.name, "br");
+  EXPECT_EQ(next().type, XmlEventType::EndElement);
+}
+
+// Text content spans two buffer-fills; element names fit in their own fill.
+// "<longelement>" is 13 bytes, "</longelement>" is 14 bytes — buf=16 fits
+// each tag individually but forces refills between tag, text, and close tag.
+TEST_F(XmlTest, ElementNameSplitAcrossBuffer) {
+  const char* xml = "<longelement>text</longelement>";
+  open(xml, 16);
+
+  auto ev = next();
+  EXPECT_EQ(ev.type, XmlEventType::StartElement);
+  EXPECT_EQ(ev.name, "longelement");
+
+  XmlEvent terminator;
+  std::string text;
+  COLLECT_TEXT(text, terminator);
+  EXPECT_EQ(text, "text");
+
+  EXPECT_EQ(terminator.type, XmlEventType::EndElement);
+  EXPECT_EQ(terminator.name, "longelement");
+}
+
+// End-tag name split across a buffer boundary.
+TEST_F(XmlTest, EndTagNameSplitAcrossBuffer) {
+  const char* xml = "<ab>hello</abcde>";
+  open(xml, 8);
+
+  auto ev = next();
+  EXPECT_EQ(ev.type, XmlEventType::StartElement);
+  EXPECT_EQ(ev.name, "ab");
+
+  XmlEvent terminator;
+  std::string text;
+  COLLECT_TEXT(text, terminator);
+
+  EXPECT_EQ(terminator.type, XmlEventType::EndElement);
+  EXPECT_EQ(terminator.name, "abcde");
+}
+
+// CDATA token: "<![CDATA[hello world]]>" is 23 bytes → buf=24 just fits it.
+TEST_F(XmlTest, CDataContentSplitAcrossBuffer) {
+  const char* xml = "<![CDATA[hello world]]>";
+  open(xml, 24);
+
+  auto ev = next();
+  EXPECT_EQ(ev.type, XmlEventType::CData);
+  EXPECT_EQ(to_string(ev.content), "hello world");
+}
+
+// Multiple adjacent elements where the boundary falls between them.
+TEST_F(XmlTest, MultipleElementsSmallBuffer) {
+  const char* xml = "<a/><b/><c/>";
+  open(xml, 8);
+
+  auto ev = next();
+  EXPECT_EQ(ev.type, XmlEventType::StartElement);
+  EXPECT_EQ(ev.name, "a");
+  EXPECT_EQ(next().type, XmlEventType::EndElement);
+
+  ev = next();
+  EXPECT_EQ(ev.type, XmlEventType::StartElement);
+  EXPECT_EQ(ev.name, "b");
+  EXPECT_EQ(next().type, XmlEventType::EndElement);
+
+  ev = next();
+  EXPECT_EQ(ev.type, XmlEventType::StartElement);
+  EXPECT_EQ(ev.name, "c");
+  EXPECT_EQ(next().type, XmlEventType::EndElement);
+
+  EXPECT_EQ(next().type, XmlEventType::EndOfFile);
+}
+
+// UTF-8 multi-byte sequence split across a buffer boundary.
+// The test simply verifies the full sequence is reassembled correctly.
+TEST_F(XmlTest, Utf8MultiByteContentSplitAcrossBuffer) {
+  // U+00E9 = é = 0xC3 0xA9 (2 bytes). Use buf=8 to force split.
+  const char* xml = "<t>\xC3\xA9\xC3\xA9\xC3\xA9</t>";
+  open(xml, 8);
+
+  auto ev = next();
+  EXPECT_EQ(ev.type, XmlEventType::StartElement);
+
+  XmlEvent term;
+  std::string text;
+  COLLECT_TEXT(text, term);
+  // All three é characters must survive the buffer boundary.
+  EXPECT_EQ(text.size(), 6u);  // 3 × 2 bytes
+  EXPECT_EQ(static_cast<uint8_t>(text[0]), 0xC3u);
+  EXPECT_EQ(static_cast<uint8_t>(text[1]), 0xA9u);
+  EXPECT_EQ(text, "\xC3\xA9\xC3\xA9\xC3\xA9");
+}
+
+// ---------------------------------------------------------------------------
 // EPUB fixture extraction + XML parsing
 // ---------------------------------------------------------------------------
 

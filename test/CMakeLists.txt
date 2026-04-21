@@ -102,11 +102,15 @@ add_executable(unit_tests
     unit/EpubParserTest.cpp
     unit/ImageDecoderTest.cpp
     unit/TextLayoutTest.cpp
+    unit/BitmapFontTest.cpp
     unit/MrbFormatTest.cpp
     unit/MrbLayoutComparisonTest.cpp
     unit/StreamingPipelineTest.cpp
     unit/NavigationTest.cpp
-    unit/BitmapFontTest.cpp
+)
+target_include_directories(unit_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/support
+    ${CMAKE_CURRENT_SOURCE_DIR}/vendor
 )
 target_link_libraries(unit_tests PRIVATE
     microreader_content
@@ -127,16 +131,20 @@ add_executable(microreader_tests
     unit/CssParserTest.cpp
     unit/EpubParserTest.cpp
     unit/ImageDecoderTest.cpp
-    unit/RealBookTest.cpp
-    unit/BulkBookTest.cpp
     unit/TextLayoutTest.cpp
-    unit/HtmlExportTest.cpp
+    unit/BitmapFontTest.cpp
     unit/MrbFormatTest.cpp
     unit/MrbLayoutComparisonTest.cpp
     unit/StreamingPipelineTest.cpp
     unit/NavigationTest.cpp
-    unit/DitherComparisonTest.cpp
-    unit/stb_image_write.cpp
+    integration/RealBookTest.cpp
+    integration/BulkBookTest.cpp
+    integration/HtmlExportTest.cpp
+    integration/DebugLayoutTest.cpp
+    integration/DitherComparisonTest.cpp
+)
+target_include_directories(microreader_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/support
 )
 target_link_libraries(microreader_tests PRIVATE
     microreader_content
@@ -159,6 +167,9 @@ add_test(NAME microreader_tests COMMAND microreader_tests)
 # ---------------------------------------------------------------------------
 add_executable(conversion_bench
     bench/ConversionBench.cpp
+)
+target_include_directories(conversion_bench PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/support
 )
 target_link_libraries(conversion_bench PRIVATE
     microreader_content

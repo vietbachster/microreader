@@ -89,8 +89,8 @@ static NavResult navigate_book(const std::string& epub_path) {
         break;
 
       // Safety: abort if stuck in an infinite loop.
-      if (chapter_pages > 10000) {
-        printf("    ABORT: ch%d exceeded 10000 pages at pos{%u,%u}\n", ci, pos.paragraph, pos.line);
+      if (chapter_pages > 1000) {
+        printf("    ABORT: ch%d exceeded 1000 pages at pos{%u,%u}\n", ci, pos.paragraph, pos.line);
         mrb.close();
         std::remove(mrb_path.c_str());
         return result;
@@ -136,19 +136,11 @@ TEST_P(FullBookNavTest, NavigateAllPages) {
 // Test suites — smoke (unit_tests) vs full (microreader_tests).
 // ---------------------------------------------------------------------------
 
-#ifdef SMOKE_TESTS_ONLY
+INSTANTIATE_EPUB_TESTS(FullBookNavTest);
 
-INSTANTIATE_TEST_SUITE_P(SmokeNav, FullBookNavTest, ::testing::ValuesIn(test_books::get_smoke_books()),
-                         [](const auto& info) { return test_books::epub_test_name(info.param); });
-
-#else
-
-INSTANTIATE_TEST_SUITE_P(CuratedNav, FullBookNavTest, ::testing::ValuesIn(test_books::get_curated_books()),
-                         [](const auto& info) { return test_books::epub_test_name(info.param); });
-
+#ifndef SMOKE_TESTS_ONLY
 INSTANTIATE_TEST_SUITE_P(AllNav, FullBookNavTest, ::testing::ValuesIn(test_books::get_all_books()),
-                         [](const auto& info) { return test_books::epub_test_name(info.param); });
-
+                         EPUB_TEST_PARAM_NAME);
 #endif
 
 // ---------------------------------------------------------------------------
@@ -190,7 +182,7 @@ TEST_P(BackwardNavTest, NavigateBackwardAllPages) {
       ++fwd_pages;
       if (page.at_chapter_end)
         break;
-      ASSERT_LT(fwd_pages, 10000) << name << " ch" << ci << " forward stuck";
+      ASSERT_LT(fwd_pages, 1000) << name << " ch" << ci << " forward stuck";
       pos = page.end;
     }
 
@@ -202,7 +194,7 @@ TEST_P(BackwardNavTest, NavigateBackwardAllPages) {
       ++bwd_pages;
       if (page.start.paragraph == 0 && page.start.line == 0)
         break;
-      ASSERT_LT(bwd_pages, 10000) << name << " ch" << ci << " backward stuck";
+      ASSERT_LT(bwd_pages, 1000) << name << " ch" << ci << " backward stuck";
       end_pos = page.start;
     }
 
@@ -220,14 +212,4 @@ TEST_P(BackwardNavTest, NavigateBackwardAllPages) {
   std::remove(mrb_path.c_str());
 }
 
-#ifdef SMOKE_TESTS_ONLY
-
-INSTANTIATE_TEST_SUITE_P(SmokeBackNav, BackwardNavTest, ::testing::ValuesIn(test_books::get_smoke_books()),
-                         [](const auto& info) { return test_books::epub_test_name(info.param); });
-
-#else
-
-INSTANTIATE_TEST_SUITE_P(CuratedBackNav, BackwardNavTest, ::testing::ValuesIn(test_books::get_curated_books()),
-                         [](const auto& info) { return test_books::epub_test_name(info.param); });
-
-#endif
+INSTANTIATE_EPUB_TESTS(BackwardNavTest);

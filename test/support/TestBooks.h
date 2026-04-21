@@ -112,3 +112,27 @@ inline std::string epub_test_name(const std::string& path) {
 }
 
 }  // namespace test_books
+
+// ---------------------------------------------------------------------------
+// Convenience macro: instantiates a parameterized test suite with the smoke
+// book list in unit_tests (SMOKE_TESTS_ONLY) or the curated book list in
+// microreader_tests. Usage:
+//
+//   INSTANTIATE_EPUB_TESTS(MyTestSuite);
+//
+// This produces INSTANTIATE_TEST_SUITE_P(SmokeBooks, ...) or
+// INSTANTIATE_TEST_SUITE_P(AllBooks, ...) as appropriate, with a GTest
+// name that uses the EPUB filename stem.
+// ---------------------------------------------------------------------------
+#define EPUB_TEST_PARAM_NAME \
+  [](const ::testing::TestParamInfo<std::string>& info) { return test_books::epub_test_name(info.param); }
+
+#ifdef SMOKE_TESTS_ONLY
+#define INSTANTIATE_EPUB_TESTS(TestSuite)                                                             \
+  INSTANTIATE_TEST_SUITE_P(SmokeBooks, TestSuite, ::testing::ValuesIn(test_books::get_smoke_books()), \
+                           EPUB_TEST_PARAM_NAME)
+#else
+#define INSTANTIATE_EPUB_TESTS(TestSuite)                                                             \
+  INSTANTIATE_TEST_SUITE_P(AllBooks, TestSuite, ::testing::ValuesIn(test_books::get_curated_books()), \
+                           EPUB_TEST_PARAM_NAME)
+#endif
