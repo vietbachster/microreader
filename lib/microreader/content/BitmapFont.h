@@ -16,7 +16,7 @@
 #include <cstring>
 
 #include "BitmapFontFormat.h"
-#include "TextLayout.h"
+#include "Font.h"
 
 namespace microreader {
 

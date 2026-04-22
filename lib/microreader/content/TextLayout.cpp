@@ -2,48 +2,8 @@
 
 #include <algorithm>
 #include <cstdio>
-#include <cstring>
 
 namespace microreader {
-
-// ---------------------------------------------------------------------------
-// UTF-8 / word-splitting helpers
-// ---------------------------------------------------------------------------
-
-static size_t utf8_codepoint_len(uint8_t b) {
-  if (b < 0x80)
-    return 1;
-  if (b < 0xE0)
-    return 2;
-  if (b < 0xF0)
-    return 3;
-  return 4;
-}
-
-static char32_t utf8_decode(const char* s, size_t len, size_t& pos) {
-  if (pos >= len)
-    return 0;
-  uint8_t b = static_cast<uint8_t>(s[pos]);
-  char32_t cp;
-  size_t n;
-  if (b < 0x80) {
-    cp = b;
-    n = 1;
-  } else if (b < 0xE0) {
-    cp = b & 0x1F;
-    n = 2;
-  } else if (b < 0xF0) {
-    cp = b & 0x0F;
-    n = 3;
-  } else {
-    cp = b & 0x07;
-    n = 4;
-  }
-  for (size_t i = 1; i < n && pos + i < len; ++i)
-    cp = (cp << 6) | (static_cast<uint8_t>(s[pos + i]) & 0x3F);
-  pos += n;
-  return cp;
-}
 
 static bool is_ws(char c) {
   return c == ' ' || c == '\t' || c == '\n' || c == '\r';
