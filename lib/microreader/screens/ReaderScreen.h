@@ -112,8 +112,8 @@ class ReaderScreen final : public IScreen {
   bool grayscale_active_ = false;
 
   bool resolve_image_size_(uint16_t key, uint16_t& w, uint16_t& h);
-  bool decode_image_to_buffer_(uint32_t offset, DrawBuffer& buf, int dest_x, int dest_y, uint16_t max_w,
-                               uint16_t max_h);
+  bool decode_image_to_buffer_(uint32_t offset, DrawBuffer& buf, int dest_x, int dest_y, uint16_t max_w, uint16_t max_h,
+                               uint16_t src_y = 0, uint16_t clip_h = 0);
   // Render page content (BW only). Sets grayscale_pending_ if font has grayscale.
   void render_page_(DrawBuffer& buf);
   // Deferred grayscale pass: writes LSB/MSB planes to BW/RED RAM and triggers

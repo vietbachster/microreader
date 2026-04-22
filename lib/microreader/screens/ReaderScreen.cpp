@@ -76,7 +76,7 @@ bool ReaderScreen::resolve_image_size_(uint16_t key, uint16_t& w, uint16_t& h) {
 }
 
 bool ReaderScreen::decode_image_to_buffer_(uint32_t offset, DrawBuffer& buf, int dest_x, int dest_y, uint16_t max_w,
-                                           uint16_t max_h) {
+                                           uint16_t max_h, uint16_t src_y, uint16_t clip_h) {
   StdioZipFile file;
   if (!file.open(path_.c_str()))
     return false;
@@ -88,13 +88,20 @@ bool ReaderScreen::decode_image_to_buffer_(uint32_t offset, DrawBuffer& buf, int
   struct BlitCtx {
     DrawBuffer* buf;
     int x, y;
+    uint16_t src_y;
+    uint16_t clip_h;  // max rows to render (0 = no clip)
   };
-  BlitCtx ctx{&buf, dest_x, dest_y};
+  BlitCtx ctx{&buf, dest_x, dest_y, src_y, clip_h};
   ImageRowSink sink;
   sink.ctx = &ctx;
   sink.emit_row = [](void* c, uint16_t row, const uint8_t* data, uint16_t width) {
     auto* bc = static_cast<BlitCtx*>(c);
-    bc->buf->blit_1bit_row(bc->x, bc->y + row, data, width);
+    if (row < bc->src_y)
+      return;
+    uint16_t dest_row = static_cast<uint16_t>(row - bc->src_y);
+    if (bc->clip_h > 0 && dest_row >= bc->clip_h)
+      return;
+    bc->buf->blit_1bit_row(bc->x, bc->y + dest_row, data, width);
   };
 
   // Use the active display buffer as the work buffer to avoid a 44KB heap
@@ -376,6 +383,8 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
   struct ImageToDraw {
     int x, y, w, h;
     uint32_t offset;
+    uint16_t src_y = 0;
+    uint16_t clip_h = 0;  // rendered slice height (0 = full)
   };
   std::vector<ImageToDraw> images;
   for (const auto& img_item : page_.image_items) {
@@ -390,8 +399,14 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
     itd.x = static_cast<int>(img_item.x_offset);
     itd.y = static_cast<int>(img_item.y_offset + page_.vertical_offset);
     itd.w = img_w;
-    itd.h = img_h;
+    // Use full_height as max_h so the decoder scales to the correct aspect ratio;
+    // src_y crops to the visible slice within that full render.
+    itd.h = img_item.full_height > 0 ? static_cast<int>(img_item.full_height) : img_h;
     itd.offset = mrb_.image_ref(img_item.key).local_header_offset;
+    itd.src_y = img_item.y_crop;
+    // Clip rendered rows to the slice height so the image doesn't overflow past
+    // its layout-assigned area (e.g. into the page number zone or page N+1).
+    itd.clip_h = static_cast<uint16_t>(img_h);
     images.push_back(itd);
   }
 
@@ -427,7 +442,7 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
 
   for (const auto& itd : images) {
     if (!decode_image_to_buffer_(itd.offset, buf, itd.x, itd.y, static_cast<uint16_t>(itd.w),
-                                 static_cast<uint16_t>(itd.h))) {
+                                 static_cast<uint16_t>(itd.h), itd.src_y, itd.clip_h)) {
       buf.fill_rect(itd.x, itd.y, itd.w, itd.h, false);
     }
   }
@@ -542,17 +557,33 @@ bool ReaderScreen::prev_page_() {
   if (page_pos_ == PagePosition{0, 0}) {
     if (chapter_idx_ > 0) {
       load_chapter_(chapter_idx_ - 1);
-      auto para_count = static_cast<uint16_t>(chapter_src_->paragraph_count());
-      layout_engine_.set_position(PagePosition{para_count, 0});
-      auto pc = layout_engine_.layout_backward();
-      page_pos_ = pc.start;
+      // Scan forward to find the last page of the previous chapter.
+      PagePosition pos{0, 0};
+      layout_engine_.set_position(pos);
+      for (;;) {
+        auto pc = layout_engine_.layout();
+        if (pc.at_chapter_end || pc.end == pos) {
+          pos = pc.start;
+          break;
+        }
+        pos = pc.end;
+        layout_engine_.set_position(pos);
+      }
+      page_pos_ = pos;
       return true;
     }
     return false;
   }
 
-  layout_engine_.set_position(page_pos_);
-  auto pc = layout_engine_.layout_backward();
+  // Scan forward from chapter start to find the page whose end == page_pos_.
+  PagePosition pos{0, 0};
+  layout_engine_.set_position(pos);
+  auto pc = layout_engine_.layout();
+  while (pc.end != page_pos_ && !pc.at_chapter_end && pc.end != pos) {
+    pos = pc.end;
+    layout_engine_.set_position(pos);
+    pc = layout_engine_.layout();
+  }
   page_pos_ = pc.start;
   return true;
 }

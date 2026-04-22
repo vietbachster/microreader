@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <optional>
 
 namespace microreader {
 
@@ -209,10 +210,6 @@ static void scale_image(const PageOptions& opts, uint16_t content_width, uint16_
       img_w = content_width;
     }
   }
-  if (img_h > fh) {
-    img_w = static_cast<uint16_t>(static_cast<uint32_t>(img_w) * fh / img_h);
-    img_h = fh;
-  }
   if (img_w == 0)
     img_w = 1;
   if (img_h == 0)
@@ -268,32 +265,88 @@ TextLayout::InlineImageInfo TextLayout::resolve_inline_image(const TextParagraph
   return info;
 }
 
-// Resolve and scale a standalone Image paragraph into a PageItem.
-// Returns an item with height==0 when dimensions could not be determined.
-TextLayout::PageItem TextLayout::make_image_para_item(uint16_t pi, const Paragraph& para, const PageOptions& opts,
-                                                      uint16_t content_width, const ImageSizeQuery& sp) {
-  uint16_t w = para.image.attr_width, h = para.image.attr_height;
-  if ((w == 0 || h == 0) && sp)
-    sp(para.image.key, w, h);
-  if (w == 0 || h == 0)
-    return {PageItem::Image, pi, 0, {}, 0};
-  uint16_t x;
-  scale_image(opts, content_width, w, h, x);
-  return {PageItem::Image, pi, 0, {}, h, 0, para.image.key, w, h, x};
-}
+// get_laid_out_() — lay out one paragraph and cache the result.
+// The ring-buffer cache (capacity kCacheCapacity) is invalidated whenever the
+// font, options, paragraph source, or image-size callback changes.
+const TextLayout::LaidOutParagraph& TextLayout::get_laid_out_(size_t pi) const {
+  if (!cache_valid_) {
+    for (auto& e : para_cache_)
+      e = LaidOutParagraph{};
+    cache_next_ = 0;
+    cache_valid_ = true;
+  }
+  for (auto& e : para_cache_)
+    if (!e.empty() && e.para_idx == static_cast<uint16_t>(pi))
+      return e;
 
-// Prepare text lines for a paragraph: resolve inline image, set lo indent, run layout.
-// img_info is filled in; lo.first_line_extra_indent is reset to 0 on return.
-// at_line_zero controls whether a non-promoted inline image activates the indent.
-std::vector<LayoutLine> TextLayout::prepare_text_lines(const IFont& font, LayoutOptions& lo, const TextParagraph& text,
-                                                       uint16_t content_width, const ImageSizeQuery& sp,
-                                                       bool at_line_zero, InlineImageInfo& img_info) {
-  img_info = resolve_inline_image(text, content_width, sp);
-  if (at_line_zero && img_info.has_image && img_info.width > 0 && img_info.height > 0 && !img_info.promoted)
-    lo.first_line_extra_indent = img_info.width + 4;
-  auto lines = layout_para_lines(font, lo, text);
-  lo.first_line_extra_indent = 0;
-  return lines;
+  LaidOutParagraph& slot = para_cache_[cache_next_];
+  cache_next_ = (cache_next_ + 1) % kCacheCapacity;
+
+  const IFont& font = *font_;
+  const PageOptions& opts = opts_;
+  const ImageSizeQuery& sp = size_fn_;
+  const uint16_t cw = opts.width - opts.padding_left - opts.padding_right;
+  const auto& para = source_->paragraph(pi);
+
+  slot = LaidOutParagraph{};
+  slot.para_idx = static_cast<uint16_t>(pi);
+  slot.type = para.type;
+
+  switch (para.type) {
+    case ParagraphType::Text: {
+      if (para.text.runs.empty()) {
+        slot.text_runs_empty = true;
+        slot.block_height = font.y_advance();
+        break;
+      }
+      InlineImageInfo img = resolve_inline_image(para.text, cw, sp);
+      slot.inline_img = img;
+      LayoutOptions lo;
+      lo.width = cw;
+      lo.alignment = opts.alignment;
+      if (img.has_image && img.width > 0 && img.height > 0 && !img.promoted)
+        lo.first_line_extra_indent = img.width + 4;
+      slot.lines = layout_para_lines(font, lo, para.text);
+      slot.line_heights.resize(slot.lines.size());
+      slot.line_baselines.resize(slot.lines.size());
+      for (size_t i = 0; i < slot.lines.size(); ++i) {
+        slot.line_heights[i] = compute_line_height(font, slot.lines[i], para.text.line_height_pct);
+        slot.line_baselines[i] = line_baseline(font, slot.lines[i]);
+      }
+      if (!img.promoted && img.has_image && img.width > 0 && img.height > 0 && !slot.lines.empty()) {
+        uint16_t bl0 = slot.line_baselines[0];
+        if (img.height > bl0)
+          slot.inline_extra = img.height - bl0;
+      }
+      if (img.promoted && img.width > 0 && img.height > 0) {
+        slot.promoted_w = img.width;
+        slot.promoted_h = img.height;
+        scale_image(opts, cw, slot.promoted_w, slot.promoted_h, slot.promoted_x);
+      }
+      break;
+    }
+    case ParagraphType::Image: {
+      uint16_t w = para.image.attr_width, h = para.image.attr_height;
+      if ((w == 0 || h == 0) && sp)
+        sp(para.image.key, w, h);
+      slot.img_key = para.image.key;
+      if (w > 0 && h > 0) {
+        uint16_t x;
+        scale_image(opts, cw, w, h, x);
+        slot.img_w = w;
+        slot.img_h = h;
+        slot.img_x = x;
+        slot.block_height = h;
+      }
+      break;
+    }
+    case ParagraphType::Hr:
+      slot.block_height = font.y_advance();
+      break;
+    case ParagraphType::PageBreak:
+      break;
+  }
+  return slot;
 }
 
 // ---------------------------------------------------------------------------
@@ -303,7 +356,6 @@ std::vector<LayoutLine> TextLayout::prepare_text_lines(const IFont& font, Layout
 
 PageContent TextLayout::assemble_page(std::vector<PageItem>& items, PagePosition start, PagePosition end,
                                       bool at_chapter_end) const {
-  using PageItem = TextLayout::PageItem;
   const PageOptions& opts = opts_;
   const IFont& font = *font_;
   IParagraphSource& source = *source_;
@@ -328,17 +380,31 @@ PageContent TextLayout::assemble_page(std::vector<PageItem>& items, PagePosition
         y += *sb;
     }
     switch (item.kind) {
-      case PageItem::TextLine:
-        page.text_items.push_back(
-            {item.para_idx, item.line_idx, std::move(item.layout_line), y, item.height, item.baseline});
+      case PageItem::TextLine: {
+        const uint16_t para_idx = item.para_idx, line_idx = item.line_idx, baseline = item.baseline;
+        page.text_items.push_back({para_idx, line_idx, std::move(item.layout_line), y, item.height, baseline});
+        // Non-promoted inline image: anchor its bottom to the baseline of the first line.
+        if (line_idx == 0) {
+          const auto& lp = get_laid_out_(para_idx);
+          if (!lp.inline_img.promoted && lp.inline_img.has_image && lp.inline_img.width > 0 &&
+              lp.inline_img.height > 0) {
+            uint16_t baseline_y = y + baseline;
+            uint16_t img_y = baseline_y >= lp.inline_img.height ? baseline_y - lp.inline_img.height : 0;
+            page.image_items.push_back(
+                {para_idx, lp.inline_img.key, lp.inline_img.width, lp.inline_img.height, opts_.padding_left, img_y});
+          }
+        }
         break;
+      }
       case PageItem::Image:
-        page.image_items.push_back({item.para_idx, item.img_key, item.img_w, item.img_h, item.img_x, y});
+        page.image_items.push_back(
+            {item.para_idx, item.img_key, item.img_w, item.height, item.img_x, y, item.img_y_crop, item.img_h});
         break;
       case PageItem::Hr:
         page.hr_items.push_back({opts.padding_left, static_cast<uint16_t>(y + default_y_advance / 2), content_width});
         break;
       case PageItem::Empty:
+      case PageItem::PageBreak:
         break;
     }
     y += item.height;
@@ -441,253 +507,198 @@ PageContent TextLayout::assemble_page(std::vector<PageItem>& items, PagePosition
 }
 
 // ---------------------------------------------------------------------------
-// collect_forward / collect_backward
-//
-// Both produce an ordered std::vector<PageItem> which assemble_page() turns
-// into PageContent. Shared helpers (make_image_para_item, prepare_text_lines)
-// keep the per-paragraph-type logic in one place.
-//
-// Direction abstraction:
-//   backward=false  pos=start  iterate pi ascending;  collect until page full → record end
-//   backward=true   pos=end    iterate pi descending; collect until page full → reverse → record start
-//
-// Spacing rule: the gap between paragraph A and B (B follows A) = B.spacing_before.
-//   Forward:  gap to add before pi  = spacing_before(pi)          (pi is the later one)
-//   Backward: gap to add before pi  = spacing_before(items.back()) (items.back() is the later one)
+// LaidOutParagraph::collect — static helpers, one per paragraph type
 // ---------------------------------------------------------------------------
 
-TextLayout::CollectResult TextLayout::collect_page_items(PagePosition pos, bool backward) const {
-  using PageItem = TextLayout::PageItem;
-  using PendingInlineImage = TextLayout::PendingInlineImage;
-  using CollectResult = TextLayout::CollectResult;
-  const IFont& font = *font_;
-  const PageOptions& opts = opts_;
-  IParagraphSource& source = *source_;
-  const ImageSizeQuery& sp = size_fn_;
-  const uint16_t cw = opts.width - opts.padding_left - opts.padding_right;
-  const uint16_t adv = font.y_advance();
-  const uint16_t ph = opts.height - opts.padding_top - opts.padding_bottom;
-  const size_t pcnt = source.paragraph_count();
-  LayoutOptions lo;
-  lo.width = cw;
-  lo.alignment = opts.alignment;
+using LaidOut = TextLayout::LaidOutParagraph;
+using Collected = TextLayout::LaidOutParagraph::Collected;
+using PageItem = TextLayout::PageItem;
+
+static std::optional<Collected> collect_text(const LaidOut& lp, size_t idx, uint16_t available) {
+  if (lp.text_runs_empty) {
+    if (idx != 0)
+      return std::nullopt;
+    return Collected{
+        PageItem{PageItem::Empty, lp.para_idx, 0, {}, lp.block_height},
+        1
+    };
+  }
+
+  // Promoted inline image: idx is a pixel offset into the image while idx < promoted_h,
+  // then shifts to line indexing for the text lines that follow.
+  size_t line_idx = idx;
+  if (lp.inline_img.promoted && lp.promoted_h > 0) {
+    if (idx < (size_t)lp.promoted_h) {
+      uint16_t remaining = lp.promoted_h - static_cast<uint16_t>(idx);
+      uint16_t slice_h = std::min(remaining, available);
+      if (slice_h == 0)
+        return std::nullopt;
+      PageItem item{PageItem::Image,
+                    lp.para_idx,
+                    0,
+                    {},
+                    slice_h,
+                    0,
+                    lp.inline_img.key,
+                    lp.promoted_w,
+                    lp.promoted_h,
+                    lp.promoted_x,
+                    static_cast<uint16_t>(idx)};
+      return Collected{std::move(item), idx + slice_h};
+    }
+    line_idx = idx - lp.promoted_h;
+  }
+
+  if (line_idx >= lp.lines.size())
+    return std::nullopt;
+
+  uint16_t lh = lp.line_heights[line_idx];
+  uint16_t bl = lp.line_baselines[line_idx];
+  if (line_idx == 0 && lp.inline_extra > 0) {
+    lh += lp.inline_extra;
+    bl += lp.inline_extra;
+  }
+  if (lh > available)
+    return std::nullopt;
+
+  PageItem item{PageItem::TextLine, lp.para_idx, static_cast<uint16_t>(line_idx), lp.lines[line_idx], lh, bl};
+  return Collected{std::move(item), idx + 1};
+}
+
+static std::optional<Collected> collect_image(const LaidOut& lp, size_t idx, uint16_t available) {
+  if (lp.block_height == 0 || idx >= (size_t)lp.block_height || available == 0)
+    return std::nullopt;
+
+  uint16_t remaining = lp.block_height - static_cast<uint16_t>(idx);
+  uint16_t slice_h = std::min(remaining, available);
+  PageItem item{PageItem::Image,           lp.para_idx, 0, {}, slice_h, 0, lp.img_key, lp.img_w, lp.img_h, lp.img_x,
+                static_cast<uint16_t>(idx)};
+  return Collected{std::move(item), idx + slice_h};
+}
+
+static std::optional<Collected> collect_hr(const LaidOut& lp, size_t idx, uint16_t available) {
+  if (idx != 0 || lp.block_height > available)
+    return std::nullopt;
+
+  return Collected{
+      PageItem{PageItem::Hr, lp.para_idx, 0, {}, lp.block_height},
+      1
+  };
+}
+
+static std::optional<Collected> collect_page_break(const LaidOut& lp, size_t idx, uint16_t /*available*/) {
+  if (idx != 0)
+    return std::nullopt;
+
+  return Collected{
+      PageItem{PageItem::PageBreak, lp.para_idx, 0, {}, 0},
+      1
+  };
+}
+
+std::optional<Collected> TextLayout::LaidOutParagraph::collect(size_t idx, uint16_t available) const {
+  switch (type) {
+    case ParagraphType::Text:
+      return collect_text(*this, idx, available);
+    case ParagraphType::Image:
+      return collect_image(*this, idx, available);
+    case ParagraphType::Hr:
+      return collect_hr(*this, idx, available);
+    case ParagraphType::PageBreak:
+      return collect_page_break(*this, idx, available);
+  }
+  return std::nullopt;
+}
+
+// ---------------------------------------------------------------------------
+// collect_para_items — collect items from one paragraph into the page.
+// Returns break_idx: the idx at which collection stopped.
+// ---------------------------------------------------------------------------
+
+static size_t collect_para_items(const LaidOut& lp, size_t start_idx, uint16_t spc, uint16_t ph, uint16_t& used,
+                                 bool& has_content, bool& page_full, bool& pending_page_break, PagePosition& boundary,
+                                 std::vector<PageItem>& items) {
+  size_t break_idx = start_idx;
+  for (size_t idx = start_idx; !page_full; ++idx) {
+    break_idx = idx;
+    uint16_t gap = (idx == start_idx && !items.empty()) ? spc : 0;
+    uint16_t avail = items.empty() ? ph : (used + gap < ph ? ph - used - gap : 0);
+
+    if (avail == 0) {
+      auto probe = lp.collect(idx, ph);
+      if (probe) {
+        if (probe->item.kind == PageItem::PageBreak) {
+          boundary = {static_cast<uint16_t>(lp.para_idx + 1), 0};
+          pending_page_break = has_content;
+        } else {
+          boundary = {lp.para_idx, static_cast<uint16_t>(idx)};
+          page_full = true;
+        }
+      }
+      break;
+    }
+
+    auto r = lp.collect(idx, avail);
+    if (!r)
+      break;
+
+    if (r->item.kind == PageItem::PageBreak) {
+      boundary = {static_cast<uint16_t>(lp.para_idx + 1), 0};
+      pending_page_break = has_content;
+      break;
+    }
+
+    used += gap + r->item.height;
+    has_content |= (r->item.kind != PageItem::Empty);
+    size_t next_idx = r->next_idx;
+    items.push_back(std::move(r->item));
+    idx = next_idx - 1;  // loop does ++idx
+  }
+  return break_idx;
+}
+
+// ---------------------------------------------------------------------------
+// collect_page_items — fill a page by iterating paragraphs.
+// ---------------------------------------------------------------------------
+
+TextLayout::CollectResult TextLayout::collect_page_items(PagePosition pos) const {
+  const uint16_t ph = opts_.height - opts_.padding_top - opts_.padding_bottom;
+  const size_t pcnt = source_->paragraph_count();
 
   std::vector<PageItem> items;
-  std::vector<PendingInlineImage> pending;
   uint16_t used = 0;
-  bool has_toi = false, page_full = false;
+  bool has_content = false, page_full = false, pending_page_break = false;
   PagePosition boundary = pos;
-  bool is_cs = (!backward && pos.paragraph == 0 && pos.line == 0);
+  const bool is_cs = (pos.paragraph == 0 && pos.line == 0);
 
-  // Iteration range.
-  // Backward: if pos.line>0 we need lines 0..pos.line-1 from pos.paragraph, so start there.
-  //           if pos.line==0 there's nothing in pos.paragraph; start one below.
-  int pi_start = backward ? ((pos.line > 0) ? (int)pos.paragraph : (int)pos.paragraph - 1) : (int)pos.paragraph;
-  // line boundary for the first paragraph in the iteration
-  size_t line_bnd = (backward && pos.line == 0) ? SIZE_MAX : pos.line;
+  for (size_t pi = (size_t)pos.paragraph; !page_full && pi < pcnt; ++pi) {
+    const LaidOutParagraph& lp = get_laid_out_(pi);
 
-  for (int pi = pi_start; !page_full && (backward ? pi >= 0 : (size_t)pi < pcnt); pi += (backward ? -1 : 1)) {
-    if ((size_t)pi >= pcnt)
+    if (pending_page_break && lp.type != ParagraphType::PageBreak) {
+      page_full = true;
       break;
-    const auto& para = source.paragraph((size_t)pi);
-
-    // Spacing (height-budget only; actual y positions are computed by assemble_page).
-    uint16_t spc = 0;
-    if (!items.empty()) {
-      uint16_t ref = backward ? items.back().para_idx : (uint16_t)pi;
-      spc = source.paragraph(ref).spacing_before.value_or(opts.para_spacing);
-    } else if (is_cs && para.spacing_before.has_value()) {
-      spc = *para.spacing_before;
     }
 
-    switch (para.type) {
-      case ParagraphType::Text: {
-        if (para.text.runs.empty()) {
-          if (used + spc + adv > ph && !items.empty()) {
-            if (!backward)
-              boundary = {(uint16_t)pi, 0};
-            page_full = true;
-            break;
-          }
-          used += spc + adv;
-          items.push_back({PageItem::Empty, (uint16_t)pi, 0, {}, adv});
-          if (!backward)
-            boundary = {(uint16_t)(pi + 1), 0};
-          break;
-        }
+    const auto& para_spc = source_->paragraph(pi).spacing_before;
+    uint16_t spc = items.empty() ? (is_cs ? para_spc.value_or(0) : 0) : para_spc.value_or(opts_.para_spacing);
+    size_t start_idx = (pi == (size_t)pos.paragraph) ? (size_t)pos.line : 0;
 
-        bool is_bnd = ((size_t)pi == (size_t)pi_start);
-        size_t skip = (!backward && is_bnd) ? line_bnd : 0;
-        size_t limit = (backward && is_bnd) ? line_bnd : SIZE_MAX;
+    size_t break_idx =
+        collect_para_items(lp, start_idx, spc, ph, used, has_content, page_full, pending_page_break, boundary, items);
 
-        InlineImageInfo img;
-        auto lines = prepare_text_lines(font, lo, para.text, cw, sp, skip == 0, img);
-        bool promoted = (img.has_image && img.promoted && img.width > 0 && img.height > 0);
-
-        // Forward only: promoted image block goes before the text lines.
-        if (!backward && skip == 0 && promoted) {
-          uint16_t pw = img.width, ih = img.height, px;
-          scale_image(opts, cw, pw, ih, px);
-          if (used + spc + ih > ph && !items.empty()) {
-            boundary = {(uint16_t)pi, 0};
-            page_full = true;
-            break;
-          }
-          used += spc + ih;
-          items.push_back({PageItem::Image, (uint16_t)pi, 0, {}, ih, 0, img.key, pw, ih, px});
-          has_toi = true;
-          spc = 0;
-        }
-
-        // Forward only: non-promoted inline image; compute extra height above first line.
-        bool has_inline = (!backward && !promoted && img.has_image && img.width > 0 && img.height > 0 && skip == 0);
-        uint16_t inline_extra = 0;
-        if (has_inline && !lines.empty()) {
-          uint16_t bl0 = line_baseline(font, lines[0]);
-          if (img.height > bl0)
-            inline_extra = img.height - bl0;
-        }
-
-        size_t lcount = lines.size();
-        size_t lim = (limit < lcount) ? limit : lcount;
-        // Iterate: forward = skip..lcount-1 (ascending); backward = lim-1..0 (descending).
-        size_t n = backward ? lim : (lcount - skip);
-        bool fst = true, got_l0 = false;
-        for (size_t k = 0; k < n; ++k) {
-          size_t li = backward ? (lim - 1 - k) : (skip + k);
-          uint16_t lh = compute_line_height(font, lines[li], para.text.line_height_pct);
-          uint16_t bl = line_baseline(font, lines[li]);
-          // For line 0 with an inline drop-cap image, the image top sits above the text
-          // baseline by inline_extra pixels. Bake that into this item's height and baseline
-          // so the item itself is taller — no phantom Empty item needed.
-          if (!backward && li == 0 && inline_extra > 0) {
-            lh += inline_extra;
-            bl += inline_extra;
-          }
-          uint16_t gap = fst ? spc : 0;
-          if (used + gap + lh > ph && !items.empty()) {
-            if (!backward) {
-              boundary = {(uint16_t)pi, (uint16_t)li};
-              if (has_inline && !fst)
-                pending.push_back({(uint16_t)pi, img.key, img.width, img.height});
-            }
-            page_full = true;
-            break;
-          }
-          used += gap + lh;
-          items.push_back({PageItem::TextLine, (uint16_t)pi, (uint16_t)li, std::move(lines[li]), lh, bl});
-          has_toi = true;
-          fst = false;
-          if (li == 0)
-            got_l0 = true;
-        }
-
-        if (!backward) {
-          if (has_inline && !fst && !page_full)
-            pending.push_back({(uint16_t)pi, img.key, img.width, img.height});
-          if (!page_full)
-            boundary = {(uint16_t)(pi + 1), 0};
-        } else if (promoted && got_l0) {
-          // Backward: promoted image goes after line 0 is collected (before it after reversal).
-          uint16_t pw = img.width, ih = img.height, px;
-          scale_image(opts, cw, pw, ih, px);
-          used += ih;
-          items.push_back({PageItem::Image, (uint16_t)pi, 0, {}, ih, 0, img.key, pw, ih, px});
-        }
-        break;
-      }
-
-      case ParagraphType::Image: {
-        auto item = make_image_para_item((uint16_t)pi, para, opts, cw, sp);
-        if (item.height == 0) {
-          if (!backward)
-            boundary = {(uint16_t)(pi + 1), 0};
-          break;
-        }
-        if (used + spc + item.height > ph && !items.empty()) {
-          if (!backward)
-            boundary = {(uint16_t)pi, 0};
-          page_full = true;
-          break;
-        }
-        used += spc + item.height;
-        items.push_back(std::move(item));
-        has_toi = true;
-        if (!backward)
-          boundary = {(uint16_t)(pi + 1), 0};
-        break;
-      }
-
-      case ParagraphType::Hr: {
-        if (used + spc + adv > ph) {
-          if (has_toi || (backward && !items.empty())) {
-            if (!backward)
-              boundary = {(uint16_t)pi, 0};
-            page_full = true;
-          } else if (!backward)
-            boundary = {(uint16_t)(pi + 1), 0};
-          break;
-        }
-        used += spc + adv;
-        items.push_back({PageItem::Hr, (uint16_t)pi, 0, {}, adv});
-        if (!backward)
-          boundary = {(uint16_t)(pi + 1), 0};
-        break;
-      }
-
-      case ParagraphType::PageBreak: {
-        if (has_toi || (backward && !items.empty())) {
-          if (!backward) {
-            bool more = false;
-            for (size_t ri = (size_t)pi + 1; ri < pcnt; ++ri)
-              if (source.paragraph(ri).type != ParagraphType::PageBreak) {
-                more = true;
-                break;
-              }
-            if (more) {
-              boundary = {(uint16_t)(pi + 1), 0};
-              page_full = true;
-              break;
-            }
-          } else {
-            page_full = true;
-            break;
-          }
-        }
-        if (!backward)
-          boundary = {(uint16_t)(pi + 1), 0};
-        break;
+    if (!page_full && !items.empty()) {
+      auto probe = lp.collect(break_idx, ph);
+      if (probe && probe->item.kind != PageItem::PageBreak) {
+        boundary = {static_cast<uint16_t>(pi), static_cast<uint16_t>(break_idx)};
+        page_full = true;
       }
     }
+
+    if (!page_full)
+      boundary = {static_cast<uint16_t>(pi + 1), 0};
   }
 
-  if (!backward)
-    return {std::move(items), std::move(pending), boundary, !page_full};
-
-  // Backward post-processing: reverse, find start_pos, account for chapter-start spacing.
-  std::reverse(items.begin(), items.end());
-  if (items.empty())
-    return {{}, {}, pos, pos.paragraph >= pcnt};
-
-  PagePosition start_pos = {items.front().para_idx, items.front().line_idx};
-  bool at_end = (start_pos == PagePosition{0, 0} && pos.paragraph >= pcnt);
-
-  if (start_pos.paragraph == 0 && start_pos.line == 0) {
-    auto sb = source.paragraph(0).spacing_before;
-    if (sb.has_value()) {
-      if (used + *sb <= ph) {
-        used += *sb;
-      } else {
-        while (!items.empty() && used + *sb > ph) {
-          used -= items.front().height;
-          items.erase(items.begin());
-        }
-        if (!items.empty())
-          start_pos = {items.front().para_idx, items.front().line_idx};
-      }
-    }
-  }
-  return {std::move(items), {}, start_pos, at_end};
+  return {std::move(items), boundary, !page_full};
 }
 
 // ---------------------------------------------------------------------------
@@ -699,36 +710,12 @@ std::vector<LayoutLine> TextLayout::layout_paragraph(const LayoutOptions& opts, 
 }
 
 PageContent TextLayout::layout() const {
-  auto c = collect_page_items(position_, false);
-  auto page = assemble_page(c.items, position_, c.boundary, c.at_chapter_end);
-  for (auto& pii : c.pending) {
-    for (auto& ti : page.text_items) {
-      if (ti.paragraph_index == pii.para_idx) {
-        uint16_t baseline_y = ti.y_offset + ti.baseline;
-        uint16_t img_y = (baseline_y >= pii.height) ? (baseline_y - pii.height) : 0;
-        page.image_items.push_back({pii.para_idx, pii.key, pii.width, pii.height, opts_.padding_left, img_y});
-        break;
-      }
-    }
-  }
-  return page;
+  auto c = collect_page_items(position_);
+  return assemble_page(c.items, position_, c.boundary, c.at_chapter_end);
 }
 
 PageContent TextLayout::layout_backward() const {
-  if (position_.paragraph == 0 && position_.line == 0) {
-    PageContent page;
-    page.start = {0, 0};
-    page.end = {0, 0};
-    return page;
-  }
-  auto c = collect_page_items(position_, true);
-  if (c.items.empty()) {
-    PageContent page;
-    page.start = page.end = position_;
-    page.at_chapter_end = (position_.paragraph >= source_->paragraph_count());
-    return page;
-  }
-  return assemble_page(c.items, c.boundary, position_, c.at_chapter_end);
+  return {};
 }
 
 }  // namespace microreader

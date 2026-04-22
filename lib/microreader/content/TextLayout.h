@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -69,9 +70,11 @@ struct PageImageItem {
   uint16_t paragraph_index;
   uint16_t key;
   uint16_t width;
-  uint16_t height;
-  uint16_t x_offset;  // pixel offset from page left (for centering)
-  uint16_t y_offset;  // pixel offset from page top
+  uint16_t height;           // slice height (pixels rendered on this page)
+  uint16_t x_offset;         // pixel offset from page left (for centering)
+  uint16_t y_offset;         // pixel offset from page top
+  uint16_t y_crop = 0;       // rows into source image to skip (for partial/split images)
+  uint16_t full_height = 0;  // full scaled image height (for decode: width × aspect)
 };
 
 struct PageHrItem {
@@ -156,21 +159,25 @@ class TextLayout {
   // Replace the paragraph source (e.g. after loading a new chapter).
   void set_source(IParagraphSource& source) {
     source_ = &source;
+    cache_valid_ = false;
   }
 
   // Replace the font (e.g. after a proportional font becomes available).
   void set_font(IFont& font) {
     font_ = &font;
+    cache_valid_ = false;
   }
 
   // Replace options (e.g. after a screen resize).
   void set_options(const PageOptions& opts) {
     opts_ = opts;
+    cache_valid_ = false;
   }
 
   // Replace the image size query (e.g. when a book is opened).
   void set_image_size_fn(ImageSizeQuery fn) {
     size_fn_ = std::move(fn);
+    cache_valid_ = false;
   }
 
   // Break a single paragraph into lines using the stored font.
@@ -183,21 +190,18 @@ class TextLayout {
   // position(). Use the returned page.start to navigate to the previous page.
   PageContent layout_backward() const;
 
- private:
-  // Internal types used by collect_page_items / assemble_page.
+  // Implementation-internal types. Declared public so that .cpp-scope helper
+  // functions (which are not class members) can reference them without
+  // triggering MSVC C2248 private-access errors.
   struct PageItem {
-    enum Kind { TextLine, Image, Hr, Empty } kind;
+    enum Kind { TextLine, Image, Hr, Empty, PageBreak } kind;
     uint16_t para_idx, line_idx;
     LayoutLine layout_line;
     uint16_t height, baseline = 0;
-    uint16_t img_key = 0, img_w = 0, img_h = 0, img_x = 0;
-  };
-  struct PendingInlineImage {
-    uint16_t para_idx, key, width, height;
+    uint16_t img_key = 0, img_w = 0, img_h = 0, img_x = 0, img_y_crop = 0;
   };
   struct CollectResult {
     std::vector<PageItem> items;
-    std::vector<PendingInlineImage> pending;
     PagePosition boundary;
     bool at_chapter_end = false;
   };
@@ -207,22 +211,67 @@ class TextLayout {
     bool promoted = false, has_image = false;
   };
 
-  CollectResult collect_page_items(PagePosition pos, bool backward) const;
+  // Laid-out paragraph: result of the expensive per-paragraph work (line-breaking,
+  // image scaling, inline image resolution). Stored in a small ring-buffer cache
+  // so that a paragraph spanning two pages is not re-laid-out on every layout() call.
+  struct LaidOutParagraph {
+    uint16_t para_idx = UINT16_MAX;  // UINT16_MAX = empty slot
+    ParagraphType type = ParagraphType::Text;
+
+    // ParagraphType::Text:
+    bool text_runs_empty = false;  // true when para.text.runs is empty
+    std::vector<LayoutLine> lines;
+    InlineImageInfo inline_img;
+    std::vector<uint16_t> line_heights;                       // pre-computed per-line heights
+    std::vector<uint16_t> line_baselines;                     // pre-computed per-line baselines
+    uint16_t inline_extra = 0;                                // extra px on line 0 for non-promoted inline image
+    uint16_t promoted_w = 0, promoted_h = 0, promoted_x = 0;  // scaled promoted inline image
+
+    // ParagraphType::Image (standalone), Hr, empty Text:
+    uint16_t block_height = 0;                              // Image: scaled h (0=unknown); Hr/empty-text: font advance
+    uint16_t img_key = 0, img_w = 0, img_h = 0, img_x = 0;  // Image paragraph only
+
+    bool empty() const {
+      return para_idx == UINT16_MAX;
+    }
+
+    // Result of collect(): the next item from this paragraph, or nullopt when
+    // the paragraph is exhausted (no more items at idx).
+    // collect() does NOT check whether the item fits on the page; the caller
+    // is responsible for that.
+    // next_idx: the idx to pass on the next call (idx+1 for most items; for
+    //           image slices it advances by the slice height in pixels).
+    struct Collected {
+      PageItem item;
+      size_t next_idx = 0;
+    };
+
+    // Returns the item at collect-index `idx` that fits within `available` pixels,
+    // or nullopt when the paragraph is exhausted or the next item doesn't fit.
+    // Dispatches to a per-type static helper (collect_text / collect_image /
+    // collect_hr / collect_page_break). Each helper is responsible for computing
+    // next_idx: idx+slice_h for image slices, idx+1 for everything else.
+    std::optional<Collected> collect(size_t idx, uint16_t available) const;
+  };
+
+ private:
+  CollectResult collect_page_items(PagePosition pos) const;
   PageContent assemble_page(std::vector<PageItem>& items, PagePosition start, PagePosition end,
                             bool at_chapter_end) const;
   static InlineImageInfo resolve_inline_image(const TextParagraph& text_para, uint16_t content_width,
                                               const ImageSizeQuery& sp);
-  static PageItem make_image_para_item(uint16_t pi, const Paragraph& para, const PageOptions& opts,
-                                       uint16_t content_width, const ImageSizeQuery& sp);
-  static std::vector<LayoutLine> prepare_text_lines(const IFont& font, LayoutOptions& lo, const TextParagraph& text,
-                                                    uint16_t content_width, const ImageSizeQuery& sp, bool at_line_zero,
-                                                    InlineImageInfo& img_info);
+  const LaidOutParagraph& get_laid_out_(size_t pi) const;
 
   IFont* font_ = nullptr;
   PageOptions opts_;
   IParagraphSource* source_ = nullptr;
   ImageSizeQuery size_fn_;
   PagePosition position_;
+
+  static constexpr size_t kCacheCapacity = 8;
+  mutable std::array<LaidOutParagraph, kCacheCapacity> para_cache_{};
+  mutable size_t cache_next_ = 0;
+  mutable bool cache_valid_ = false;
 };
 
 }  // namespace microreader

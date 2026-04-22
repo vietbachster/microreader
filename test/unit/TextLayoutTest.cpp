@@ -1,4 +1,4 @@
-#include <gtest/gtest.h>
+﻿#include <gtest/gtest.h>
 
 #include <algorithm>
 
@@ -78,7 +78,7 @@ TEST(TextLayout, WordWrapToTwoLines) {
   TextParagraph para;
   para.runs.push_back(microreader::Run("Hello world foo", FontStyle::Regular, false));
 
-  // Width 80: "Hello" = 40, space=8, "world" = 40 → need 88 > 80 → wrap
+  // Width 80: "Hello" = 40, space=8, "world" = 40 â†’ need 88 > 80 â†’ wrap
   LayoutOptions opts{80, Alignment::Start};
   auto lines = TextLayout(font8).layout_paragraph(opts, para);
 
@@ -94,7 +94,7 @@ TEST(TextLayout, MultipleWordsMultipleLines) {
   // Each word = 16px, space = 8px
   // Width 56: "aa" + " " + "bb" + " " + "cc" = 16+8+16+8+16 = 64 > 56
   //           "aa" + " " + "bb" = 16+8+16 = 40 < 56
-  //           "aa" + " " + "bb" + " " = 48 + "cc" = 64 > 56 → wrap after bb
+  //           "aa" + " " + "bb" + " " = 48 + "cc" = 64 > 56 â†’ wrap after bb
   LayoutOptions opts{56, Alignment::Start};
   auto lines = TextLayout(font8).layout_paragraph(opts, para);
 
@@ -173,7 +173,7 @@ TEST(TextLayout, AlignCenter) {
   para.runs.push_back(microreader::Run("Hi", FontStyle::Regular, false));
   para.alignment = Alignment::Center;
 
-  // "Hi" = 16px on width 100 → room = 84 → nudge = 42
+  // "Hi" = 16px on width 100 â†’ room = 84 â†’ nudge = 42
   LayoutOptions opts{100, Alignment::Start};
   auto lines = TextLayout(font8).layout_paragraph(opts, para);
 
@@ -198,9 +198,9 @@ TEST(TextLayout, JustifyTwoWords) {
   para.runs.push_back(microreader::Run("aa bb cc", FontStyle::Regular, false));
 
   // Width 80: "aa" + " " + "bb" + " " + "cc" = 16+8+16+8+16 = 64
-  // But "aa" + " " + "bb" = 40 → fits
-  // "aa" + " " + "bb" + " " + "cc" = 64 < 80 → all on one line
-  // Last line → no justification for single-line paragraphs
+  // But "aa" + " " + "bb" = 40 â†’ fits
+  // "aa" + " " + "bb" + " " + "cc" = 64 < 80 â†’ all on one line
+  // Last line â†’ no justification for single-line paragraphs
   LayoutOptions opts{80, Alignment::Justify};
   auto lines = TextLayout(font8).layout_paragraph(opts, para);
 
@@ -213,10 +213,10 @@ TEST(TextLayout, JustifyMultipleLines) {
   TextParagraph para;
   para.runs.push_back(microreader::Run("aa bb cc dd", FontStyle::Regular, false));
 
-  // Width 50: "aa"=16, space=8, "bb"=16 → 40 < 50
+  // Width 50: "aa"=16, space=8, "bb"=16 â†’ 40 < 50
   //           "aa" + " " + "bb" + " " + "cc" = 16+8+16+8+16 = 64 > 50
-  // Line 1: "aa bb" (40px), room = 10 → justified (one gap gets +10)
-  // Line 2: "cc dd" (40px) — last line, no justification
+  // Line 1: "aa bb" (40px), room = 10 â†’ justified (one gap gets +10)
+  // Line 2: "cc dd" (40px) â€” last line, no justification
   LayoutOptions opts{50, Alignment::Justify};
   auto lines = TextLayout(font8).layout_paragraph(opts, para);
 
@@ -246,7 +246,7 @@ TEST(TextLayout, ParagraphIndent) {
 TEST(TextLayout, DefaultAlignmentFromOptions) {
   TextParagraph para;
   para.runs.push_back(microreader::Run("Hi", FontStyle::Regular, false));
-  // No para.alignment set → uses opts.alignment
+  // No para.alignment set â†’ uses opts.alignment
 
   LayoutOptions opts{100, Alignment::Center};
   auto lines = TextLayout(font8).layout_paragraph(opts, para);
@@ -258,7 +258,7 @@ TEST(TextLayout, DefaultAlignmentFromOptions) {
 TEST(TextLayout, MarginLeftWithIndent) {
   // When margin_left is set, text-indent is skipped to keep all lines aligned.
   TextParagraph para;
-  para.indent = 16;  // 2 chars indent — ignored when margin_left is set
+  para.indent = 16;  // 2 chars indent â€” ignored when margin_left is set
   // Runs with margin_left set (simulating a poem with left margin)
   microreader::Run r1("Hello world this is a long line here", FontStyle::Regular, false);
   r1.margin_left = 40;  // 5 chars margin
@@ -276,7 +276,7 @@ TEST(TextLayout, MarginLeftWithIndent) {
 TEST(TextLayout, MarginRightReducesLineWidth) {
   // With margin_right, text should wrap earlier (at max_width - margin_right).
   TextParagraph para;
-  // "AAAA BBBB CCCC" = 3 words × 4 chars × 8px = 32px each, + 8px spaces
+  // "AAAA BBBB CCCC" = 3 words Ã— 4 chars Ã— 8px = 32px each, + 8px spaces
   microreader::Run r1("AAAA BBBB CCCC", FontStyle::Regular, false);
   r1.margin_right = 40;
   para.runs.push_back(r1);
@@ -296,7 +296,7 @@ TEST(TextLayout, MarginRightReducesLineWidth) {
 
 TEST(TextLayout, UnicodeText) {
   TextParagraph para;
-  // 2 codepoints × 8px = 16px
+  // 2 codepoints Ã— 8px = 16px
   para.runs.push_back(microreader::Run(std::string("Gr\xc3\xbc\xc3\x9f"
                                                    "e"),
                                        FontStyle::Regular, false));
@@ -305,28 +305,28 @@ TEST(TextLayout, UnicodeText) {
   auto lines = TextLayout(font8).layout_paragraph(opts, para);
 
   ASSERT_EQ(lines.size(), 1);
-  // "Grüße" = 5 codepoints × 8 = 40px
+  // "GrÃ¼ÃŸe" = 5 codepoints Ã— 8 = 40px
   EXPECT_EQ(lines[0].words[0].x, 0);
 }
 
 // ===== German text rendering pipeline test =====
-// Simulates exactly what ReaderScreen does: layout → DrawWord → glyph iteration
+// Simulates exactly what ReaderScreen does: layout â†’ DrawWord â†’ glyph iteration
 
 TEST(TextLayout, GermanTextRenderingPipeline) {
   // Use the same font parameters as ReaderScreen: glyph_width=16, line_height=20
   FixedFont font16(16, 20);
 
   // German sentence with umlauts, guillemets, em-dash
-  // "Rechtsgeschäft" = 14 codepoints (13 ASCII + 1 ä)
-  // "für" = 3 codepoints (f + ü + r)
-  // "»Prinz Eugen«" = 13 codepoints (» + P,r,i,n,z + space + E,u,g,e,n + «)
-  // "1944–1945" = 9 codepoints (4 digits + – + 4 digits)
+  // "RechtsgeschÃ¤ft" = 14 codepoints (13 ASCII + 1 Ã¤)
+  // "fÃ¼r" = 3 codepoints (f + Ã¼ + r)
+  // "Â»Prinz EugenÂ«" = 13 codepoints (Â» + P,r,i,n,z + space + E,u,g,e,n + Â«)
+  // "1944â€“1945" = 9 codepoints (4 digits + â€“ + 4 digits)
   TextParagraph para;
   para.runs.push_back(microreader::Run(std::string("Rechtsgesch\xc3\xa4"
-                                                   "ft"                            // Rechtsgeschäft
-                                                   " f\xc3\xbcr"                   // für
-                                                   " \xc2\xbbPrinz Eugen\xc2\xab"  // »Prinz Eugen«
-                                                   " 1944\xe2\x80\x93"             // 1944–
+                                                   "ft"                            // RechtsgeschÃ¤ft
+                                                   " f\xc3\xbcr"                   // fÃ¼r
+                                                   " \xc2\xbbPrinz Eugen\xc2\xab"  // Â»Prinz EugenÂ«
+                                                   " 1944\xe2\x80\x93"             // 1944â€“
                                                    "1945"),                        // 1945
                                        FontStyle::Regular, false));
 
@@ -335,7 +335,7 @@ TEST(TextLayout, GermanTextRenderingPipeline) {
 
   ASSERT_GE(lines.size(), 1u);
 
-  // Verify word widths match codepoint counts × 16
+  // Verify word widths match codepoint counts Ã— 16
   struct Expected {
     const char* text;
     size_t byte_len;
@@ -343,12 +343,12 @@ TEST(TextLayout, GermanTextRenderingPipeline) {
   };
   Expected expected[] = {
       {"Rechtsgesch\xc3\xa4"
-       "ft",     15, 14}, // 11 ASCII + 2 bytes ä + 2 ASCII = 15 bytes, 14 codepoints
-      {"f\xc3\xbcr",    4,  3 }, // f + ü(2b) + r = 4 bytes, 3 codepoints
-      {"\xc2\xbbPrinz", 7,  6 }, // »(2b) + Prinz = 7 bytes, 6 codepoints
-      {"Eugen\xc2\xab", 7,  6 }, // Eugen + «(2b) = 7 bytes, 6 codepoints
+       "ft",     15, 14}, // 11 ASCII + 2 bytes Ã¤ + 2 ASCII = 15 bytes, 14 codepoints
+      {"f\xc3\xbcr",    4,  3 }, // f + Ã¼(2b) + r = 4 bytes, 3 codepoints
+      {"\xc2\xbbPrinz", 7,  6 }, // Â»(2b) + Prinz = 7 bytes, 6 codepoints
+      {"Eugen\xc2\xab", 7,  6 }, // Eugen + Â«(2b) = 7 bytes, 6 codepoints
       {"1944\xe2\x80\x93"
-       "1945",   11, 9 }, // 1944 + –(3b) + 1945 = 11 bytes, 9 codepoints
+       "1945",   11, 9 }, // 1944 + â€“(3b) + 1945 = 11 bytes, 9 codepoints
   };
 
   // Collect all words from all lines
@@ -367,7 +367,7 @@ TEST(TextLayout, GermanTextRenderingPipeline) {
     // Verify byte length
     EXPECT_EQ(w.len, expected[i].byte_len);
 
-    // Verify word width = codepoints × glyph_width
+    // Verify word width = codepoints Ã— glyph_width
     uint16_t measured = font16.word_width(w.text, w.len, FontStyle::Regular);
     EXPECT_EQ(measured, expected[i].codepoints * 16);
 
@@ -389,7 +389,7 @@ TEST(TextLayout, GermanTextRenderingPipeline) {
     }
     EXPECT_EQ(glyph_count, expected[i].codepoints) << "Codepoint count doesn't match expected";
 
-    // Verify rendered width = glyph_count × 8 × scale (where scale=2, so 16)
+    // Verify rendered width = glyph_count Ã— 8 Ã— scale (where scale=2, so 16)
     // This matches the rendering: dw.x + ci * 8 * scale
     int rendered_width = glyph_count * 16;
     EXPECT_EQ(rendered_width, measured) << "Rendered width doesn't match layout-measured width";
@@ -482,28 +482,28 @@ TEST(PageLayout, SpreadWithImagePrefersImageTextGap) {
   // Layout: image (50px) + text line + text line in the same paragraph.
   // page_height = 83, padded = 83 (no padding).
   // Items: image(50) + text(16) + text(16) = 82px. slack = 1.
-  // Gaps: image→text1 (weight 8), text1→text2 (weight 1, same para). total_weight=9.
-  // Extra space goes almost entirely to the image→text gap.
-  // With slack=1, base_per_unit=0, leftover=1 → last 1 unit gets +1.
-  // gap[0]=0 (8 units, all 0 except last which gets +1 if unit index ≥ 8)
-  // Actually units_used: for gap[0], w=0..7 → units 0..7. leftover=1, total_weight-leftover=8.
-  //   unit 0..7: units_used 0..7, all < 8 → 0. gap[0]=0.
-  //   for gap[1], w=0: units_used=8 ≥ 8 → 1. gap[1]=1.
-  // So image→text gap=0, text→text gap=1. Slack goes to the intra-para gap!
+  // Gaps: imageâ†’text1 (weight 8), text1â†’text2 (weight 1, same para). total_weight=9.
+  // Extra space goes almost entirely to the imageâ†’text gap.
+  // With slack=1, base_per_unit=0, leftover=1 â†’ last 1 unit gets +1.
+  // gap[0]=0 (8 units, all 0 except last which gets +1 if unit index â‰¥ 8)
+  // Actually units_used: for gap[0], w=0..7 â†’ units 0..7. leftover=1, total_weight-leftover=8.
+  //   unit 0..7: units_used 0..7, all < 8 â†’ 0. gap[0]=0.
+  //   for gap[1], w=0: units_used=8 â‰¥ 8 â†’ 1. gap[1]=1.
+  // So imageâ†’text gap=0, textâ†’text gap=1. Slack goes to the intra-para gap!
   // That seems wrong, let me design a test where image boundary wins.
   // Use slack=9 so that: base_per_unit=1, leftover=0.
-  //   gap[0] = 8*1 = 8, gap[1] = 1*1 = 1. Image→text gets 8, text→text gets 1.
+  //   gap[0] = 8*1 = 8, gap[1] = 1*1 = 1. Imageâ†’text gets 8, textâ†’text gets 1.
   // page_height: 50 + 16 + 16 + 8 + 1 = 91px of content needed to make slack=9 at height 91.
   // Actually we want y=82 (no spacing), padded_height=91. height=91+0padding=91.
   Chapter ch;
   ch.paragraphs.push_back(Paragraph::make_image(1, 200, 50));  // 200x50 image
   TextParagraph tp;
   tp.runs.push_back(microreader::Run("Line one two three", FontStyle::Regular, false));
-  tp.runs.push_back(microreader::Run(" more words here x", FontStyle::Regular, true));  // breaking run → 2 lines
+  tp.runs.push_back(microreader::Run(" more words here x", FontStyle::Regular, true));  // breaking run â†’ 2 lines
   ch.paragraphs.push_back(Paragraph::make_text(std::move(tp)));
 
   // page height=91 (no padding, no para_spacing). Content = image(50) + line(16) + line(16) = 82.
-  // slack = 91 - 82 = 9. weights: gap[0]=8 (image→text), gap[1]=1 (same para).
+  // slack = 91 - 82 = 9. weights: gap[0]=8 (imageâ†’text), gap[1]=1 (same para).
   // Expected: gap[0]=8, gap[1]=1.
   TestChapterSource src(ch);
   PageOptions opts(200, 91, 0, 0);
@@ -516,26 +516,26 @@ TEST(PageLayout, SpreadWithImagePrefersImageTextGap) {
   // The image should be at y=0.
   EXPECT_EQ(page.image_items[0].y_offset, 0u);
 
-  // After spreading: image→text1 gap gets 8px, text1→text2 gap gets 1px.
+  // After spreading: imageâ†’text1 gap gets 8px, text1â†’text2 gap gets 1px.
   // text_item[0].y_offset = 50 + 8 = 58
   // text_item[1].y_offset = 58 + 16 + 1 = 75
   // Then fine-tune baseline: last text baseline = 75 + font8.baseline() = 75+12=87.
   // target_baseline = padded_height(91) - standard_descent(16-12=4) = 87. delta=0.
-  EXPECT_EQ(page.text_items[0].y_offset, 58u) << "Image→text gap should be 8px";
-  EXPECT_EQ(page.text_items[1].y_offset, 75u) << "Text→text gap should be 1px";
+  EXPECT_EQ(page.text_items[0].y_offset, 58u) << "Imageâ†’text gap should be 8px";
+  EXPECT_EQ(page.text_items[1].y_offset, 75u) << "Textâ†’text gap should be 1px";
 }
 
 TEST(PageLayout, SpreadWithHrPrefersHrTextGap) {
   // HR followed by two text lines. HR boundary gap (weight 8) should absorb most slack.
-  // HR item uses default_y_advance=16px slot. Two text lines × 16px = 32px.
-  // Total = 48px. page_height = 57 → slack = 9. weights: hr→text1 (8), text1→text2 (3, diff para).
+  // HR item uses default_y_advance=16px slot. Two text lines Ã— 16px = 32px.
+  // Total = 48px. page_height = 57 â†’ slack = 9. weights: hrâ†’text1 (8), text1â†’text2 (3, diff para).
   // total_weight=11. base_per_unit=0, leftover=9.
-  // gap[0]: 8 units, units 0..7 < 11-9=2 → first 2 get 0, next 6 get 1 → gap[0]=6.
-  // gap[1]: 3 units, units 8..10 ≥ 2 → all get 1 → gap[1]=3.
+  // gap[0]: 8 units, units 0..7 < 11-9=2 â†’ first 2 get 0, next 6 get 1 â†’ gap[0]=6.
+  // gap[1]: 3 units, units 8..10 â‰¥ 2 â†’ all get 1 â†’ gap[1]=3.
   // Actually: total_weight=11, leftover=9, total_weight-leftover=2.
-  //   unit 0: units_used=0 < 2 → +0; unit 1: 1 < 2 → +0; units 2..10 ≥ 2 → +1.
-  //   gap[0]: w=0..7 → units 0..7 → 0+0+1+1+1+1+1+1 = 6. gap[0]=6.
-  //   gap[1]: w=0..2 → units 8..10 → 1+1+1 = 3. gap[1]=3.
+  //   unit 0: units_used=0 < 2 â†’ +0; unit 1: 1 < 2 â†’ +0; units 2..10 â‰¥ 2 â†’ +1.
+  //   gap[0]: w=0..7 â†’ units 0..7 â†’ 0+0+1+1+1+1+1+1 = 6. gap[0]=6.
+  //   gap[1]: w=0..2 â†’ units 8..10 â†’ 1+1+1 = 3. gap[1]=3.
   Chapter ch;
   ch.paragraphs.push_back(Paragraph::make_hr());
   TextParagraph tp1;
@@ -571,7 +571,7 @@ TEST(PageLayout, SpreadNoOpWhenTooMuchSlack) {
   tp.runs.push_back(microreader::Run("Short", FontStyle::Regular, false));
   ch.paragraphs.push_back(Paragraph::make_text(std::move(tp)));
 
-  // 16px of text, 200px page → slack = 184 >= 16 → no spreading. Flush to top.
+  // 16px of text, 200px page â†’ slack = 184 >= 16 â†’ no spreading. Flush to top.
   TestChapterSource src(ch);
   PageOptions opts(200, 200, 0, 0);
   opts.center_text = true;
@@ -612,7 +612,7 @@ TEST(PageLayout, MultipleParagraphsFitOnePage) {
     ch.paragraphs.push_back(Paragraph::make_text(std::move(tp)));
   }
 
-  // 3 lines × 16px = 48px, 2 gaps × 8px = 16px → 64px < 100px
+  // 3 lines Ã— 16px = 48px, 2 gaps Ã— 8px = 16px â†’ 64px < 100px
   TestChapterSource src(ch);
   PageOptions opts(200, 100, 0, 8);
   auto page = TextLayout(font8, opts, src, PagePosition(0, 0)).layout();
@@ -708,9 +708,9 @@ TEST(PageLayout, MultiLineParagraphSplitAcrossPages) {
   tp.runs.push_back(microreader::Run("aa bb cc dd ee ff gg hh ii jj", FontStyle::Regular, false));
   ch.paragraphs.push_back(Paragraph::make_text(std::move(tp)));
 
-  // Width 40: each word = 16px, space = 8px → "aa bb" = 40 fits, "aa bb cc" = 64 > 40
-  // So each line fits ~2 words → ~5 lines
-  // Page height 48 → fits 3 lines (48/16=3)
+  // Width 40: each word = 16px, space = 8px â†’ "aa bb" = 40 fits, "aa bb cc" = 64 > 40
+  // So each line fits ~2 words â†’ ~5 lines
+  // Page height 48 â†’ fits 3 lines (48/16=3)
   TestChapterSource src(ch);
   PageOptions opts(40, 48, 0);
   TextLayout tl(font8, opts, src);
@@ -737,7 +737,7 @@ TEST(PageLayout, ImageParagraph) {
 
   EXPECT_EQ(page.image_items.size(), 1);
   EXPECT_EQ(page.image_items[0].key, 42);
-  // 100x30 scaled up to fill width 200 → 200x60
+  // 100x30 scaled up to fill width 200 â†’ 200x60
   EXPECT_EQ(page.image_items[0].width, 200);
   EXPECT_EQ(page.image_items[0].height, 60);
   EXPECT_EQ(page.image_items[0].y_offset, 0);
@@ -748,7 +748,7 @@ TEST(PageLayout, ImageScaledToFitWidth) {
   Chapter ch;
   ch.paragraphs.push_back(Paragraph::make_image(1, 400, 200));
 
-  // Content width = 200-0 = 200, image is 400 wide → scaled to 200×100
+  // Content width = 200-0 = 200, image is 400 wide â†’ scaled to 200Ã—100
   TestChapterSource src(ch);
   PageOptions opts(200, 300, 0);
   auto page = TextLayout(font8, opts, src, PagePosition(0, 0)).layout();
@@ -758,28 +758,148 @@ TEST(PageLayout, ImageScaledToFitWidth) {
   EXPECT_EQ(page.image_items[0].height, 100);
 }
 
-TEST(PageLayout, ImageDoesntFitPushedToNextPage) {
+TEST(PageLayout, ImageSlicedWhenDoesntFit) {
   Chapter ch;
   TextParagraph tp;
   tp.runs.push_back(microreader::Run("Hello", FontStyle::Regular, false));
   ch.paragraphs.push_back(Paragraph::make_text(std::move(tp)));
-  ch.paragraphs.push_back(Paragraph::make_image(1, 100, 80));
+  // Use a narrow image (60Ã—80) so scale_image doesn't resize it.
+  // Page: 200Ã—32, no padding, no para spacing.
+  // Text uses 16px, leaving 16px for the image (80px tall) â†’ sliced.
+  ch.paragraphs.push_back(Paragraph::make_image(1, 60, 80));
 
-  // Page height 32 → text takes 16px, image needs 80px → doesn't fit
   TestChapterSource src(ch);
-  PageOptions opts(200, 32, 0);
+  PageOptions opts(200, 32, 0, 0);  // no padding, no para spacing
   TextLayout tl(font8, opts, src);
   auto page = tl.layout();
 
   EXPECT_EQ(page.text_items.size(), 1);
-  EXPECT_EQ(page.image_items.size(), 0);
+  ASSERT_EQ(page.image_items.size(), 1);
+  EXPECT_EQ(page.image_items[0].y_crop, 0);
+  EXPECT_EQ(page.image_items[0].height, 16);  // sliced to remaining 16px
   EXPECT_FALSE(page.at_chapter_end);
   EXPECT_EQ(page.end.paragraph, 1);
+  EXPECT_EQ(page.end.line, 16);
 
-  // Next page shows the image
+  // Page 2: next 32px slice
   tl.set_position(page.end);
   auto page2 = tl.layout();
-  EXPECT_EQ(page2.image_items.size(), 1);
+  ASSERT_EQ(page2.image_items.size(), 1);
+  EXPECT_EQ(page2.image_items[0].y_crop, 16);
+  EXPECT_EQ(page2.image_items[0].height, 32);
+  EXPECT_FALSE(page2.at_chapter_end);
+
+  // Page 3: final 32px slice
+  tl.set_position(page2.end);
+  auto page3 = tl.layout();
+  ASSERT_EQ(page3.image_items.size(), 1);
+  EXPECT_EQ(page3.image_items[0].y_crop, 48);
+  EXPECT_EQ(page3.image_items[0].height, 32);
+  EXPECT_TRUE(page3.at_chapter_end);
+}
+
+TEST(PageLayout, ImageSplitsAcrossPages) {
+  // Image taller than the page (after width-scaling) should be split: first page
+  // shows top slice, second page shows the remainder.
+  // Image: 200Ã—600. Page: width=200, height=300, padding=0.
+  // scale_image does not cap height to page height â†’ block_height=600.
+  Chapter ch;
+  ch.paragraphs.push_back(Paragraph::make_image(1, 200, 600));
+
+  TestChapterSource src(ch);
+  PageOptions opts(200, 300, 0);  // page height 300px (no padding)
+  TextLayout tl(font8, opts, src);
+  auto page1 = tl.layout();
+
+  // First page: one image item, fills the page (height==300), y_crop==0
+  ASSERT_EQ(page1.image_items.size(), 1u);
+  EXPECT_EQ(page1.image_items[0].height, 300);
+  EXPECT_EQ(page1.image_items[0].y_crop, 0);
+  EXPECT_FALSE(page1.at_chapter_end);
+  // boundary should point back into the same paragraph at pixel offset 300
+  EXPECT_EQ(page1.end.paragraph, 0);
+  EXPECT_EQ(page1.end.line, 300);
+
+  // Second page: remainder of the image (300px), y_crop==300
+  tl.set_position(page1.end);
+  auto page2 = tl.layout();
+  ASSERT_EQ(page2.image_items.size(), 1u);
+  EXPECT_EQ(page2.image_items[0].height, 300);
+  EXPECT_EQ(page2.image_items[0].y_crop, 300);
+  EXPECT_TRUE(page2.at_chapter_end);
+}
+
+TEST(PageLayout, ImageSplitWithTextBefore) {
+  // Text lines fill part of a page, then a tall image is split across the
+  // remainder of page 1 and a full page 2.
+  // font8 = 16px y_advance. Page: 200Ã—100, no padding, no para_spacing.
+  // Text: 1 line = 16px, available for image = 84px.
+  // Image: 200Ã—200, block_height=200 (fits width exactly, no scaling).
+  Chapter ch;
+  TextParagraph tp;
+  tp.runs.push_back(microreader::Run("Line", FontStyle::Regular, false));
+  ch.paragraphs.push_back(Paragraph::make_text(std::move(tp)));
+  ch.paragraphs.push_back(Paragraph::make_image(1, 200, 200));
+
+  TestChapterSource src(ch);
+  PageOptions opts(200, 100, 0, 0);
+  TextLayout tl(font8, opts, src);
+  auto page1 = tl.layout();
+
+  // Page 1: text line + image slice (0..84)
+  ASSERT_EQ(page1.text_items.size(), 1u);
+  ASSERT_EQ(page1.image_items.size(), 1u);
+  EXPECT_EQ(page1.image_items[0].y_crop, 0);
+  EXPECT_EQ(page1.image_items[0].height, 84);
+  EXPECT_FALSE(page1.at_chapter_end);
+  EXPECT_EQ(page1.end.paragraph, 1);
+  EXPECT_EQ(page1.end.line, 84);  // boundary into image paragraph at row 84
+
+  // Page 2: continuation of image (rows 84..183) â€” remainder on a full page
+  tl.set_position(page1.end);
+  auto page2 = tl.layout();
+  EXPECT_EQ(page2.text_items.size(), 0u);
+  ASSERT_EQ(page2.image_items.size(), 1u);
+  EXPECT_EQ(page2.image_items[0].y_crop, 84);
+  EXPECT_EQ(page2.image_items[0].height, 100);
+  EXPECT_FALSE(page2.at_chapter_end);
+  EXPECT_EQ(page2.end.paragraph, 1);
+  EXPECT_EQ(page2.end.line, 184);
+
+  // Page 3: final 16px slice
+  tl.set_position(page2.end);
+  auto page3 = tl.layout();
+  ASSERT_EQ(page3.image_items.size(), 1u);
+  EXPECT_EQ(page3.image_items[0].y_crop, 184);
+  EXPECT_EQ(page3.image_items[0].height, 16);
+  EXPECT_TRUE(page3.at_chapter_end);
+}
+
+TEST(PageLayout, ImageSplitFullHeightPreserved) {
+  // When an image is split, each slice must record full_height == block_height
+  // so the decoder can scale correctly and src_y crops to the right slice.
+  // Image: 200Ã—200 â†’ block_height=200. Page: 200Ã—100 (no padding).
+  Chapter ch;
+  ch.paragraphs.push_back(Paragraph::make_image(1, 200, 200));
+
+  TestChapterSource src(ch);
+  PageOptions opts(200, 100, 0, 0);
+  TextLayout tl(font8, opts, src);
+  auto page1 = tl.layout();
+
+  ASSERT_EQ(page1.image_items.size(), 1u);
+  EXPECT_EQ(page1.image_items[0].height, 100);       // slice: 100px
+  EXPECT_EQ(page1.image_items[0].y_crop, 0);         // top of image
+  EXPECT_EQ(page1.image_items[0].full_height, 200);  // full image height for decoder
+
+  tl.set_position(page1.end);
+  auto page2 = tl.layout();
+
+  ASSERT_EQ(page2.image_items.size(), 1u);
+  EXPECT_EQ(page2.image_items[0].height, 100);       // slice: 100px
+  EXPECT_EQ(page2.image_items[0].y_crop, 100);       // bottom of image
+  EXPECT_EQ(page2.image_items[0].full_height, 200);  // same full height
+  EXPECT_TRUE(page2.at_chapter_end);
 }
 
 TEST(PageLayout, HrParagraph) {
@@ -821,8 +941,8 @@ TEST(PageLayout, PaddingReducesContentArea) {
   tp.runs.push_back(microreader::Run("Hello", FontStyle::Regular, false));
   ch.paragraphs.push_back(Paragraph::make_text(std::move(tp)));
 
-  // Page 200×100 with padding 20 → content area 160×60
-  // Line height 16 → fits floor(60/16) = 3 lines
+  // Page 200Ã—100 with padding 20 â†’ content area 160Ã—60
+  // Line height 16 â†’ fits floor(60/16) = 3 lines
   TestChapterSource src(ch);
   PageOptions opts(200, 100, 20, 0);
   auto page = TextLayout(font8, opts, src, PagePosition(0, 0)).layout();
@@ -1023,7 +1143,7 @@ TEST(TextLayout, MixedSizesLineHeight) {
   uint16_t y1 = page.text_items[1].y_offset;
   uint16_t gap = y1 - y0;
 
-  // Large line height = 16 * 5/4 = 20, plus para_spacing = 8 → gap = 28
+  // Large line height = 16 * 5/4 = 20, plus para_spacing = 8 â†’ gap = 28
   // Normal line height would be 16 + 8 = 24
   EXPECT_GT(gap, font8.y_advance(FontSize::Normal));
 }
@@ -1085,7 +1205,7 @@ TEST(TextLayout, CrossRunWordContinuation) {
 }
 
 TEST(TextLayout, CrossRunWithTrailingSpace) {
-  // Run ending with space: "Hello " + "world" → normal word spacing
+  // Run ending with space: "Hello " + "world" â†’ normal word spacing
   TextParagraph para;
   para.runs.push_back(microreader::Run("Hello ", FontStyle::Regular));
   para.runs.push_back(microreader::Run("world", FontStyle::Regular));
@@ -1102,7 +1222,7 @@ TEST(TextLayout, CrossRunWithTrailingSpace) {
 }
 
 TEST(TextLayout, CrossRunDifferentStyles) {
-  // "A" in bold + "LICE" in regular, no spaces → adjacent
+  // "A" in bold + "LICE" in regular, no spaces â†’ adjacent
   TextParagraph para;
   para.runs.push_back(microreader::Run("A", FontStyle::Bold));
   para.runs.push_back(microreader::Run("LICE", FontStyle::Regular));
@@ -1159,7 +1279,7 @@ TEST(PageLayout, ImageZeroHeightSkipped) {
 }
 
 TEST(PageLayout, ImageScaledToFitPageHeight) {
-  // Image taller than page height should be capped
+  // Image taller than page height is sliced; first page shows page-height rows
   Chapter ch;
   ch.paragraphs.push_back(Paragraph::make_image(1, 100, 2000));
   TestChapterSource src(ch);
@@ -1168,13 +1288,14 @@ TEST(PageLayout, ImageScaledToFitPageHeight) {
   auto page = TextLayout(font8, opts, src, PagePosition(0, 0)).layout();
 
   ASSERT_EQ(page.image_items.size(), 1);
-  EXPECT_LE(page.image_items[0].height, 100);  // capped to page height
-  EXPECT_GT(page.image_items[0].height, 0);
-  EXPECT_LE(page.image_items[0].width, 200);  // preserved ratio
+  EXPECT_EQ(page.image_items[0].height, 100);  // sliced to page height
+  EXPECT_EQ(page.image_items[0].y_crop, 0);
+  EXPECT_GT(page.image_items[0].width, 0);
+  EXPECT_FALSE(page.at_chapter_end);  // more image on next page
 }
 
 TEST(PageLayout, ImageScaledBothDimensions) {
-  // Image larger than page in both dimensions
+  // Image larger than page in both dimensions â€” width-scaled first, then sliced vertically
   Chapter ch;
   ch.paragraphs.push_back(Paragraph::make_image(1, 1000, 2000));
   TestChapterSource src(ch);
@@ -1184,13 +1305,12 @@ TEST(PageLayout, ImageScaledBothDimensions) {
 
   ASSERT_EQ(page.image_items.size(), 1);
   EXPECT_LE(page.image_items[0].width, 200);
-  EXPECT_LE(page.image_items[0].height, 100);
+  EXPECT_EQ(page.image_items[0].height, 100);  // sliced to page height
   EXPECT_GT(page.image_items[0].width, 0);
-  EXPECT_GT(page.image_items[0].height, 0);
 }
 
 TEST(PageLayout, ImageFillsEntirePage) {
-  // Image exactly fills page height — should be placed as first item
+  // Image exactly fills page height â€” should be placed as first item
   Chapter ch;
   ch.paragraphs.push_back(Paragraph::make_image(1, 200, 100));
   TestChapterSource src(ch);
@@ -1231,13 +1351,13 @@ TEST(PageLayout, ImageWithPaddingUsesFullWidth) {
   ch.paragraphs.push_back(Paragraph::make_image(1, 800, 600));
   TestChapterSource src(ch);
 
-  // Page 600x800 with padding 20 → images scale to full 600x800
+  // Page 600x800 with padding 20 â†’ images scale to full 600x800
   PageOptions opts(600, 800, 20, 0);
   auto page = TextLayout(font8, opts, src, PagePosition(0, 0)).layout();
 
   ASSERT_EQ(page.image_items.size(), 1);
-  EXPECT_LE(page.image_items[0].width, 600);   // ≤ full page width
-  EXPECT_LE(page.image_items[0].height, 800);  // ≤ full page height
+  EXPECT_LE(page.image_items[0].width, 600);   // â‰¤ full page width
+  EXPECT_LE(page.image_items[0].height, 800);  // â‰¤ full page height
   // Should be centered: x_offset = (600 - actual_w) / 2
   EXPECT_EQ(page.image_items[0].x_offset, (600 - page.image_items[0].width) / 2);
 }
@@ -1248,7 +1368,7 @@ TEST(PageLayout, MultipleImagesStack) {
   ch.paragraphs.push_back(Paragraph::make_image(1, 100, 15));
   ch.paragraphs.push_back(Paragraph::make_image(2, 100, 15));
 
-  // 100x15 scales up to 200x30 each. Two images + spacing: 30 + 4 + 30 = 64 ≤ 100
+  // 100x15 scales up to 200x30 each. Two images + spacing: 30 + 4 + 30 = 64 â‰¤ 100
   TestChapterSource src(ch);
   PageOptions opts(200, 100, 0, 4);
   auto page = TextLayout(font8, opts, src, PagePosition(0, 0)).layout();
@@ -1262,8 +1382,8 @@ TEST(PageLayout, MultipleImagesStack) {
 TEST(PageLayout, ImageNeverExceedsPageBounds) {
   // Stress test: various extreme image sizes should never exceed full page
   PageOptions opts(600, 800, 20, 8);
-  uint16_t page_w = opts.width;   // 600 — images use full width
-  uint16_t page_h = opts.height;  // 800 — images use full height
+  uint16_t page_w = opts.width;   // 600 â€” images use full width
+  uint16_t page_h = opts.height;  // 800 â€” images use full height
 
   struct TestCase {
     uint16_t w, h;
@@ -1314,7 +1434,7 @@ TEST(PageLayout, ImageOnlyPageVerticallyCentered) {
 
   ASSERT_EQ(page.image_items.size(), 1);
   EXPECT_TRUE(page.at_chapter_end);
-  // 100x50 scaled up to 200x100 on 200px page → vertical_offset = (200-100)/2 = 50
+  // 100x50 scaled up to 200x100 on 200px page â†’ vertical_offset = (200-100)/2 = 50
   EXPECT_EQ(page.vertical_offset, 50);
 }
 
@@ -1324,25 +1444,25 @@ TEST(PageLayout, ImageOnlyWithPaddingCenteredOnFullScreen) {
   ch.paragraphs.push_back(Paragraph::make_image(1, 100, 50));
   TestChapterSource src(ch);
 
-  // Page 200x200, padding 20 → content area 160x160
+  // Page 200x200, padding 20 â†’ content area 160x160
   PageOptions opts(200, 200, 20, 0);
   auto page = TextLayout(font8, opts, src, PagePosition(0, 0)).layout();
 
   ASSERT_EQ(page.image_items.size(), 1);
   EXPECT_TRUE(page.at_chapter_end);
-  // 100x50 scaled up to 200x100 → centered on full 200px screen: (200-100)/2 = 50
+  // 100x50 scaled up to 200x100 â†’ centered on full 200px screen: (200-100)/2 = 50
   EXPECT_EQ(page.vertical_offset, 50);
 }
 
 TEST(PageLayout, SparseTextVerticallyCentered) {
-  // A single short line on a tall page — no centering (centering was removed)
+  // A single short line on a tall page â€” no centering (centering was removed)
   Chapter ch;
   TextParagraph tp;
   tp.runs.push_back(microreader::Run("Hi", FontStyle::Regular, false));
   ch.paragraphs.push_back(Paragraph::make_text(std::move(tp)));
   TestChapterSource src(ch);
 
-  // 16px of text on 200px page → NOT centered (flush to top)
+  // 16px of text on 200px page â†’ NOT centered (flush to top)
   PageOptions opts(200, 200, 0);
   auto page = TextLayout(font8, opts, src, PagePosition(0, 0)).layout();
 
@@ -1415,7 +1535,7 @@ TEST(PageLayout, FullPageTextNotVerticallyCentered) {
   PageOptions opts(200, 80, 0);  // small page that will be mostly full
   auto page = TextLayout(font8, opts, src, PagePosition(0, 0)).layout();
 
-  // Full page → vertical_offset is normal top padding (no extra centering)
+  // Full page â†’ vertical_offset is normal top padding (no extra centering)
   EXPECT_EQ(page.vertical_offset, opts.padding_top);
 }
 
@@ -1431,7 +1551,7 @@ TEST(PageLayout, MixedTextAndImageNoVerticalCenter) {
   PageOptions opts(200, 200, 0, 4);
   auto page = TextLayout(font8, opts, src, PagePosition(0, 0)).layout();
 
-  // Has both text and image → vertical_offset is normal top padding (no extra centering)
+  // Has both text and image â†’ vertical_offset is normal top padding (no extra centering)
   EXPECT_EQ(page.vertical_offset, opts.padding_top);
 }
 
@@ -1472,7 +1592,7 @@ TEST(PageLayout, NoCenteringOnMultiPageChapter) {
     pos = last_page.end;
   }
   EXPECT_TRUE(last_page.at_chapter_end);
-  // Last page should NOT be extra-centered — vertical_offset equals normal top padding
+  // Last page should NOT be extra-centered â€” vertical_offset equals normal top padding
   EXPECT_EQ(last_page.vertical_offset, opts.padding_top);
 }
 
@@ -1581,7 +1701,7 @@ TEST(PageLayout, InlineImageFirstLineIndented) {
 }
 
 TEST(PageLayout, SmallInlineImageSameAsBaseline) {
-  // 12x12 image — same height as baseline (12px). Bottom aligns with baseline,
+  // 12x12 image â€” same height as baseline (12px). Bottom aligns with baseline,
   // so image top = first line top.
   auto ch = make_inline_image_chapter(12, 12, "Hello world this is a test of a small inline icon");
   TestChapterSource src(ch);
@@ -1603,7 +1723,7 @@ TEST(PageLayout, SmallInlineImageSameAsBaseline) {
 }
 
 TEST(PageLayout, TallInlineImageExtendsAboveFirstLine) {
-  // 40x48 image — taller than baseline (12px). Image extends above the first line.
+  // 40x48 image â€” taller than baseline (12px). Image extends above the first line.
   auto ch = make_inline_image_chapter(40, 48, "Hello world this is a test of a tall inline image");
   TestChapterSource src(ch);
   PageOptions opts(300, 400, 0, 10);
@@ -1786,12 +1906,12 @@ TEST(PageLayoutBackward, MultiLineParagraphSplit) {
   // A paragraph with multiple lines. Backward should pick trailing lines.
   Chapter ch;
   TextParagraph tp;
-  // 10 words × 8px = 80px per word. Width 100px → ~1 word per line.
+  // 10 words Ã— 8px = 80px per word. Width 100px â†’ ~1 word per line.
   tp.runs.push_back(microreader::Run("aaa bbb ccc ddd eee", FontStyle::Regular, false));
   ch.paragraphs.push_back(Paragraph::make_text(std::move(tp)));
 
-  // Width 32px: each 3-letter word = 24px, fits one per line. 5 lines × 16px = 80px.
-  // Page height 32 → fits 2 lines.
+  // Width 32px: each 3-letter word = 24px, fits one per line. 5 lines Ã— 16px = 80px.
+  // Page height 32 â†’ fits 2 lines.
   TestChapterSource src(ch);
   PageOptions opts(32, 32, 0, 0);
   TextLayout tl(font8, opts, src, PagePosition(1, 0));
@@ -1870,7 +1990,7 @@ TEST(PageLayoutBackward, PageBreakStopsBackward) {
   TextLayout tl(font8, opts, src, PagePosition(3, 0));
   auto page = tl.layout_backward();
 
-  // Should only get "After break" — page break stops backward scan
+  // Should only get "After break" â€” page break stops backward scan
   ASSERT_EQ(page.text_items.size(), 1);
   EXPECT_EQ(line_text(page.text_items[0].line), "After break");
 }
@@ -1946,4 +2066,64 @@ TEST(PageLayoutBackward, ParagraphSpacingMatches) {
   for (size_t i = 0; i < fwd.text_items.size(); ++i) {
     EXPECT_EQ(fwd.text_items[i].y_offset, bwd.text_items[i].y_offset) << "y_offset mismatch at item " << i;
   }
+}
+
+TEST(PageLayout, PromotedInlineImageSlicedWhenNoSpace) {
+  // A text paragraph with a promoted inline image is sliced across pages,
+  // just like a standalone image paragraph.
+  //
+  // Page: 200x200, no padding, para_spacing=0. font8: y_advance=16.
+  // Para 0: 3 lines -> 48px used.
+  // Para 1: 3 lines -> 48px used. Total: 96px used, 104px remaining.
+  // Para 2: text with promoted inline image (200x150 -> promoted_h=150 > 104px avail).
+  //         Page 1: 6 text lines + 104px image slice.
+  //         Page 2: remaining 46px image slice + 1 text line ("Caption").
+
+  Chapter ch;
+
+  // Para 0: 3 lines via breaking runs
+  TextParagraph tp0;
+  tp0.runs.push_back(microreader::Run("Alpha", FontStyle::Regular, false));
+  tp0.runs.back().breaking = true;
+  tp0.runs.push_back(microreader::Run("Beta", FontStyle::Regular, false));
+  tp0.runs.back().breaking = true;
+  tp0.runs.push_back(microreader::Run("Gamma", FontStyle::Regular, false));
+  ch.paragraphs.push_back(Paragraph::make_text(std::move(tp0)));
+
+  // Para 1: 3 lines
+  TextParagraph tp1;
+  tp1.runs.push_back(microreader::Run("Delta", FontStyle::Regular, false));
+  tp1.runs.back().breaking = true;
+  tp1.runs.push_back(microreader::Run("Epsilon", FontStyle::Regular, false));
+  tp1.runs.back().breaking = true;
+  tp1.runs.push_back(microreader::Run("Zeta", FontStyle::Regular, false));
+  ch.paragraphs.push_back(Paragraph::make_text(std::move(tp1)));
+
+  // Para 2: text with a large promoted inline image (width=200 > cw/3 -> promoted)
+  TextParagraph tp2;
+  tp2.runs.push_back(microreader::Run("Caption", FontStyle::Regular, false));
+  tp2.inline_image = ImageRef(99, 200, 150);  // 150px > 104px remaining -> sliced
+  ch.paragraphs.push_back(Paragraph::make_text(std::move(tp2)));
+
+  TestChapterSource src(ch);
+  PageOptions opts(200, 200, 0, 0);
+  TextLayout tl(font8, opts, src);
+  auto page1 = tl.layout();
+
+  // Page 1: 6 text lines + first 104px slice of the image
+  EXPECT_EQ(page1.text_items.size(), 6u);
+  ASSERT_EQ(page1.image_items.size(), 1u) << "first image slice must appear on page 1";
+  EXPECT_EQ(page1.image_items[0].height, 104u) << "slice height = 104px (200-96)";
+  EXPECT_EQ(page1.image_items[0].y_crop, 0u);
+  EXPECT_EQ(page1.image_items[0].full_height, 150u);
+  EXPECT_FALSE(page1.at_chapter_end);
+
+  // Page 2: remaining 46px slice + caption text line
+  tl.set_position(page1.end);
+  auto page2 = tl.layout();
+  ASSERT_GE(page2.image_items.size(), 1u) << "second image slice must appear on page 2";
+  EXPECT_EQ(page2.image_items[0].height, 46u) << "remaining slice = 46px";
+  EXPECT_EQ(page2.image_items[0].y_crop, 104u);
+  EXPECT_GE(page2.text_items.size(), 1u) << "caption text must follow on page 2";
+  EXPECT_TRUE(page2.at_chapter_end);
 }
