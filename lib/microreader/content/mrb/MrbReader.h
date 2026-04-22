@@ -5,7 +5,7 @@
 #include <vector>
 
 #include "../ContentModel.h"
-#include "../TextLayout.h"
+#include "../IParagraphSource.h"
 #include "MrbFormat.h"
 
 namespace microreader {

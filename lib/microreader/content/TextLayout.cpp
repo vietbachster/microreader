@@ -100,7 +100,8 @@ static void align_line(Alignment alignment, uint16_t room, std::vector<LayoutWor
 // layout_paragraph() — greedy line-breaking with styled runs
 // ---------------------------------------------------------------------------
 
-std::vector<LayoutLine> layout_paragraph(const IFont& font, const LayoutOptions& opts, const TextParagraph& para) {
+static std::vector<LayoutLine> layout_para_lines(const IFont& font, const LayoutOptions& opts,
+                                                 const TextParagraph& para) {
   const uint16_t max_width = opts.width;
   const uint16_t space_width = font.char_width(' ', FontStyle::Regular);
   const Alignment align = para.alignment.value_or(opts.alignment);
@@ -194,15 +195,6 @@ std::vector<LayoutLine> layout_paragraph(const IFont& font, const LayoutOptions&
 // Page layout types and shared helpers
 // ---------------------------------------------------------------------------
 
-struct PageItem {
-  enum Kind { TextLine, Image, Hr, Empty };
-  Kind kind;
-  uint16_t para_idx, line_idx;
-  LayoutLine layout_line;
-  uint16_t height, baseline = 0;
-  uint16_t img_key = 0, img_w = 0, img_h = 0, img_x = 0;
-};
-
 static void scale_image(const PageOptions& opts, uint16_t content_width, uint16_t& img_w, uint16_t& img_h,
                         uint16_t& x_off) {
   const uint16_t fw = opts.width, fh = opts.height;
@@ -258,13 +250,8 @@ static uint16_t line_baseline(const IFont& font, const LayoutLine& line) {
   return bl;
 }
 
-struct InlineImageInfo {
-  uint16_t key = 0, width = 0, height = 0;
-  bool promoted = false, has_image = false;
-};
-
-static InlineImageInfo resolve_inline_image(const TextParagraph& text_para, uint16_t content_width,
-                                            const ImageSizeQuery& sp) {
+TextLayout::InlineImageInfo TextLayout::resolve_inline_image(const TextParagraph& text_para, uint16_t content_width,
+                                                             const ImageSizeQuery& sp) {
   InlineImageInfo info;
   if (!text_para.inline_image.has_value())
     return info;
@@ -283,8 +270,8 @@ static InlineImageInfo resolve_inline_image(const TextParagraph& text_para, uint
 
 // Resolve and scale a standalone Image paragraph into a PageItem.
 // Returns an item with height==0 when dimensions could not be determined.
-static PageItem make_image_para_item(uint16_t pi, const Paragraph& para, const PageOptions& opts,
-                                     uint16_t content_width, const ImageSizeQuery& sp) {
+TextLayout::PageItem TextLayout::make_image_para_item(uint16_t pi, const Paragraph& para, const PageOptions& opts,
+                                                      uint16_t content_width, const ImageSizeQuery& sp) {
   uint16_t w = para.image.attr_width, h = para.image.attr_height;
   if ((w == 0 || h == 0) && sp)
     sp(para.image.key, w, h);
@@ -298,13 +285,13 @@ static PageItem make_image_para_item(uint16_t pi, const Paragraph& para, const P
 // Prepare text lines for a paragraph: resolve inline image, set lo indent, run layout.
 // img_info is filled in; lo.first_line_extra_indent is reset to 0 on return.
 // at_line_zero controls whether a non-promoted inline image activates the indent.
-static std::vector<LayoutLine> prepare_text_lines(const IFont& font, LayoutOptions& lo, const TextParagraph& text,
-                                                  uint16_t content_width, const ImageSizeQuery& sp, bool at_line_zero,
-                                                  InlineImageInfo& img_info) {
+std::vector<LayoutLine> TextLayout::prepare_text_lines(const IFont& font, LayoutOptions& lo, const TextParagraph& text,
+                                                       uint16_t content_width, const ImageSizeQuery& sp,
+                                                       bool at_line_zero, InlineImageInfo& img_info) {
   img_info = resolve_inline_image(text, content_width, sp);
   if (at_line_zero && img_info.has_image && img_info.width > 0 && img_info.height > 0 && !img_info.promoted)
     lo.first_line_extra_indent = img_info.width + 4;
-  auto lines = layout_paragraph(font, lo, text);
+  auto lines = layout_para_lines(font, lo, text);
   lo.first_line_extra_indent = 0;
   return lines;
 }
@@ -314,9 +301,12 @@ static std::vector<LayoutLine> prepare_text_lines(const IFont& font, LayoutOptio
 // Applies paragraph spacing, image-only centering, and line spreading.
 // ---------------------------------------------------------------------------
 
-static PageContent assemble_page(const PageOptions& opts, const IFont& font, IParagraphSource& source,
-                                 std::vector<PageItem>& items, PagePosition start, PagePosition end,
-                                 bool at_chapter_end) {
+PageContent TextLayout::assemble_page(std::vector<PageItem>& items, PagePosition start, PagePosition end,
+                                      bool at_chapter_end) const {
+  using PageItem = TextLayout::PageItem;
+  const PageOptions& opts = opts_;
+  const IFont& font = *font_;
+  IParagraphSource& source = *source_;
   const uint16_t content_width = opts.width - opts.padding_left - opts.padding_right;
   const uint16_t default_y_advance = font.y_advance();
 
@@ -466,19 +456,14 @@ static PageContent assemble_page(const PageOptions& opts, const IFont& font, IPa
 //   Backward: gap to add before pi  = spacing_before(items.back()) (items.back() is the later one)
 // ---------------------------------------------------------------------------
 
-struct PendingInlineImage {
-  uint16_t para_idx, key, width, height;
-};
-
-struct CollectResult {
-  std::vector<PageItem> items;
-  std::vector<PendingInlineImage> pending;  // populated only when backward=false
-  PagePosition boundary;                    // end_pos (forward) or start_pos (backward)
-  bool at_chapter_end = false;
-};
-
-static CollectResult collect_page_items(const IFont& font, const PageOptions& opts, IParagraphSource& source,
-                                        PagePosition pos, bool backward, const ImageSizeQuery& sp) {
+TextLayout::CollectResult TextLayout::collect_page_items(PagePosition pos, bool backward) const {
+  using PageItem = TextLayout::PageItem;
+  using PendingInlineImage = TextLayout::PendingInlineImage;
+  using CollectResult = TextLayout::CollectResult;
+  const IFont& font = *font_;
+  const PageOptions& opts = opts_;
+  IParagraphSource& source = *source_;
+  const ImageSizeQuery& sp = size_fn_;
   const uint16_t cw = opts.width - opts.padding_left - opts.padding_right;
   const uint16_t adv = font.y_advance();
   const uint16_t ph = opts.height - opts.padding_top - opts.padding_bottom;
@@ -706,19 +691,22 @@ static CollectResult collect_page_items(const IFont& font, const PageOptions& op
 }
 
 // ---------------------------------------------------------------------------
-// Public API
+// TextLayout methods
 // ---------------------------------------------------------------------------
 
-PageContent layout_page(const IFont& font, const PageOptions& opts, IParagraphSource& source, PagePosition start,
-                        const ImageSizeQuery& size_provider) {
-  auto c = collect_page_items(font, opts, source, start, false, size_provider);
-  auto page = assemble_page(opts, font, source, c.items, start, c.boundary, c.at_chapter_end);
+std::vector<LayoutLine> TextLayout::layout_paragraph(const LayoutOptions& opts, const TextParagraph& para) const {
+  return layout_para_lines(*font_, opts, para);
+}
+
+PageContent TextLayout::layout() const {
+  auto c = collect_page_items(position_, false);
+  auto page = assemble_page(c.items, position_, c.boundary, c.at_chapter_end);
   for (auto& pii : c.pending) {
     for (auto& ti : page.text_items) {
       if (ti.paragraph_index == pii.para_idx) {
         uint16_t baseline_y = ti.y_offset + ti.baseline;
         uint16_t img_y = (baseline_y >= pii.height) ? (baseline_y - pii.height) : 0;
-        page.image_items.push_back({pii.para_idx, pii.key, pii.width, pii.height, opts.padding_left, img_y});
+        page.image_items.push_back({pii.para_idx, pii.key, pii.width, pii.height, opts_.padding_left, img_y});
         break;
       }
     }
@@ -726,22 +714,21 @@ PageContent layout_page(const IFont& font, const PageOptions& opts, IParagraphSo
   return page;
 }
 
-PageContent layout_page_backward(const IFont& font, const PageOptions& opts, IParagraphSource& source, PagePosition end,
-                                 const ImageSizeQuery& size_provider) {
-  if (end.paragraph == 0 && end.line == 0) {
+PageContent TextLayout::layout_backward() const {
+  if (position_.paragraph == 0 && position_.line == 0) {
     PageContent page;
     page.start = {0, 0};
     page.end = {0, 0};
     return page;
   }
-  auto c = collect_page_items(font, opts, source, end, true, size_provider);
+  auto c = collect_page_items(position_, true);
   if (c.items.empty()) {
     PageContent page;
-    page.start = page.end = end;
-    page.at_chapter_end = (end.paragraph >= source.paragraph_count());
+    page.start = page.end = position_;
+    page.at_chapter_end = (position_.paragraph >= source_->paragraph_count());
     return page;
   }
-  return assemble_page(opts, font, source, c.items, c.boundary, end, c.at_chapter_end);
+  return assemble_page(c.items, c.boundary, position_, c.at_chapter_end);
 }
 
 }  // namespace microreader

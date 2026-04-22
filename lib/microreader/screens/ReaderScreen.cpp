@@ -261,6 +261,10 @@ void ReaderScreen::start(DrawBuffer& buf) {
     goto show_error;
   }
   page_pos_ = saved_page_pos_;
+  layout_engine_ = TextLayout{};
+  layout_engine_.set_source(*chapter_src_);
+  layout_engine_.set_image_size_fn(
+      [this](uint16_t key, uint16_t& w, uint16_t& h) { return resolve_image_size_(key, w, h); });
   render_page_(buf);
 #ifdef ESP_PLATFORM
   ESP_LOGI("reader", "BOOK_OK: %s", path_);
@@ -341,6 +345,7 @@ void ReaderScreen::load_chapter_(size_t idx) {
   if (idx < mrb_.chapter_count()) {
     chapter_src_ = std::make_unique<MrbChapterSource>(mrb_, static_cast<uint16_t>(idx));
     chapter_idx_ = idx;
+    layout_engine_.set_source(*chapter_src_);
   }
 }
 
@@ -361,9 +366,11 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
   opts.padding_bottom = kPaddingBottom;
   opts.padding_left = kPaddingLeft;
   opts.center_text = true;
+  layout_engine_.set_font(font);
+  layout_engine_.set_options(opts);
+  layout_engine_.set_position(page_pos_);
 
-  page_ = layout_page(font, opts, *chapter_src_, page_pos_,
-                      [this](uint16_t key, uint16_t& w, uint16_t& h) { return resolve_image_size_(key, w, h); });
+  page_ = layout_engine_.layout();
 
   // ── Collect image positions from layout ─────────────────────────────────
   struct ImageToDraw {
@@ -535,37 +542,17 @@ bool ReaderScreen::prev_page_() {
   if (page_pos_ == PagePosition{0, 0}) {
     if (chapter_idx_ > 0) {
       load_chapter_(chapter_idx_ - 1);
-      const BitmapFontSet* fset = ext_font_set_ ? ext_font_set_ : (font_set_.valid() ? &font_set_ : nullptr);
-      FixedFont fixed_font(kGlyphW * kScale, kGlyphH * kScale + 4);
-      IFont& font = fset ? static_cast<IFont&>(const_cast<BitmapFontSet&>(*fset)) : static_cast<IFont&>(fixed_font);
-      PageOptions opts(static_cast<uint16_t>(DrawBuffer::kWidth), static_cast<uint16_t>(DrawBuffer::kHeight),
-                       kPaddingTop, kParaSpacing, Alignment::Start);
-      opts.padding_right = kPaddingRight;
-      opts.padding_bottom = kPaddingBottom;
-      opts.padding_left = kPaddingLeft;
-      opts.center_text = true;
       auto para_count = static_cast<uint16_t>(chapter_src_->paragraph_count());
-      auto pc = layout_page_backward(
-          font, opts, *chapter_src_, PagePosition{para_count, 0},
-          [this](uint16_t key, uint16_t& w, uint16_t& h) { return resolve_image_size_(key, w, h); });
+      layout_engine_.set_position(PagePosition{para_count, 0});
+      auto pc = layout_engine_.layout_backward();
       page_pos_ = pc.start;
       return true;
     }
     return false;
   }
 
-  const BitmapFontSet* fset2 = ext_font_set_ ? ext_font_set_ : (font_set_.valid() ? &font_set_ : nullptr);
-  FixedFont fixed_font(kGlyphW * kScale, kGlyphH * kScale + 4);
-  IFont& font = fset2 ? static_cast<IFont&>(const_cast<BitmapFontSet&>(*fset2)) : static_cast<IFont&>(fixed_font);
-  PageOptions opts(static_cast<uint16_t>(DrawBuffer::kWidth), static_cast<uint16_t>(DrawBuffer::kHeight), kPaddingTop,
-                   kParaSpacing, Alignment::Start);
-  opts.padding_right = kPaddingRight;
-  opts.padding_bottom = kPaddingBottom;
-  opts.padding_left = kPaddingLeft;
-  opts.center_text = true;
-  auto pc = layout_page_backward(font, opts, *chapter_src_, page_pos_, [this](uint16_t key, uint16_t& w, uint16_t& h) {
-    return resolve_image_size_(key, w, h);
-  });
+  layout_engine_.set_position(page_pos_);
+  auto pc = layout_engine_.layout_backward();
   page_pos_ = pc.start;
   return true;
 }

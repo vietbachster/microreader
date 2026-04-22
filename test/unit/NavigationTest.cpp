@@ -78,11 +78,11 @@ static NavResult navigate_book(const std::string& epub_path) {
 
   for (uint16_t ci = 0; ci < mrb.chapter_count(); ++ci) {
     MrbChapterSource src(mrb, ci);
-    PagePosition pos{0, 0};
     int chapter_pages = 0;
 
+    TextLayout tl(font, opts, src);
     while (true) {
-      auto page = layout_page(font, opts, src, pos);
+      auto page = tl.layout();
       ++chapter_pages;
 
       if (page.at_chapter_end)
@@ -90,13 +90,13 @@ static NavResult navigate_book(const std::string& epub_path) {
 
       // Safety: abort if stuck in an infinite loop.
       if (chapter_pages > 1000) {
-        printf("    ABORT: ch%d exceeded 1000 pages at pos{%u,%u}\n", ci, pos.paragraph, pos.line);
+        printf("    ABORT: ch%d exceeded 1000 pages at pos{%u,%u}\n", ci, page.end.paragraph, page.end.line);
         mrb.close();
         std::remove(mrb_path.c_str());
         return result;
       }
 
-      pos = page.end;
+      tl.set_position(page.end);
     }
 
     result.total_pages += chapter_pages;
@@ -175,22 +175,23 @@ TEST_P(BackwardNavTest, NavigateBackwardAllPages) {
     MrbChapterSource src(mrb, ci);
 
     // Forward pass to count pages and find chapter end.
-    PagePosition pos{0, 0};
     int fwd_pages = 0;
+    TextLayout tl(font, opts, src);
     while (true) {
-      auto page = layout_page(font, opts, src, pos);
+      auto page = tl.layout();
       ++fwd_pages;
       if (page.at_chapter_end)
         break;
       ASSERT_LT(fwd_pages, 1000) << name << " ch" << ci << " forward stuck";
-      pos = page.end;
+      tl.set_position(page.end);
     }
 
     // Backward pass from chapter end.
     PagePosition end_pos{static_cast<uint16_t>(src.paragraph_count()), 0};
     int bwd_pages = 0;
     while (true) {
-      auto page = layout_page_backward(font, opts, src, end_pos);
+      tl.set_position(end_pos);
+      auto page = tl.layout_backward();
       ++bwd_pages;
       if (page.start.paragraph == 0 && page.start.line == 0)
         break;

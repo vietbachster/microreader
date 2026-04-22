@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "TestBooks.h"
+#include "TestChapterSource.h"
 #include "microreader/content/Book.h"
 #include "microreader/content/TextLayout.h"
 #include "microreader/content/ZipReader.h"
@@ -141,13 +142,14 @@ class MrbLayoutComparisonTest : public ::testing::Test {
       ASSERT_EQ(ch.paragraphs.size(), mrb_src.paragraph_count()) << epub_name << " ch" << ci << " paragraph count";
 
       // Paginate both and compare.
-      PagePosition epub_pos{0, 0};
-      PagePosition mrb_pos{0, 0};
+      TestChapterSource epub_src(ch);
+      TextLayout epub_tl(font, opts, epub_src);
+      TextLayout mrb_tl(font, opts, mrb_src);
       int page_num = 0;
 
       while (true) {
-        auto epub_page = layout_page(font, opts, ch, epub_pos);
-        auto mrb_page = layout_page(font, opts, mrb_src, mrb_pos);
+        auto epub_page = epub_tl.layout();
+        auto mrb_page = mrb_tl.layout();
 
         std::string ctx = std::string(epub_name) + " ch" + std::to_string(ci) + " page" + std::to_string(page_num);
         assert_pages_equal(epub_page, mrb_page, ctx);
@@ -158,8 +160,8 @@ class MrbLayoutComparisonTest : public ::testing::Test {
         }
         ASSERT_FALSE(mrb_page.at_chapter_end) << ctx << " MRB at chapter end too early";
 
-        epub_pos = epub_page.end;
-        mrb_pos = mrb_page.end;
+        epub_tl.set_position(epub_page.end);
+        mrb_tl.set_position(mrb_page.end);
         ++page_num;
 
         ASSERT_LT(page_num, 5000) << ctx << " too many pages (safety limit)";
@@ -252,13 +254,14 @@ TEST_P(BulkMrbComparisonTest, LayoutMatchesEpub) {
     MrbChapterSource mrb_src(mrb, ci);
     ASSERT_EQ(ch.paragraphs.size(), mrb_src.paragraph_count()) << filename << " ch" << ci << " paragraph count";
 
-    PagePosition epub_pos{0, 0};
-    PagePosition mrb_pos{0, 0};
+    TestChapterSource epub_src(ch);
+    TextLayout epub_tl(font, opts, epub_src);
+    TextLayout mrb_tl(font, opts, mrb_src);
     int page_num = 0;
 
     while (true) {
-      auto epub_page = layout_page(font, opts, ch, epub_pos);
-      auto mrb_page = layout_page(font, opts, mrb_src, mrb_pos);
+      auto epub_page = epub_tl.layout();
+      auto mrb_page = mrb_tl.layout();
 
       std::string ctx = filename + " ch" + std::to_string(ci) + " page" + std::to_string(page_num);
       assert_pages_equal(epub_page, mrb_page, ctx);
@@ -269,8 +272,8 @@ TEST_P(BulkMrbComparisonTest, LayoutMatchesEpub) {
       }
       ASSERT_FALSE(mrb_page.at_chapter_end) << ctx;
 
-      epub_pos = epub_page.end;
-      mrb_pos = mrb_page.end;
+      epub_tl.set_position(epub_page.end);
+      mrb_tl.set_position(mrb_page.end);
       ++page_num;
       ++total_pages;
 

@@ -89,6 +89,7 @@ class ReaderScreen final : public IScreen {
   MrbReader mrb_;
   std::unique_ptr<MrbChapterSource> chapter_src_;
   size_t chapter_idx_ = 0;
+  TextLayout layout_engine_;
   PagePosition page_pos_;
   PageContent page_;
   bool open_ok_ = false;

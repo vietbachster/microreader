@@ -7,34 +7,9 @@
 
 #include "ContentModel.h"
 #include "Font.h"
+#include "IParagraphSource.h"
 
 namespace microreader {
-
-// ---------------------------------------------------------------------------
-// Paragraph source — abstract interface for accessing paragraphs.
-// Lets layout_page() work with Chapter (in-memory) or MrbReader (on-disk).
-// ---------------------------------------------------------------------------
-
-struct IParagraphSource {
-  virtual ~IParagraphSource() = default;
-  virtual size_t paragraph_count() const = 0;
-  virtual const Paragraph& paragraph(size_t index) const = 0;
-};
-
-// Chapter adapter — wraps Chapter::paragraphs for IParagraphSource.
-class ChapterParagraphSource : public IParagraphSource {
- public:
-  explicit ChapterParagraphSource(const Chapter& ch) : ch_(ch) {}
-  size_t paragraph_count() const override {
-    return ch_.paragraphs.size();
-  }
-  const Paragraph& paragraph(size_t index) const override {
-    return ch_.paragraphs[index];
-  }
-
- private:
-  const Chapter& ch_;
-};
 
 // ---------------------------------------------------------------------------
 // Layout output types
@@ -67,8 +42,6 @@ struct LayoutOptions {
   LayoutOptions() = default;
   LayoutOptions(uint16_t w, Alignment a = Alignment::Justify) : width(w), alignment(a) {}
 };
-
-std::vector<LayoutLine> layout_paragraph(const IFont& font, const LayoutOptions& opts, const TextParagraph& para);
 
 // ---------------------------------------------------------------------------
 // Page layout — fit paragraphs onto a fixed-height page
@@ -154,29 +127,102 @@ struct PageOptions {
 // Called when attr_width or attr_height is 0. Returns true if size was resolved.
 using ImageSizeQuery = std::function<bool(uint16_t key, uint16_t& w, uint16_t& h)>;
 
-// Layout one page worth of content starting at `start`.
-// The paragraph source provides paragraphs on demand.
-// size_fn is called lazily when an image has attr_width/height == 0.
-PageContent layout_page(const IFont& font, const PageOptions& opts, IParagraphSource& source, PagePosition start,
-                        const ImageSizeQuery& size_fn = {});
+// ---------------------------------------------------------------------------
+// TextLayout — stateful layout engine
+//
+// Stores font, options, paragraph source, image size query, and current
+// page position. Call layout() / layout_backward() without arguments.
+// Position must be updated manually after navigation (set_position).
+// ---------------------------------------------------------------------------
 
-// Layout one page worth of content ending at `end` (exclusive).
-// Fills the page bottom-to-top. Used for backward navigation.
-// `end` is one-past-end: {paragraph_count, 0} means chapter end.
-PageContent layout_page_backward(const IFont& font, const PageOptions& opts, IParagraphSource& source, PagePosition end,
-                                 const ImageSizeQuery& size_fn = {});
+class TextLayout {
+ public:
+  TextLayout() = default;
+  explicit TextLayout(IFont& font) : font_(&font) {}
+  TextLayout(IFont& font, const PageOptions& opts) : font_(&font), opts_(opts) {}
+  TextLayout(IFont& font, const PageOptions& opts, IParagraphSource& source, ImageSizeQuery size_fn = {})
+      : font_(&font), opts_(opts), source_(&source), size_fn_(std::move(size_fn)) {}
+  TextLayout(IFont& font, const PageOptions& opts, IParagraphSource& source, PagePosition start,
+             ImageSizeQuery size_fn = {})
+      : font_(&font), opts_(opts), source_(&source), position_(start), size_fn_(std::move(size_fn)) {}
 
-// Convenience overload: pass a Chapter directly (wraps in ChapterParagraphSource).
-inline PageContent layout_page(const IFont& font, const PageOptions& opts, const Chapter& chapter, PagePosition start,
-                               const ImageSizeQuery& size_fn = {}) {
-  ChapterParagraphSource src(chapter);
-  return layout_page(font, opts, src, start, size_fn);
-}
+  PagePosition position() const {
+    return position_;
+  }
+  void set_position(PagePosition pos) {
+    position_ = pos;
+  }
 
-inline PageContent layout_page_backward(const IFont& font, const PageOptions& opts, const Chapter& chapter,
-                                        PagePosition end, const ImageSizeQuery& size_fn = {}) {
-  ChapterParagraphSource src(chapter);
-  return layout_page_backward(font, opts, src, end, size_fn);
-}
+  // Replace the paragraph source (e.g. after loading a new chapter).
+  void set_source(IParagraphSource& source) {
+    source_ = &source;
+  }
+
+  // Replace the font (e.g. after a proportional font becomes available).
+  void set_font(IFont& font) {
+    font_ = &font;
+  }
+
+  // Replace options (e.g. after a screen resize).
+  void set_options(const PageOptions& opts) {
+    opts_ = opts;
+  }
+
+  // Replace the image size query (e.g. when a book is opened).
+  void set_image_size_fn(ImageSizeQuery fn) {
+    size_fn_ = std::move(fn);
+  }
+
+  // Break a single paragraph into lines using the stored font.
+  std::vector<LayoutLine> layout_paragraph(const LayoutOptions& opts, const TextParagraph& para) const;
+
+  // Layout the page starting at position(). Does not change position().
+  PageContent layout() const;
+
+  // Layout the page that ends at position() (backward fill). Does not change
+  // position(). Use the returned page.start to navigate to the previous page.
+  PageContent layout_backward() const;
+
+ private:
+  // Internal types used by collect_page_items / assemble_page.
+  struct PageItem {
+    enum Kind { TextLine, Image, Hr, Empty } kind;
+    uint16_t para_idx, line_idx;
+    LayoutLine layout_line;
+    uint16_t height, baseline = 0;
+    uint16_t img_key = 0, img_w = 0, img_h = 0, img_x = 0;
+  };
+  struct PendingInlineImage {
+    uint16_t para_idx, key, width, height;
+  };
+  struct CollectResult {
+    std::vector<PageItem> items;
+    std::vector<PendingInlineImage> pending;
+    PagePosition boundary;
+    bool at_chapter_end = false;
+  };
+
+  struct InlineImageInfo {
+    uint16_t key = 0, width = 0, height = 0;
+    bool promoted = false, has_image = false;
+  };
+
+  CollectResult collect_page_items(PagePosition pos, bool backward) const;
+  PageContent assemble_page(std::vector<PageItem>& items, PagePosition start, PagePosition end,
+                            bool at_chapter_end) const;
+  static InlineImageInfo resolve_inline_image(const TextParagraph& text_para, uint16_t content_width,
+                                              const ImageSizeQuery& sp);
+  static PageItem make_image_para_item(uint16_t pi, const Paragraph& para, const PageOptions& opts,
+                                       uint16_t content_width, const ImageSizeQuery& sp);
+  static std::vector<LayoutLine> prepare_text_lines(const IFont& font, LayoutOptions& lo, const TextParagraph& text,
+                                                    uint16_t content_width, const ImageSizeQuery& sp, bool at_line_zero,
+                                                    InlineImageInfo& img_info);
+
+  IFont* font_ = nullptr;
+  PageOptions opts_;
+  IParagraphSource* source_ = nullptr;
+  ImageSizeQuery size_fn_;
+  PagePosition position_;
+};
 
 }  // namespace microreader

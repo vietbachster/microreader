@@ -79,11 +79,11 @@ TEST(DebugLayoutTest, AliceIllustrated) {
 
   for (uint16_t ci = 0; ci < mrb.chapter_count(); ++ci) {
     MrbChapterSource src(mrb, ci);
-    PagePosition pos{0, 0};
     int page_in_chapter = 0;
 
+    TextLayout tl(font, opts, src);
     while (true) {
-      auto pc = layout_page(font, opts, src, pos);
+      auto pc = tl.layout();
       ++global_page;
       ++page_in_chapter;
 
@@ -162,7 +162,7 @@ TEST(DebugLayoutTest, AliceIllustrated) {
       if (page_in_chapter > 5000)
         break;
 
-      pos = pc.end;
+      tl.set_position(pc.end);
     }
 
     write_separator();
