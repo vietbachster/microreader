@@ -1,11 +1,16 @@
 #pragma once
 
 #include <cstdio>
+#include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "../ContentModel.h"
 #include "../IParagraphSource.h"
+#include "../ImageDecoder.h"
+#include "../TextLayout.h"
+#include "../ZipReader.h"
 #include "MrbFormat.h"
 
 namespace microreader {
@@ -162,5 +167,76 @@ class MrbChapterSource : public IParagraphSource {
     return best;
   }
 };
+
+// ---------------------------------------------------------------------------
+// Build an ImageSizeQuery that resolves image dimensions from an MRB file.
+// Fast path: width/height stored in MrbImageRef (from HTML attributes).
+// Slow path: stream the image header from the EPUB local file entry.
+// Scales to fit max_w preserving aspect ratio. Results are cached.
+// Mirrors the logic in ReaderScreen::resolve_image_size_().
+// ---------------------------------------------------------------------------
+inline ImageSizeQuery make_image_size_query(const MrbReader& mrb, const std::string& epub_path, uint16_t max_w) {
+  struct Cache {
+    std::vector<uint16_t> w, h;
+    const MrbReader* mrb;
+    std::string epub_path;
+    uint16_t max_w;
+  };
+  auto cache = std::make_shared<Cache>();
+  cache->mrb = &mrb;
+  cache->epub_path = epub_path;
+  cache->max_w = max_w;
+  cache->w.assign(mrb.image_count(), 0);
+  cache->h.assign(mrb.image_count(), 0);
+
+  return [cache](uint16_t key, uint16_t& w, uint16_t& h) -> bool {
+    if (key >= static_cast<uint16_t>(cache->w.size()))
+      return false;
+    if (cache->w[key] != 0 || cache->h[key] != 0) {
+      w = cache->w[key];
+      h = cache->h[key];
+      return true;
+    }
+    const auto& ref = cache->mrb->image_ref(key);
+    uint16_t src_w = ref.width, src_h = ref.height;
+    if (src_w == 0 || src_h == 0) {
+      StdioZipFile file;
+      if (!file.open(cache->epub_path.c_str()))
+        return false;
+      ZipEntry entry;
+      if (ZipReader::read_local_entry(file, ref.local_header_offset, entry) != ZipError::Ok)
+        return false;
+      uint8_t small_buf[256];
+      ZipEntryInput inp;
+      std::unique_ptr<uint8_t[]> heap_buf;
+      auto zerr = inp.open(file, entry, small_buf, sizeof(small_buf));
+      if (zerr != ZipError::Ok) {
+        heap_buf.reset(new (std::nothrow) uint8_t[ZipEntryInput::kMinWorkBufSize]);
+        if (!heap_buf)
+          return false;
+        zerr = inp.open(file, entry, heap_buf.get(), ZipEntryInput::kMinWorkBufSize);
+        if (zerr != ZipError::Ok)
+          return false;
+      }
+      ImageSizeStream stream;
+      uint8_t chunk[256];
+      for (;;) {
+        size_t n = inp.read(chunk, sizeof(chunk));
+        if (n == 0)
+          break;
+        if (stream.feed(chunk, n))
+          break;
+      }
+      if (!stream.ok())
+        return false;
+      src_w = stream.width();
+      src_h = stream.height();
+    }
+    scaled_size(src_w, src_h, cache->max_w, cache->max_w, cache->w[key], cache->h[key]);
+    w = cache->w[key];
+    h = cache->h[key];
+    return w != 0 || h != 0;
+  };
+}
 
 }  // namespace microreader

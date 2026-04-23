@@ -369,7 +369,7 @@ PageContent TextLayout::assemble_page(std::vector<PageItem>& items, PagePosition
 
   uint16_t y = 0;
   uint16_t prev_para = UINT16_MAX;
-  bool is_chapter_start = (start.paragraph == 0 && start.line == 0);
+  bool is_chapter_start = (start.paragraph == 0 && start.offset == 0);
 
   for (auto& item : items) {
     if (prev_para != UINT16_MAX && item.para_idx != prev_para) {
@@ -691,7 +691,7 @@ TextLayout::CollectResult TextLayout::collect_page_items(PagePosition pos) const
   uint16_t used = 0;
   bool has_content = false, page_full = false, pending_page_break = false;
   PagePosition boundary = pos;
-  const bool is_cs = (pos.paragraph == 0 && pos.line == 0);
+  const bool is_cs = (pos.paragraph == 0 && pos.offset == 0);
 
   for (size_t pi = (size_t)pos.paragraph; !page_full && pi < pcnt; ++pi) {
     const LaidOutParagraph& lp = get_laid_out_(pi);
@@ -703,7 +703,7 @@ TextLayout::CollectResult TextLayout::collect_page_items(PagePosition pos) const
 
     const auto& para_spc = source_->paragraph(pi).spacing_before;
     uint16_t spc = items.empty() ? (is_cs ? para_spc.value_or(0) : 0) : para_spc.value_or(opts_.para_spacing);
-    size_t start_idx = (pi == (size_t)pos.paragraph) ? (size_t)pos.line : 0;
+    size_t start_idx = (pi == (size_t)pos.paragraph) ? (size_t)pos.offset : 0;
 
     size_t break_idx =
         collect_para_items(lp, start_idx, spc, ph, used, has_content, page_full, pending_page_break, boundary, items);

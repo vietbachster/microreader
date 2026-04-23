@@ -50,16 +50,19 @@ struct LayoutOptions {
 
 struct PagePosition {
   uint16_t paragraph = 0;  // index into chapter.paragraphs
-  uint16_t line = 0;       // line within that paragraph (0 for images/hrs)
+  uint16_t offset = 0;     // line index within a text paragraph; pixel row offset within an image paragraph (0 for hrs)
 
   PagePosition() = default;
-  PagePosition(uint16_t p, uint16_t l) : paragraph(p), line(l) {}
+  PagePosition(uint16_t p, uint16_t l) : paragraph(p), offset(l) {}
 
   bool operator==(const PagePosition& o) const {
-    return paragraph == o.paragraph && line == o.line;
+    return paragraph == o.paragraph && offset == o.offset;
+  }
+  bool operator!=(const PagePosition& o) const {
+    return !(*this == o);
   }
   bool operator<(const PagePosition& o) const {
-    return paragraph < o.paragraph || (paragraph == o.paragraph && line < o.line);
+    return paragraph < o.paragraph || (paragraph == o.paragraph && offset < o.offset);
   }
   bool operator<=(const PagePosition& o) const {
     return *this == o || *this < o;

@@ -90,7 +90,7 @@ static NavResult navigate_book(const std::string& epub_path) {
 
       // Safety: abort if stuck in an infinite loop.
       if (chapter_pages > 1000) {
-        printf("    ABORT: ch%d exceeded 1000 pages at pos{%u,%u}\n", ci, page.end.paragraph, page.end.line);
+        printf("    ABORT: ch%d exceeded 1000 pages at pos{%u,%u}\n", ci, page.end.paragraph, page.end.offset);
         mrb.close();
         std::remove(mrb_path.c_str());
         return result;
@@ -193,7 +193,7 @@ TEST_P(BackwardNavTest, NavigateBackwardAllPages) {
       tl.set_position(end_pos);
       auto page = tl.layout_backward();
       ++bwd_pages;
-      if (page.start.paragraph == 0 && page.start.line == 0)
+      if (page.start.paragraph == 0 && page.start.offset == 0)
         break;
       ASSERT_LT(bwd_pages, 1000) << name << " ch" << ci << " backward stuck";
       end_pos = page.start;

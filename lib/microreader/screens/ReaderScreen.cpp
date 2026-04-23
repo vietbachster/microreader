@@ -16,64 +16,8 @@ namespace microreader {
 // ReaderScreen — image size resolution
 // ---------------------------------------------------------------------------
 
-bool ReaderScreen::resolve_image_size_(uint16_t key, uint16_t& w, uint16_t& h) {
-  if (key >= static_cast<uint16_t>(dim_cache_.size()))
-    return false;
-  auto& dim = dim_cache_[key];
-  if (dim.width != 0 || dim.height != 0) {
-    w = dim.width;
-    h = dim.height;
-    return true;
-  }
-  const auto& ref = mrb_.image_ref(key);
-  if (ref.width != 0 || ref.height != 0) {
-    scaled_size(ref.width, ref.height, static_cast<uint16_t>(DrawBuffer::kWidth),
-                static_cast<uint16_t>(DrawBuffer::kHeight), dim.width, dim.height);
-    w = dim.width;
-    h = dim.height;
-    return true;
-  }
-  // Read source dimensions from the image header via streaming.
-  StdioZipFile file;
-  if (!file.open(path_.c_str()))
-    return false;
-  ZipEntry entry;
-  if (ZipReader::read_local_entry(file, ref.local_header_offset, entry) != ZipError::Ok)
-    return false;
-
-  // Open a ZipEntryInput — use a small stack buffer for stored entries,
-  // fall back to heap for deflate.
-  uint8_t small_buf[256];
-  ZipEntryInput inp;
-  std::unique_ptr<uint8_t[]> heap_buf;
-  auto zerr = inp.open(file, entry, small_buf, sizeof(small_buf));
-  if (zerr != ZipError::Ok) {
-    heap_buf.reset(new (std::nothrow) uint8_t[ZipEntryInput::kMinWorkBufSize]);
-    if (!heap_buf)
-      return false;
-    zerr = inp.open(file, entry, heap_buf.get(), ZipEntryInput::kMinWorkBufSize);
-    if (zerr != ZipError::Ok)
-      return false;
-  }
-
-  ImageSizeStream stream;
-  uint8_t chunk[256];
-  for (;;) {
-    size_t n = inp.read(chunk, sizeof(chunk));
-    if (n == 0)
-      break;
-    if (stream.feed(chunk, n))
-      break;
-  }
-  if (!stream.ok())
-    return false;
-
-  scaled_size(stream.width(), stream.height(), static_cast<uint16_t>(DrawBuffer::kWidth),
-              static_cast<uint16_t>(DrawBuffer::kHeight), dim.width, dim.height);
-  w = dim.width;
-  h = dim.height;
-  return true;
-}
+// resolve_image_size_ removed — image size resolution is now handled by
+// make_image_size_query() (MrbReader.h), stored in image_size_fn_.
 
 bool ReaderScreen::decode_image_to_buffer_(uint32_t offset, DrawBuffer& buf, int dest_x, int dest_y, uint16_t max_w,
                                            uint16_t max_h, uint16_t src_y, uint16_t clip_h) {
@@ -246,7 +190,7 @@ void ReaderScreen::start(DrawBuffer& buf) {
   page_pos_ = PagePosition{0, 0};
   saved_chapter_idx_ = 0;
   saved_page_pos_ = PagePosition{0, 0};
-  dim_cache_.assign(mrb_.image_count(), ImageDims{});
+  image_size_fn_ = make_image_size_query(mrb_, path_, static_cast<uint16_t>(DrawBuffer::kWidth));
   // Restore position: if the user selected a chapter from the TOC, jump there;
   // otherwise load saved bookmark from disk (defaults to 0/{0,0} on first open).
   if (chapter_select_.has_pending()) {
@@ -270,8 +214,7 @@ void ReaderScreen::start(DrawBuffer& buf) {
   page_pos_ = saved_page_pos_;
   layout_engine_ = TextLayout{};
   layout_engine_.set_source(*chapter_src_);
-  layout_engine_.set_image_size_fn(
-      [this](uint16_t key, uint16_t& w, uint16_t& h) { return resolve_image_size_(key, w, h); });
+  layout_engine_.set_image_size_fn(image_size_fn_);
   render_page_(buf);
 #ifdef ESP_PLATFORM
   ESP_LOGI("reader", "BOOK_OK: %s", path_);
@@ -289,8 +232,7 @@ show_error:
 void ReaderScreen::stop() {
   if (open_ok_)
     save_position_();
-  dim_cache_.clear();
-  dim_cache_.shrink_to_fit();
+  image_size_fn_ = {};
   chapter_src_.reset();
   mrb_.close();
   book_.close();
@@ -392,7 +334,7 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
     const int img_h = static_cast<int>(img_item.height);
     if (img_w <= 0 || img_h <= 0)
       continue;
-    if (img_item.key >= static_cast<uint16_t>(dim_cache_.size()))
+    if (img_item.key >= mrb_.image_count())
       continue;
 
     ImageToDraw itd;
@@ -600,7 +542,7 @@ void ReaderScreen::save_position_() {
   if (!f)
     return;
   std::fprintf(f, "%u %u %u\n", static_cast<unsigned>(chapter_idx_), static_cast<unsigned>(page_pos_.paragraph),
-               static_cast<unsigned>(page_pos_.line));
+               static_cast<unsigned>(page_pos_.offset));
   std::fclose(f);
 }
 

@@ -68,7 +68,7 @@ class ReaderScreen final : public IScreen {
   void stop() override;
   bool update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& runtime) override;
 
- private:
+  // Layout constants — exposed so tests and tools can build matching PageOptions.
   static constexpr int kScale = 2;
   static constexpr int kGlyphW = 8;
   static constexpr int kGlyphH = 8;
@@ -78,6 +78,23 @@ class ReaderScreen final : public IScreen {
   static constexpr int kPaddingLeft = 12;
   static constexpr int kParaSpacing = 8;
 
+  // Build the fixed fallback font used when no proportional font is loaded.
+  static FixedFont make_fixed_font() {
+    return FixedFont(kGlyphW * kScale, kGlyphH * kScale + 4);
+  }
+
+  // Build PageOptions matching the reader's layout configuration.
+  static PageOptions make_page_opts() {
+    PageOptions opts(static_cast<uint16_t>(DrawBuffer::kWidth), static_cast<uint16_t>(DrawBuffer::kHeight), kPaddingTop,
+                     kParaSpacing, Alignment::Start);
+    opts.padding_right = kPaddingRight;
+    opts.padding_bottom = kPaddingBottom;
+    opts.padding_left = kPaddingLeft;
+    opts.center_text = true;
+    return opts;
+  }
+
+ private:
   BitmapFontSet font_set_;                       // owned set (for single-font set_font() path)
   const BitmapFontSet* ext_font_set_ = nullptr;  // external set (from set_fonts())
   std::string path_;
@@ -102,16 +119,10 @@ class ReaderScreen final : public IScreen {
   size_t saved_chapter_idx_ = 0;
   PagePosition saved_page_pos_;
 
-  // Cached image dimensions: one entry per image ref in the MRB.
-  struct ImageDims {
-    uint16_t width = 0;
-    uint16_t height = 0;
-  };
-  std::vector<ImageDims> dim_cache_;
+  ImageSizeQuery image_size_fn_;
   bool grayscale_pending_ = false;
   bool grayscale_active_ = false;
 
-  bool resolve_image_size_(uint16_t key, uint16_t& w, uint16_t& h);
   bool decode_image_to_buffer_(uint32_t offset, DrawBuffer& buf, int dest_x, int dest_y, uint16_t max_w, uint16_t max_h,
                                uint16_t src_y = 0, uint16_t clip_h = 0);
   // Render page content (BW only). Sets grayscale_pending_ if font has grayscale.

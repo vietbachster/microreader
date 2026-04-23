@@ -638,7 +638,7 @@ TEST(PageLayout, PageBreakBetweenParagraphs) {
   EXPECT_EQ(page.text_items.size(), 2);
   EXPECT_FALSE(page.at_chapter_end);
   EXPECT_EQ(page.end.paragraph, 2);
-  EXPECT_EQ(page.end.line, 0);
+  EXPECT_EQ(page.end.offset, 0);
 }
 
 TEST(PageLayout, ContinueFromMiddle) {
@@ -719,7 +719,7 @@ TEST(PageLayout, MultiLineParagraphSplitAcrossPages) {
   EXPECT_EQ(page1.text_items.size(), 3);
   EXPECT_FALSE(page1.at_chapter_end);
   EXPECT_EQ(page1.end.paragraph, 0);  // Still in paragraph 0
-  EXPECT_EQ(page1.end.line, 3);       // After line 3
+  EXPECT_EQ(page1.end.offset, 3);     // After line 3
 
   // Second page continues
   tl.set_position(page1.end);
@@ -779,7 +779,7 @@ TEST(PageLayout, ImageSlicedWhenDoesntFit) {
   EXPECT_EQ(page.image_items[0].height, 16);  // sliced to remaining 16px
   EXPECT_FALSE(page.at_chapter_end);
   EXPECT_EQ(page.end.paragraph, 1);
-  EXPECT_EQ(page.end.line, 16);
+  EXPECT_EQ(page.end.offset, 16);
 
   // Page 2: next 32px slice
   tl.set_position(page.end);
@@ -818,7 +818,7 @@ TEST(PageLayout, ImageSplitsAcrossPages) {
   EXPECT_FALSE(page1.at_chapter_end);
   // boundary should point back into the same paragraph at pixel offset 300
   EXPECT_EQ(page1.end.paragraph, 0);
-  EXPECT_EQ(page1.end.line, 300);
+  EXPECT_EQ(page1.end.offset, 300);
 
   // Second page: remainder of the image (300px), y_crop==300
   tl.set_position(page1.end);
@@ -853,7 +853,7 @@ TEST(PageLayout, ImageSplitWithTextBefore) {
   EXPECT_EQ(page1.image_items[0].height, 84);
   EXPECT_FALSE(page1.at_chapter_end);
   EXPECT_EQ(page1.end.paragraph, 1);
-  EXPECT_EQ(page1.end.line, 84);  // boundary into image paragraph at row 84
+  EXPECT_EQ(page1.end.offset, 84);  // boundary into image paragraph at row 84
 
   // Page 2: continuation of image (rows 84..183) â€” remainder on a full page
   tl.set_position(page1.end);
@@ -864,7 +864,7 @@ TEST(PageLayout, ImageSplitWithTextBefore) {
   EXPECT_EQ(page2.image_items[0].height, 100);
   EXPECT_FALSE(page2.at_chapter_end);
   EXPECT_EQ(page2.end.paragraph, 1);
-  EXPECT_EQ(page2.end.line, 184);
+  EXPECT_EQ(page2.end.offset, 184);
 
   // Page 3: final 16px slice
   tl.set_position(page2.end);
@@ -988,12 +988,12 @@ TEST(PageLayout, LongTextPaginatesCorrectly) {
   int safety = 0;
   while (safety++ < 100) {
     auto page = tl.layout();
-    bool advanced = page.at_chapter_end || page.end.line > 0 || page.end.paragraph > 0;
+    bool advanced = page.at_chapter_end || page.end.offset > 0 || page.end.paragraph > 0;
     pages.push_back(std::move(page));
     if (pages.back().at_chapter_end)
       break;
     tl.set_position(pages.back().end);
-    ASSERT_TRUE(pages.back().end.line > 0 || pages.back().end.paragraph > 0) << "Page didn't advance position";
+    ASSERT_TRUE(pages.back().end.offset > 0 || pages.back().end.paragraph > 0) << "Page didn't advance position";
   }
 
   EXPECT_TRUE(pages.back().at_chapter_end);
@@ -1967,7 +1967,7 @@ TEST(PageLayoutBackward, MultiLineParagraphSplit) {
   ASSERT_EQ(page.text_items.size(), 2);
   // Should get the last 2 lines (ddd, eee)
   EXPECT_EQ(page.start.paragraph, 0);
-  EXPECT_EQ(page.start.line, 3);  // lines 3 and 4
+  EXPECT_EQ(page.start.offset, 3);  // lines 3 and 4
   EXPECT_EQ(line_text(page.text_items[0].line), "ddd");
   EXPECT_EQ(line_text(page.text_items[1].line), "eee");
 }
