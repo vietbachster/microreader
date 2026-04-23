@@ -101,7 +101,9 @@ add_executable(unit_tests
     unit/CssParserTest.cpp
     unit/EpubParserTest.cpp
     unit/ImageDecoderTest.cpp
-    unit/TextLayoutTest.cpp
+    unit/TextLayoutParaTest.cpp
+    unit/LaidOutParagraphTest.cpp
+    unit/PageLayoutTest.cpp
     unit/BitmapFontTest.cpp
     unit/MrbFormatTest.cpp
     unit/MrbLayoutComparisonTest.cpp
@@ -131,7 +133,9 @@ add_executable(microreader_tests
     unit/CssParserTest.cpp
     unit/EpubParserTest.cpp
     unit/ImageDecoderTest.cpp
-    unit/TextLayoutTest.cpp
+    unit/TextLayoutParaTest.cpp
+    unit/LaidOutParagraphTest.cpp
+    unit/PageLayoutTest.cpp
     unit/BitmapFontTest.cpp
     unit/MrbFormatTest.cpp
     unit/MrbLayoutComparisonTest.cpp

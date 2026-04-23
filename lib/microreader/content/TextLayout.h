@@ -150,7 +150,7 @@ class TextLayout {
       : font_(&font), opts_(opts), source_(&source), size_fn_(std::move(size_fn)) {}
   TextLayout(IFont& font, const PageOptions& opts, IParagraphSource& source, PagePosition start,
              ImageSizeQuery size_fn = {})
-      : font_(&font), opts_(opts), source_(&source), position_(start), size_fn_(std::move(size_fn)) {}
+      : font_(&font), opts_(opts), source_(&source), size_fn_(std::move(size_fn)), position_(start) {}
 
   PagePosition position() const {
     return position_;
@@ -193,6 +193,12 @@ class TextLayout {
   // position(). Use the returned page.start to navigate to the previous page.
   PageContent layout_backward() const;
 
+  // Returns true if pos is mid-way through a promoted inline image (i.e. the
+  // offset is a pixel row inside the promoted-image region of a Text paragraph).
+  // Used by navigation to snap to the start of the paragraph so the full image
+  // is shown on the next page.
+  bool is_mid_promoted_image(PagePosition pos) const;
+
   // Implementation-internal types. Declared public so that .cpp-scope helper
   // functions (which are not class members) can reference them without
   // triggering MSVC C2248 private-access errors.
@@ -233,32 +239,35 @@ class TextLayout {
     // ParagraphType::Image (standalone), Hr, empty Text:
     uint16_t block_height = 0;                              // Image: scaled h (0=unknown); Hr/empty-text: font advance
     uint16_t img_key = 0, img_w = 0, img_h = 0, img_x = 0;  // Image paragraph only
+    uint16_t min_slice_h = 0;  // Image: minimum forward-slice height; smaller slices are deferred
+    uint16_t min_cut_h = 0;    // Image: minimum cut-off when slicing; ensure cut is visually obvious
 
     bool empty() const {
       return para_idx == UINT16_MAX;
     }
 
-    // Result of collect(): the next item from this paragraph, or nullopt when
-    // the paragraph is exhausted (no more items at idx).
-    // collect() does NOT check whether the item fits on the page; the caller
-    // is responsible for that.
-    // next_idx: the idx to pass on the next call (idx+1 for most items; for
-    //           image slices it advances by the slice height in pixels).
+    // Result of both collect() and collect_backward().
+    // next_idx is the cursor position to pass on the next call to the same function:
+    //   collect(r.next_idx, ...)        — advance forward
+    //   collect_backward(r.next_idx, ...) — advance backward
+    // For text lines next_idx advances by 1. For image slices it advances by the slice height in pixels.
     struct Collected {
       PageItem item;
       size_t next_idx = 0;
     };
 
-    // Returns the item at collect-index `idx` that fits within `available` pixels,
-    // or nullopt when the paragraph is exhausted or the next item doesn't fit.
-    // Dispatches to a per-type static helper (collect_text / collect_image /
-    // collect_hr / collect_page_break). Each helper is responsible for computing
-    // next_idx: idx+slice_h for image slices, idx+1 for everything else.
+    // Returns the item starting at collect-index `idx` that fits within `available` pixels,
+    // or nullopt when the paragraph is exhausted or the item doesn't fit.
     std::optional<Collected> collect(size_t idx, uint16_t available) const;
+
+    // Symmetric backward operation: given end_idx (exclusive upper bound, i.e. the next_idx
+    // of the item we want) and available pixels, return the item that ends there.
+    std::optional<Collected> collect_backward(size_t end_idx, uint16_t available) const;
   };
 
  private:
   CollectResult collect_page_items(PagePosition pos) const;
+  CollectResult collect_page_items_backward(PagePosition end_pos) const;
   PageContent assemble_page(std::vector<PageItem>& items, PagePosition start, PagePosition end,
                             bool at_chapter_end) const;
   static InlineImageInfo resolve_inline_image(const TextParagraph& text_para, uint16_t content_width,

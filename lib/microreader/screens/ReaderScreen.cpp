@@ -491,7 +491,16 @@ bool ReaderScreen::next_page_() {
     }
     return false;
   }
-  page_pos_ = page_.end;
+  PagePosition next = page_.end;
+  // If the page ended mid-image (offset > 0 into an image paragraph or
+  // mid-promoted-inline-image), snap back to the start of that paragraph
+  // so the next page shows the full image.
+  if (next.offset > 0 && chapter_src_ && next.paragraph < chapter_src_->paragraph_count()) {
+    if (chapter_src_->paragraph(next.paragraph).type == ParagraphType::Image ||
+        layout_engine_.is_mid_promoted_image(next))
+      next.offset = 0;
+  }
+  page_pos_ = next;
   return true;
 }
 
@@ -499,33 +508,27 @@ bool ReaderScreen::prev_page_() {
   if (page_pos_ == PagePosition{0, 0}) {
     if (chapter_idx_ > 0) {
       load_chapter_(chapter_idx_ - 1);
-      // Scan forward to find the last page of the previous chapter.
-      PagePosition pos{0, 0};
-      layout_engine_.set_position(pos);
-      for (;;) {
-        auto pc = layout_engine_.layout();
-        if (pc.at_chapter_end || pc.end == pos) {
-          pos = pc.start;
-          break;
-        }
-        pos = pc.end;
-        layout_engine_.set_position(pos);
-      }
-      page_pos_ = pos;
+      // Jump to the last page of the previous chapter using backward layout.
+      const uint16_t end_para = static_cast<uint16_t>(chapter_src_->paragraph_count());
+      layout_engine_.set_position(PagePosition{end_para, 0});
+      auto pc = layout_engine_.layout_backward();
+      page_pos_ = pc.start;
       return true;
     }
     return false;
   }
 
-  // Scan forward from chapter start to find the page whose end == page_pos_.
-  PagePosition pos{0, 0};
-  layout_engine_.set_position(pos);
-  auto pc = layout_engine_.layout();
-  while (pc.end != page_pos_ && !pc.at_chapter_end && pc.end != pos) {
-    pos = pc.end;
-    layout_engine_.set_position(pos);
-    pc = layout_engine_.layout();
+  // If the current page starts mid-image, snap end to after the image so
+  // layout_backward includes the full image on the backward page.
+  PagePosition end = page_pos_;
+  if (end.offset > 0 && chapter_src_ && end.paragraph < chapter_src_->paragraph_count()) {
+    if (chapter_src_->paragraph(end.paragraph).type == ParagraphType::Image ||
+        layout_engine_.is_mid_promoted_image(end))
+      end = PagePosition{static_cast<uint16_t>(end.paragraph + 1), 0};
   }
+
+  layout_engine_.set_position(end);
+  auto pc = layout_engine_.layout_backward();
   page_pos_ = pc.start;
   return true;
 }
