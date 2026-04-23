@@ -1826,6 +1826,53 @@ TEST(PageLayout, InlineImageDoesNotIntersectPreviousTextLines) {
   }
 }
 
+TEST(PageLayout, SpreadWithInlineImageDoesNotDistortLineGaps) {
+  // Regression: non-promoted inline images were included as slots in the
+  // spreading algorithm, causing distorted gaps between text lines. The inline
+  // image must be invisible to the spreading logic — line gaps for lines 1+
+  // should be uniform — and the image must stay anchored to the first line's
+  // baseline after spreading.
+  auto ch = make_inline_image_chapter(
+      80, 75,
+      "URIOUSER and curiouser cried Alice she was so much surprised that for a moment she quite forgot how to speak "
+      "good gracious how she had grown");
+  {
+    TextParagraph tp;
+    tp.runs.push_back(microreader::Run("A second paragraph with some words.", FontStyle::Regular, false));
+    ch.paragraphs.push_back(Paragraph::make_text(std::move(tp)));
+  }
+  TestChapterSource src(ch);
+
+  PageOptions opts(300, 200, 0, 8);
+  opts.center_text = true;
+  auto page = TextLayout(font8, opts, src, PagePosition(0, 0)).layout();
+
+  ASSERT_GE(page.text_items.size(), 4u);
+  ASSERT_EQ(page.image_items.size(), 1u);
+
+  // Collect y-offsets for lines in paragraph 0.
+  std::vector<uint16_t> tops;
+  for (const auto& ti : page.text_items)
+    if (ti.paragraph_index == 0)
+      tops.push_back(ti.y_offset);
+  ASSERT_GE(tops.size(), 4u) << "Need at least 4 lines in paragraph 0 to check gaps";
+
+  // Lines 1, 2, 3, … must have equal spacing (line 0 is taller due to inline_extra).
+  const uint16_t gap12 = tops[2] - tops[1];
+  for (size_t i = 3; i < tops.size(); ++i) {
+    uint16_t gap = tops[i] - tops[i - 1];
+    EXPECT_EQ(gap, gap12) << "Line gap between lines " << i - 1 << " and " << i << " (" << gap
+                          << "px) differs from gap12 (" << gap12
+                          << "px) — inline image must not distort inter-line spacing";
+  }
+
+  // Image must remain anchored to the baseline of the first text line.
+  const auto& img = page.image_items[0];
+  uint16_t baseline_y = page.text_items[0].y_offset + page.text_items[0].baseline;
+  EXPECT_EQ(img.y_offset + img.height, baseline_y)
+      << "After spreading, image bottom must still align with first-line baseline";
+}
+
 // ===================================================================
 // layout_page_backward() tests
 // ===================================================================

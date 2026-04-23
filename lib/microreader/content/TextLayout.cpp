@@ -426,23 +426,24 @@ PageContent TextLayout::assemble_page(std::vector<PageItem>& items, PagePosition
     if (y >= padded_height || padded_height - y >= default_y_advance)
       return page;
 
-    size_t renderable = page.text_items.size() + page.image_items.size() + page.hr_items.size();
-    if (renderable < 2)
-      return page;
-
     struct Slot {
       enum { ST, SI, SH } type;
       size_t idx;
       uint16_t y0, h, para_idx;
     };
     std::vector<Slot> slots;
-    slots.reserve(renderable);
+    slots.reserve(page.text_items.size() + page.image_items.size() + page.hr_items.size());
     for (size_t i = 0; i < page.text_items.size(); ++i) {
       auto& ti = page.text_items[i];
       slots.push_back({Slot::ST, i, ti.y_offset, ti.height, ti.paragraph_index});
     }
     for (size_t i = 0; i < page.image_items.size(); ++i) {
       auto& im = page.image_items[i];
+      // Non-promoted inline images (full_height == 0) are anchored to their text
+      // line's baseline and repositioned by the fixup below — exclude them here
+      // so they don't distort the gap calculations between real layout slots.
+      if (im.full_height == 0)
+        continue;
       slots.push_back({Slot::SI, i, im.y_offset, im.height, im.paragraph_index});
     }
     for (size_t i = 0; i < page.hr_items.size(); ++i) {
@@ -450,6 +451,10 @@ PageContent TextLayout::assemble_page(std::vector<PageItem>& items, PagePosition
       uint16_t item_y = hr.y_offset >= default_y_advance / 2 ? hr.y_offset - default_y_advance / 2 : 0;
       slots.push_back({Slot::SH, i, item_y, default_y_advance, 0});
     }
+
+    if (slots.size() < 2)
+      return page;
+
     std::sort(slots.begin(), slots.end(), [](const Slot& a, const Slot& b) { return a.y0 < b.y0; });
 
     const size_t N = slots.size();
@@ -476,6 +481,8 @@ PageContent TextLayout::assemble_page(std::vector<PageItem>& items, PagePosition
       total_weight += weights[i];
     }
 
+    if (total_weight == 0)
+      return page;
     int32_t base = slack / total_weight, leftover = slack % total_weight;
     std::vector<int32_t> extra_gaps(N - 1, 0);
     int32_t units = 0;
@@ -502,6 +509,21 @@ PageContent TextLayout::assemble_page(std::vector<PageItem>& items, PagePosition
     }
     // By construction: y_acc == padded_height after the loop,
     // so last item bottom == padded_height and baseline == padded_height - descent.
+
+    // Non-promoted inline images must stay anchored to the baseline of their
+    // first text line. Spreading may have moved the text item independently,
+    // so re-derive the image y from the (now-spread) text item position.
+    for (auto& img : page.image_items) {
+      if (img.full_height != 0)
+        continue;  // promoted or standalone image — spreading handled it correctly
+      for (const auto& ti : page.text_items) {
+        if (ti.paragraph_index == img.paragraph_index && ti.line_index == 0) {
+          uint16_t baseline_y = ti.y_offset + ti.baseline;
+          img.y_offset = baseline_y >= img.height ? baseline_y - img.height : 0;
+          break;
+        }
+      }
+    }
   }
   return page;
 }
