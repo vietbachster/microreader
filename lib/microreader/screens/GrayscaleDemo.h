@@ -6,16 +6,12 @@
 
 namespace microreader {
 
-// Demo screen showing 5 rectangles at different grayscale levels.
-// LUT 00 = no change (pixel stays as BW pass left it), so:
-//   White:      not drawn in BW, LSB=0 MSB=0 → stays white
-//   Light gray: not drawn in BW, LSB=1 MSB=0 → driven to light gray (from white)
-//   Gray:       drawn in BW,     LSB=0 MSB=1 → driven to gray (from black)
-//   Dark gray:  drawn in BW,     LSB=1 MSB=1 → driven to dark gray (from black)
-//   Black:      drawn in BW,     LSB=0 MSB=0 → no change, stays black
-//
-// Button2/3 (down/up) move the rectangles + BW refresh (auto-reverts gray).
-// Button1 toggles grayscale on/off. Button0 exits.
+// Demo screen rendering the test_image_grayscale.h image with 5-level grayscale.
+// Button2 (down): rotate image 90° CW.
+// Button3 (up):   flip image horizontally.
+// Up:             full refresh.
+// Button1:        toggle grayscale on/off.
+// Button0:        exit.
 class GrayscaleDemo final : public IScreen {
  public:
   GrayscaleDemo() = default;
@@ -29,12 +25,15 @@ class GrayscaleDemo final : public IScreen {
   bool update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& runtime) override;
 
  private:
-  static constexpr int kNumRects = 5;
-  static constexpr int kRectW = 100;
-  static constexpr int kRectH = 80;
-  static constexpr int kSpacing = 20;
+  int rotation_ = 0;  // 0..3 — multiples of 90° CW
+  bool flip_h_ = false;
 
-  int offset_y_ = 0;  // vertical offset controlled by up/down
+  // Draw a packed 1-bit plane into the inactive buffer applying current transform.
+  // src_white_bit: value of a source bit that means "white" (1 for BW plane since
+  //   BW pixels are black, 0 for LSB/MSB planes where 0 means "not set").
+  // fill_white: initial fill colour for the inactive buffer before drawing.
+  void draw_plane_(DrawBuffer& buf, const uint8_t* data, int src_w, int src_h, bool fill_white,
+                   bool black_bit_is_one) const;
 
   void draw_bw_(DrawBuffer& buf) const;
   void apply_grayscale_(DrawBuffer& buf) const;
