@@ -142,6 +142,23 @@ static std::vector<LayoutLine> layout_para_lines(const IFont& font, const Layout
   uint16_t cur_line_width = max_width;
   bool first_line = true, prev_run_ended_space = true;
 
+  // For Center/End alignment, words start at margin_left (not 0), which would
+  // otherwise skew the centering. This helper normalises word x to [0..text_width]
+  // before computing room so that align_line produces a symmetric result.
+  auto flush_line = [&](uint16_t lw, std::vector<LayoutWord>& words, bool is_last) {
+    if (!words.empty() && (align == Alignment::Center || align == Alignment::End)) {
+      uint16_t x_first = words.front().x;
+      uint16_t text_w = x > x_first ? x - x_first : 0;
+      for (auto& w : words)
+        w.x -= x_first;
+      uint16_t room = lw > text_w ? lw - text_w : 0;
+      align_line(align, room, words, is_last);
+    } else {
+      uint16_t room = lw > x ? lw - x : 0;
+      align_line(align, room, words, is_last);
+    }
+  };
+
   for (const auto& run : para.runs) {
     const char* text = run.text.c_str();
     const size_t text_len = run.text.size();
@@ -175,8 +192,7 @@ static std::vector<LayoutLine> layout_para_lines(const IFont& font, const Layout
         needs_space = false;
       uint16_t needed = word_w + (needs_space ? space_width : 0);
       if (x + needed > line_width && !current.words.empty()) {
-        uint16_t room = line_width > x ? line_width - x : 0;
-        align_line(align, room, current.words, false);
+        flush_line(line_width, current.words, false);
         lines.push_back(std::move(current));
         current = LayoutLine{};
         x = run.margin_left;
@@ -202,8 +218,7 @@ static std::vector<LayoutLine> layout_para_lines(const IFont& font, const Layout
     }
 
     if (run.breaking) {
-      uint16_t room = cur_line_width > x ? cur_line_width - x : 0;
-      align_line(align, room, current.words, true);
+      flush_line(cur_line_width, current.words, true);
       lines.push_back(std::move(current));
       current = LayoutLine{};
       x = 0;
@@ -213,8 +228,7 @@ static std::vector<LayoutLine> layout_para_lines(const IFont& font, const Layout
   }
 
   if (!current.words.empty()) {
-    uint16_t room = cur_line_width > x ? cur_line_width - x : 0;
-    align_line(align, room, current.words, true);
+    flush_line(cur_line_width, current.words, true);
     lines.push_back(std::move(current));
   }
   return lines;
