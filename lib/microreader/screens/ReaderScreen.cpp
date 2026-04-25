@@ -329,17 +329,16 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
     uint16_t clip_h = 0;  // rendered slice height (0 = full)
   };
   std::vector<ImageToDraw> images;
-  for (const auto& img_item : page_.image_items) {
+  auto collect_img = [&](const PageImageItem& img_item) {
     const int img_w = static_cast<int>(img_item.width);
     const int img_h = static_cast<int>(img_item.height);
     if (img_w <= 0 || img_h <= 0)
-      continue;
+      return;
     if (img_item.key >= mrb_.image_count())
-      continue;
-
+      return;
     ImageToDraw itd;
     itd.x = static_cast<int>(img_item.x_offset);
-    itd.y = static_cast<int>(img_item.y_offset + page_.vertical_offset);
+    itd.y = static_cast<int>(img_item.y_offset);  // y_offset is absolute (vertical centering baked in)
     itd.w = img_w;
     // Use full_height as max_h so the decoder scales to the correct aspect ratio;
     // src_y crops to the visible slice within that full render.
@@ -350,6 +349,14 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
     // its layout-assigned area (e.g. into the page number zone or page N+1).
     itd.clip_h = static_cast<uint16_t>(img_h);
     images.push_back(itd);
+  };
+  for (const auto& ci : page_.items) {
+    if (const PageImageItem* img = std::get_if<PageImageItem>(&ci)) {
+      collect_img(*img);
+    } else if (const PageTextItem* ti = std::get_if<PageTextItem>(&ci)) {
+      if (ti->inline_image.has_value())
+        collect_img(*ti->inline_image);
+    }
   }
 
   // Track whether grayscale pass is needed (deferred to update()).
@@ -361,8 +368,11 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
   if (fset) {
     render_text_(buf, *fset, GrayPlane::BW, false);
   } else {
-    for (const auto& item : page_.text_items) {
-      for (const auto& w : item.line.words) {
+    for (const auto& ci : page_.items) {
+      const PageTextItem* item = std::get_if<PageTextItem>(&ci);
+      if (!item)
+        continue;
+      for (const auto& w : item->line.words) {
         if (w.len == 0)
           continue;
         char text[64];
@@ -371,15 +381,17 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
           tlen = 63;
         std::memcpy(text, w.text, tlen);
         text[tlen] = '\0';
-        buf.draw_text_no_bg(kPaddingLeft + w.x, static_cast<int>(item.y_offset + page_.vertical_offset), text,
-                            false /*black*/, kScale);
+        buf.draw_text_no_bg(kPaddingLeft + w.x, static_cast<int>(item->y_offset), text, false /*black*/, kScale);
       }
     }
   }
 
-  for (const auto& hr : page_.hr_items) {
-    buf.fill_rect(static_cast<int>(hr.x_offset), static_cast<int>(hr.y_offset + page_.vertical_offset),
-                  static_cast<int>(hr.width), 1, false);
+  for (const auto& ci : page_.items) {
+    const PageHrItem* hr = std::get_if<PageHrItem>(&ci);
+    if (!hr)
+      continue;
+    const int hr_y = static_cast<int>(hr->y_offset) + static_cast<int>(hr->height) / 2;
+    buf.fill_rect(static_cast<int>(hr->x_offset), hr_y, static_cast<int>(hr->width), 1, false);
   }
 
   for (const auto& itd : images) {
@@ -402,8 +414,9 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
 
   // ── Timing ──────────────────────────────────────────────────────────────
   int n_words = 0;
-  for (const auto& ti : page_.text_items)
-    n_words += static_cast<int>(ti.line.words.size());
+  for (const auto& ci : page_.items)
+    if (const PageTextItem* ti = std::get_if<PageTextItem>(&ci))
+      n_words += static_cast<int>(ti->line.words.size());
 
 #ifdef ESP_PLATFORM
   long render_us = (long)(esp_timer_get_time() - t0);
@@ -442,12 +455,15 @@ size_t ReaderScreen::current_chapter_index() const {
 
 void ReaderScreen::render_text_(DrawBuffer& buf, const BitmapFontSet& fset, GrayPlane plane, bool white) {
   uint8_t* render = buf.render_buf();
-  for (const auto& item : page_.text_items) {
-    for (const auto& w : item.line.words) {
+  for (const auto& ci : page_.items) {
+    const PageTextItem* item = std::get_if<PageTextItem>(&ci);
+    if (!item)
+      continue;
+    for (const auto& w : item->line.words) {
       if (w.len == 0)
         continue;
       int x = kPaddingLeft + w.x;
-      int baseline_y = static_cast<int>(item.y_offset + page_.vertical_offset) + item.baseline;
+      int baseline_y = static_cast<int>(item->y_offset) + item->baseline;
       if (w.vertical_align == VerticalAlign::Super)
         baseline_y -= fset.y_advance(w.size) * 20 / 100;
       else if (w.vertical_align == VerticalAlign::Sub)

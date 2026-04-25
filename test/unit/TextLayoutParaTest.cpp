@@ -1,4 +1,4 @@
-#include <gtest/gtest.h>
+﻿#include <gtest/gtest.h>
 
 #include <algorithm>
 
@@ -501,11 +501,11 @@ TEST(TextLayout, MixedSizesLineHeight) {
   PageOptions opts(300, 400, 0, 8);
   auto page = TextLayout(font8, opts, src, PagePosition(0, 0)).layout();
 
-  ASSERT_GE(page.text_items.size(), 2u);
+  ASSERT_GE(page.text_items().size(), 2u);
 
   // First line (Large) should have a greater y_advance than normal
-  uint16_t y0 = page.text_items[0].y_offset;
-  uint16_t y1 = page.text_items[1].y_offset;
+  uint16_t y0 = page.text_items()[0].y_offset;
+  uint16_t y1 = page.text_items()[1].y_offset;
   uint16_t gap = y1 - y0;
 
   // Large line height = 16 * 5/4 = 20, plus para_spacing = 8 → gap = 28

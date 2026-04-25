@@ -77,7 +77,7 @@ TEST(DebugLayoutTest, AliceIllustrated) {
       out << "=== CH " << ci << " | Page " << page_in_chapter << " (global #" << global_page << ")"
           << " | pos{" << pc.start.paragraph << "," << pc.start.offset << "}"
           << " \xe2\x86\x92 {" << pc.end.paragraph << "," << pc.end.offset << "}"
-          << " | voff=" << pc.vertical_offset << " | at_end=" << (pc.at_chapter_end ? 1 : 0) << '\n';
+          << " | at_end=" << (pc.at_chapter_end ? 1 : 0) << '\n';
 
       struct Item {
         int y;
@@ -86,7 +86,7 @@ TEST(DebugLayoutTest, AliceIllustrated) {
       };
       std::vector<Item> items;
 
-      for (const auto& ti : pc.text_items) {
+      for (const auto& ti : pc.text_items()) {
         std::string snippet;
         for (const auto& w : ti.line.words) {
           if (!snippet.empty())
@@ -99,24 +99,22 @@ TEST(DebugLayoutTest, AliceIllustrated) {
         }
         int h = ti.height > 0 ? ti.height : font.y_advance();
         char buf[256];
-        std::snprintf(buf, sizeof(buf), "  TEXT  y=%4d h=%3d  para=%u:ln=%u  \"%s\"", ti.y_offset + pc.vertical_offset,
-                      h, ti.paragraph_index, ti.line_index, snippet.c_str());
-        items.push_back({ti.y_offset + pc.vertical_offset, h, buf});
+        std::snprintf(buf, sizeof(buf), "  TEXT  y=%4d h=%3d  para=%u:ln=%u  \"%s\"", ti.y_offset, h,
+                      ti.paragraph_index, ti.line_index, snippet.c_str());
+        items.push_back({ti.y_offset, h, buf});
       }
 
-      for (const auto& img : pc.image_items) {
+      for (const auto& img : pc.image_items()) {
         char buf[128];
-        std::snprintf(buf, sizeof(buf), "  IMG   y=%4d h=%3d  para=%u  key=%u  %ux%u  @x=%u",
-                      img.y_offset + pc.vertical_offset, img.height, img.paragraph_index, img.key, img.width,
-                      img.height, img.x_offset);
-        items.push_back({img.y_offset + pc.vertical_offset, img.height, buf});
+        std::snprintf(buf, sizeof(buf), "  IMG   y=%4d h=%3d  para=%u  key=%u  %ux%u  @x=%u", img.y_offset, img.height,
+                      img.paragraph_index, img.key, img.width, img.height, img.x_offset);
+        items.push_back({img.y_offset, img.height, buf});
       }
 
-      for (const auto& hr : pc.hr_items) {
+      for (const auto& hr : pc.hr_items()) {
         char buf[128];
-        std::snprintf(buf, sizeof(buf), "  HR    y=%4d        @x=%u  w=%u", hr.y_offset + pc.vertical_offset,
-                      hr.x_offset, hr.width);
-        items.push_back({hr.y_offset + pc.vertical_offset, 1, buf});
+        std::snprintf(buf, sizeof(buf), "  HR    y=%4d        @x=%u  w=%u", hr.y_offset, hr.x_offset, hr.width);
+        items.push_back({hr.y_offset, 1, buf});
       }
 
       std::sort(items.begin(), items.end(), [](const Item& a, const Item& b) { return a.y < b.y; });
@@ -202,7 +200,7 @@ TEST(DebugLayoutTest, PositionRestoreAtCroppedImage) {
       auto page = tl.layout();
 
       // Check if any image on this page is a continuation slice (y_crop > 0).
-      for (const auto& img : page.image_items) {
+      for (const auto& img : page.image_items()) {
         if (img.y_crop == 0)
           continue;
 
@@ -217,30 +215,31 @@ TEST(DebugLayoutTest, PositionRestoreAtCroppedImage) {
         tl2.set_position(page.start);
         auto page2 = tl2.layout();
 
-        ASSERT_EQ(page2.text_items.size(), page.text_items.size())
+        auto page_texts = page.text_items();
+        auto page_imgs = page.image_items();
+        auto page_hrs = page.hr_items();
+        auto page2_texts = page2.text_items();
+        auto page2_imgs = page2.image_items();
+        auto page2_hrs = page2.hr_items();
+        ASSERT_EQ(page2_texts.size(), page_texts.size())
             << "ch" << ci << " restored page has different text item count";
-        ASSERT_EQ(page2.image_items.size(), page.image_items.size())
-            << "ch" << ci << " restored page has different image item count";
-        ASSERT_EQ(page2.hr_items.size(), page.hr_items.size())
-            << "ch" << ci << " restored page has different hr item count";
+        ASSERT_EQ(page2_imgs.size(), page_imgs.size()) << "ch" << ci << " restored page has different image item count";
+        ASSERT_EQ(page2_hrs.size(), page_hrs.size()) << "ch" << ci << " restored page has different hr item count";
 
-        for (size_t i = 0; i < page.image_items.size(); ++i) {
-          EXPECT_EQ(page2.image_items[i].key, page.image_items[i].key)
-              << "ch" << ci << " img[" << i << "] key mismatch";
-          EXPECT_EQ(page2.image_items[i].y_crop, page.image_items[i].y_crop)
-              << "ch" << ci << " img[" << i << "] y_crop mismatch";
-          EXPECT_EQ(page2.image_items[i].height, page.image_items[i].height)
-              << "ch" << ci << " img[" << i << "] height mismatch";
-          EXPECT_EQ(page2.image_items[i].full_height, page.image_items[i].full_height)
+        for (size_t i = 0; i < page_imgs.size(); ++i) {
+          EXPECT_EQ(page2_imgs[i].key, page_imgs[i].key) << "ch" << ci << " img[" << i << "] key mismatch";
+          EXPECT_EQ(page2_imgs[i].y_crop, page_imgs[i].y_crop) << "ch" << ci << " img[" << i << "] y_crop mismatch";
+          EXPECT_EQ(page2_imgs[i].height, page_imgs[i].height) << "ch" << ci << " img[" << i << "] height mismatch";
+          EXPECT_EQ(page2_imgs[i].full_height, page_imgs[i].full_height)
               << "ch" << ci << " img[" << i << "] full_height mismatch";
-          EXPECT_EQ(page2.image_items[i].y_offset, page.image_items[i].y_offset)
+          EXPECT_EQ(page2_imgs[i].y_offset, page_imgs[i].y_offset)
               << "ch" << ci << " img[" << i << "] y_offset mismatch";
         }
 
-        for (size_t i = 0; i < page.text_items.size(); ++i) {
-          EXPECT_EQ(page2.text_items[i].paragraph_index, page.text_items[i].paragraph_index)
+        for (size_t i = 0; i < page_texts.size(); ++i) {
+          EXPECT_EQ(page2_texts[i].paragraph_index, page_texts[i].paragraph_index)
               << "ch" << ci << " text[" << i << "] paragraph_index mismatch";
-          EXPECT_EQ(page2.text_items[i].line_index, page.text_items[i].line_index)
+          EXPECT_EQ(page2_texts[i].line_index, page_texts[i].line_index)
               << "ch" << ci << " text[" << i << "] line_index mismatch";
         }
 

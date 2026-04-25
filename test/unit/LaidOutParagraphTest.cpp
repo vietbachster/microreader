@@ -616,3 +616,165 @@ TEST(MultiItemRoundTrip, PromotedParagraph_SlicedImage) {
     idx = next_cursor;
   }
 }
+
+// ===================================================================
+// leading_spacer — collect() and collect_backward()
+// ===================================================================
+
+// idx 0 returns the Spacer item; real lines start at idx 1.
+TEST(LeadingSpacer, Forward_SpacerAtIdx0) {
+  auto lp = make_text_lp(0, 3, 16);
+  lp.leading_spacer = 20;
+
+  auto r = lp.collect(0, 200);
+  ASSERT_TRUE(r.has_value());
+  EXPECT_EQ(r->item.kind, TextLayout::PageItem::Spacer);
+  EXPECT_EQ(r->item.height, 20);
+  EXPECT_EQ(r->next_idx, 1u);
+}
+
+// idx 1 returns the first real line (line_idx 0).
+TEST(LeadingSpacer, Forward_FirstRealLine) {
+  auto lp = make_text_lp(0, 3, 16);
+  lp.leading_spacer = 20;
+
+  auto r = lp.collect(1, 200);
+  ASSERT_TRUE(r.has_value());
+  EXPECT_EQ(r->item.kind, TextLayout::PageItem::TextLine);
+  EXPECT_EQ(r->item.line_idx, 0);
+  EXPECT_EQ(r->next_idx, 2u);
+}
+
+// idx 3 returns line_idx 2 (last line of 3-line para), next_idx == 4.
+TEST(LeadingSpacer, Forward_LastLine) {
+  auto lp = make_text_lp(0, 3, 16);
+  lp.leading_spacer = 20;
+
+  auto r = lp.collect(3, 200);
+  ASSERT_TRUE(r.has_value());
+  EXPECT_EQ(r->item.kind, TextLayout::PageItem::TextLine);
+  EXPECT_EQ(r->item.line_idx, 2);
+  EXPECT_EQ(r->next_idx, 4u);
+}
+
+// idx 4 (past end) returns nullopt.
+TEST(LeadingSpacer, Forward_PastEnd) {
+  auto lp = make_text_lp(0, 3, 16);
+  lp.leading_spacer = 20;
+
+  EXPECT_FALSE(lp.collect(4, 200).has_value());
+}
+
+// Spacer doesn't fit → nullopt.
+TEST(LeadingSpacer, Forward_SpacerDoesntFit) {
+  auto lp = make_text_lp(0, 3, 16);
+  lp.leading_spacer = 50;
+
+  EXPECT_FALSE(lp.collect(0, 30).has_value());
+}
+
+// collect_backward(end_idx=1) returns the Spacer (item ending at 1, starting at 0).
+TEST(LeadingSpacer, Backward_SpacerAtEnd1) {
+  auto lp = make_text_lp(0, 3, 16);
+  lp.leading_spacer = 20;
+
+  auto r = lp.collect_backward(1, 200);
+  ASSERT_TRUE(r.has_value());
+  EXPECT_EQ(r->item.kind, TextLayout::PageItem::Spacer);
+  EXPECT_EQ(r->item.height, 20);
+  EXPECT_EQ(r->next_idx, 0u);
+}
+
+// collect_backward(2) returns line_idx 0 (real line ending at external idx 2).
+TEST(LeadingSpacer, Backward_FirstRealLine) {
+  auto lp = make_text_lp(0, 3, 16);
+  lp.leading_spacer = 20;
+
+  auto r = lp.collect_backward(2, 200);
+  ASSERT_TRUE(r.has_value());
+  EXPECT_EQ(r->item.kind, TextLayout::PageItem::TextLine);
+  EXPECT_EQ(r->item.line_idx, 0);
+  EXPECT_EQ(r->next_idx, 1u);
+}
+
+// collect_backward(4) returns line_idx 2 (last line).
+TEST(LeadingSpacer, Backward_LastLine) {
+  auto lp = make_text_lp(0, 3, 16);
+  lp.leading_spacer = 20;
+
+  auto r = lp.collect_backward(4, 200);
+  ASSERT_TRUE(r.has_value());
+  EXPECT_EQ(r->item.kind, TextLayout::PageItem::TextLine);
+  EXPECT_EQ(r->item.line_idx, 2);
+  EXPECT_EQ(r->next_idx, 3u);
+}
+
+// Spacer backward doesn't fit → nullopt.
+TEST(LeadingSpacer, Backward_SpacerDoesntFit) {
+  auto lp = make_text_lp(0, 3, 16);
+  lp.leading_spacer = 50;
+
+  EXPECT_FALSE(lp.collect_backward(1, 30).has_value());
+}
+
+// Full round-trip: iterate forward through all items, then verify collect_backward from each next_idx.
+TEST(LeadingSpacer, RoundTrip_AllItems) {
+  auto lp = make_text_lp(0, 3, 16);
+  lp.leading_spacer = 20;
+
+  size_t idx = 0;
+  size_t prev_cursor = 0;
+  int count = 0;
+  while (true) {
+    auto f = lp.collect(idx, 200);
+    if (!f)
+      break;
+    ++count;
+    size_t next_cursor = f->next_idx;
+
+    auto b = lp.collect_backward(next_cursor, 200);
+    ASSERT_TRUE(b.has_value());
+    EXPECT_EQ(b->item.kind, f->item.kind);
+    EXPECT_EQ(b->item.height, f->item.height);
+    if (f->item.kind == TextLayout::PageItem::TextLine)
+      EXPECT_EQ(b->item.line_idx, f->item.line_idx);
+    EXPECT_EQ(b->next_idx, prev_cursor);
+
+    prev_cursor = next_cursor;
+    idx = next_cursor;
+  }
+  // Spacer + 3 lines = 4 items, final idx = 4.
+  EXPECT_EQ(count, 4);
+  EXPECT_EQ(idx, 4u);
+}
+
+// leading_spacer on an Hr paragraph.
+TEST(LeadingSpacer, Hr_Forward_SpacerThenHr) {
+  auto lp = make_hr_lp(0, 16);
+  lp.leading_spacer = 10;
+
+  auto r0 = lp.collect(0, 200);
+  ASSERT_TRUE(r0.has_value());
+  EXPECT_EQ(r0->item.kind, TextLayout::PageItem::Spacer);
+  EXPECT_EQ(r0->next_idx, 1u);
+
+  auto r1 = lp.collect(1, 200);
+  ASSERT_TRUE(r1.has_value());
+  EXPECT_EQ(r1->item.kind, TextLayout::PageItem::Hr);
+  EXPECT_EQ(r1->next_idx, 2u);
+}
+
+TEST(LeadingSpacer, Hr_Backward_RoundTrip) {
+  auto lp = make_hr_lp(0, 16);
+  lp.leading_spacer = 10;
+
+  auto bwd2 = lp.collect_backward(2, 200);
+  ASSERT_TRUE(bwd2.has_value());
+  EXPECT_EQ(bwd2->item.kind, TextLayout::PageItem::Hr);
+  EXPECT_EQ(bwd2->next_idx, 1u);
+
+  auto bwd1 = lp.collect_backward(1, 200);
+  ASSERT_TRUE(bwd1.has_value());
+  EXPECT_EQ(bwd1->item.kind, TextLayout::PageItem::Spacer);
+  EXPECT_EQ(bwd1->next_idx, 0u);
+}

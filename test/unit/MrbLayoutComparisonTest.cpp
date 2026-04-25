@@ -1,4 +1,4 @@
-#include <gtest/gtest.h>
+﻿#include <gtest/gtest.h>
 
 #include <chrono>
 #include <cstdio>
@@ -39,13 +39,14 @@ static void assert_pages_equal(const PageContent& epub_page, const PageContent& 
   EXPECT_EQ(epub_page.start, mrb_page.start) << ctx << " start";
   EXPECT_EQ(epub_page.end, mrb_page.end) << ctx << " end";
   EXPECT_EQ(epub_page.at_chapter_end, mrb_page.at_chapter_end) << ctx << " at_chapter_end";
-  EXPECT_EQ(epub_page.vertical_offset, mrb_page.vertical_offset) << ctx << " vertical_offset";
 
   // Text items
-  ASSERT_EQ(epub_page.text_items.size(), mrb_page.text_items.size()) << ctx << " text_items count";
-  for (size_t ti = 0; ti < epub_page.text_items.size(); ++ti) {
-    const auto& ea = epub_page.text_items[ti];
-    const auto& ma = mrb_page.text_items[ti];
+  auto epub_texts = epub_page.text_items();
+  auto mrb_texts = mrb_page.text_items();
+  ASSERT_EQ(epub_texts.size(), mrb_texts.size()) << ctx << " text_items count";
+  for (size_t ti = 0; ti < epub_texts.size(); ++ti) {
+    const auto& ea = epub_texts[ti];
+    const auto& ma = mrb_texts[ti];
     std::string tctx = ctx + " text[" + std::to_string(ti) + "]";
 
     EXPECT_EQ(ea.paragraph_index, ma.paragraph_index) << tctx << " para_idx";
@@ -60,10 +61,12 @@ static void assert_pages_equal(const PageContent& epub_page, const PageContent& 
   }
 
   // Image items
-  ASSERT_EQ(epub_page.image_items.size(), mrb_page.image_items.size()) << ctx << " image_items count";
-  for (size_t ii = 0; ii < epub_page.image_items.size(); ++ii) {
-    const auto& ea = epub_page.image_items[ii];
-    const auto& ma = mrb_page.image_items[ii];
+  auto epub_images = epub_page.image_items();
+  auto mrb_images = mrb_page.image_items();
+  ASSERT_EQ(epub_images.size(), mrb_images.size()) << ctx << " image_items count";
+  for (size_t ii = 0; ii < epub_images.size(); ++ii) {
+    const auto& ea = epub_images[ii];
+    const auto& ma = mrb_images[ii];
     std::string ictx = ctx + " img[" + std::to_string(ii) + "]";
 
     EXPECT_EQ(ea.paragraph_index, ma.paragraph_index) << ictx << " para_idx";
@@ -76,10 +79,12 @@ static void assert_pages_equal(const PageContent& epub_page, const PageContent& 
   }
 
   // HR items
-  ASSERT_EQ(epub_page.hr_items.size(), mrb_page.hr_items.size()) << ctx << " hr_items count";
-  for (size_t hi = 0; hi < epub_page.hr_items.size(); ++hi) {
-    const auto& ea = epub_page.hr_items[hi];
-    const auto& ma = mrb_page.hr_items[hi];
+  auto epub_hrs = epub_page.hr_items();
+  auto mrb_hrs = mrb_page.hr_items();
+  ASSERT_EQ(epub_hrs.size(), mrb_hrs.size()) << ctx << " hr_items count";
+  for (size_t hi = 0; hi < epub_hrs.size(); ++hi) {
+    const auto& ea = epub_hrs[hi];
+    const auto& ma = mrb_hrs[hi];
     std::string hctx = ctx + " hr[" + std::to_string(hi) + "]";
 
     EXPECT_EQ(ea.x_offset, ma.x_offset) << hctx << " x_offset";

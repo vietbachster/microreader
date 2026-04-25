@@ -3,7 +3,9 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
+#include <variant>
 #include <vector>
 
 #include "ContentModel.h"
@@ -75,34 +77,43 @@ struct PageImageItem {
   uint16_t width;
   uint16_t height;           // slice height (pixels rendered on this page)
   uint16_t x_offset;         // pixel offset from page left (for centering)
-  uint16_t y_offset;         // pixel offset from page top
+  uint16_t y_offset;         // pixel offset from page top (absolute, includes vertical centering)
   uint16_t y_crop = 0;       // rows into source image to skip (for partial/split images)
   uint16_t full_height = 0;  // full scaled image height (for decode: width × aspect)
 };
 
 struct PageHrItem {
   uint16_t x_offset;  // pixel offset from page left
-  uint16_t y_offset;  // pixel offset from page top
+  uint16_t y_offset;  // slot top (absolute, includes vertical centering); render adds font.y_advance()/2
   uint16_t width;     // line width
+  uint16_t height;    // slot height (= font.y_advance())
 };
 
 struct PageTextItem {
   uint16_t paragraph_index;
   uint16_t line_index;
   LayoutLine line;
-  uint16_t y_offset;      // pixel offset from page top
+  uint16_t y_offset;      // pixel offset from page top (absolute, includes vertical centering)
   uint16_t height = 0;    // line height in pixels
   uint16_t baseline = 0;  // baseline distance from top of line to baseline
+  // Non-promoted inline image anchored to this line's baseline (line_index == 0 only).
+  std::optional<PageImageItem> inline_image;
 };
 
+// A single content item on a page: text line, standalone image, or horizontal rule.
+// Items are stored in top-to-bottom order in PageContent::items.
+using PageContentItem = std::variant<PageTextItem, PageImageItem, PageHrItem>;
+
 struct PageContent {
-  std::vector<PageTextItem> text_items;
-  std::vector<PageImageItem> image_items;
-  std::vector<PageHrItem> hr_items;
+  std::vector<PageContentItem> items;  // ordered top-to-bottom; y_offsets are absolute screen coords
   PagePosition start;
-  PagePosition end;              // one-past-end position
-  uint16_t vertical_offset = 0;  // shift all content down by this amount (for centering)
+  PagePosition end;  // one-past-end position
   bool at_chapter_end = false;
+
+  // Typed accessors — O(n) filter; prefer iterating items with std::visit in hot paths.
+  std::vector<PageTextItem> text_items() const;
+  std::vector<PageImageItem> image_items() const;
+  std::vector<PageHrItem> hr_items() const;
 };
 
 struct PageOptions {
@@ -203,7 +214,7 @@ class TextLayout {
   // functions (which are not class members) can reference them without
   // triggering MSVC C2248 private-access errors.
   struct PageItem {
-    enum Kind { TextLine, Image, Hr, Empty, PageBreak } kind;
+    enum Kind { TextLine, Image, Hr, Empty, PageBreak, Spacer } kind;
     uint16_t para_idx, line_idx;
     LayoutLine layout_line;
     uint16_t height, baseline = 0;
@@ -239,8 +250,9 @@ class TextLayout {
     // ParagraphType::Image (standalone), Hr, empty Text:
     uint16_t block_height = 0;                              // Image: scaled h (0=unknown); Hr/empty-text: font advance
     uint16_t img_key = 0, img_w = 0, img_h = 0, img_x = 0;  // Image paragraph only
-    uint16_t min_slice_h = 0;  // Image: minimum forward-slice height; smaller slices are deferred
-    uint16_t min_cut_h = 0;    // Image: minimum cut-off when slicing; ensure cut is visually obvious
+    uint16_t min_slice_h = 0;     // Image: minimum forward-slice height; smaller slices are deferred
+    uint16_t min_cut_h = 0;       // Image: minimum cut-off when slicing; ensure cut is visually obvious
+    uint16_t leading_spacer = 0;  // spacing_before baked into index space: idx 0 = Spacer, real content starts at 1
 
     bool empty() const {
       return para_idx == UINT16_MAX;
