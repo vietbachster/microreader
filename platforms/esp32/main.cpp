@@ -1,14 +1,12 @@
+#include <cstdio>
+
 #include "driver/gpio.h"
 #include "driver/usb_serial_jtag.h"
 #include "epd.h"
 #include "esp_heap_caps.h"
 #include "esp_ota_ops.h"
 #include "esp_sleep.h"
-#ifndef QEMU_BUILD
-#include "hal/usb_serial_jtag_ll.h"
-#endif
-#include <cstdio>
-
+#include "esp_system.h"
 #include "font_partition.h"
 #include "input.h"
 #include "microreader/Application.h"
@@ -32,8 +30,53 @@ static void verify_ota() {
   }
 }
 
+// When the device boots on battery (no USB), require the power button to be
+// held for at least kPowerWakeupMs milliseconds before allowing boot.
+// A brief accidental touch goes back to sleep immediately without any display
+// activity, just like the original microreader firmware.
+// Exception: software resets (e.g. after esptool flash) boot immediately.
+static constexpr gpio_num_t kPowerPin = GPIO_NUM_3;
+static constexpr uint32_t kPowerWakeupMs = 250;
+
+static void verify_wakeup_press() {
+#ifndef QEMU_BUILD
+  // A software reset means we just got flashed or restarted by a tool —
+  // boot immediately without requiring a button hold.
+  if (esp_reset_reason() == ESP_RST_SW)
+    return;
+
+  gpio_config_t cfg{};
+  cfg.pin_bit_mask = (1ULL << kPowerPin);
+  cfg.mode = GPIO_MODE_INPUT;
+  cfg.pull_up_en = GPIO_PULLUP_ENABLE;
+  cfg.pull_down_en = GPIO_PULLDOWN_DISABLE;
+  cfg.intr_type = GPIO_INTR_DISABLE;
+  gpio_config(&cfg);
+
+  // Wait up to 2× the threshold; if the button isn't held long enough, sleep.
+  const uint32_t deadline_ms = kPowerWakeupMs * 2;
+  uint32_t held_ms = 0;
+  for (uint32_t elapsed = 0; elapsed < deadline_ms; elapsed += 10) {
+    vTaskDelay(pdMS_TO_TICKS(10));
+    if (gpio_get_level(kPowerPin) == 0) {
+      held_ms += 10;
+      if (held_ms >= kPowerWakeupMs)
+        return;  // confirmed long press — boot normally
+    } else {
+      held_ms = 0;  // button released, reset counter
+    }
+  }
+
+  // Short press — go back to sleep without waking up.
+  ESP_LOGI("pwr", "Short press on wakeup (held %lu ms) — returning to sleep", (unsigned long)held_ms);
+  esp_deep_sleep_enable_gpio_wakeup(1ULL << kPowerPin, ESP_GPIO_WAKEUP_GPIO_LOW);
+  esp_deep_sleep_start();
+#endif
+}
+
 extern "C" void app_main(void) {
   verify_ota();
+  verify_wakeup_press();
 
   static Esp32InputSource input;
   static EInkDisplay epd;
@@ -42,8 +85,8 @@ extern "C" void app_main(void) {
   static microreader::DrawBuffer buf(epd);
 
 #ifndef QEMU_BUILD
-  // Only wait for serial monitor if USB is connected.
-  if (usb_serial_jtag_ll_txfifo_writable()) {
+  // After a software reset (post-flash) wait briefly for the serial monitor.
+  if (esp_reset_reason() == ESP_RST_SW) {
     vTaskDelay(pdMS_TO_TICKS(3000));
   }
 #endif

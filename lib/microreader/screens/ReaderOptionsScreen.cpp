@@ -37,6 +37,16 @@ void ReaderOptionsScreen::on_start() {
 
   char tmp[40];
 
+  // "Chapters" goes at the top so it's easy to reach.
+  if (chapter_select_.has_toc()) {
+    idx_chapters_ = count();
+    add_item("Chapters");
+  }
+
+  // Separator between chapter navigation and text layout settings.
+  if (settings_ && chapter_select_.has_toc())
+    add_separator();
+
   if (settings_) {
     idx_justify_ = count();
     add_item(fmt_setting(tmp, sizeof(tmp), "Justify", settings_->justify ? "On" : "Off"));
@@ -49,11 +59,6 @@ void ReaderOptionsScreen::on_start() {
 
     idx_line_spacing_ = count();
     add_item(fmt_setting(tmp, sizeof(tmp), "Line spacing", ReaderSettings::kSpacingNames[settings_->line_spacing_idx]));
-  }
-
-  if (chapter_select_.has_toc()) {
-    idx_chapters_ = count();
-    add_item("Chapters");
   }
 }
 

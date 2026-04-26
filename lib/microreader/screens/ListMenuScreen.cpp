@@ -70,8 +70,13 @@ void ListMenuScreen::draw_all_(DrawBuffer& buf) const {
   const int visible = (H - header_h) / line_h;
 
   const int end = scroll_offset_ + visible < n ? scroll_offset_ + visible : n;
-  const int draw_count = end - scroll_offset_;
-  const int total_h = line_h * draw_count;
+
+  // Compute total height for centring when all items fit on screen.
+  // Separators are drawn as a thin line taking half a line slot.
+  int total_h = 0;
+  for (int i = scroll_offset_; i < end; ++i)
+    total_h += (i < (int)separators_.size() && separators_[i]) ? line_h / 2 : line_h;
+
   const int items_y = n <= visible ? header_h + (H - header_h - total_h) / 2 : header_h;
 
   static const char kEllipsis[] = "...";
@@ -79,8 +84,13 @@ void ListMenuScreen::draw_all_(DrawBuffer& buf) const {
   const int ellipsis_w = ui_font_.word_width(kEllipsis, 3, FontStyle::Regular);
   char trunc_buf[260];
 
+  int y = items_y;
   for (int i = scroll_offset_; i < end; ++i) {
-    const int row = i - scroll_offset_;
+    const bool is_sep = (i < (int)separators_.size() && separators_[i]);
+    if (is_sep) {
+      y += line_h / 2;
+      continue;
+    }
     const std::string& label_str = labels_[i];
     const char* label = label_str.c_str();
     size_t len = label_str.size();
@@ -109,7 +119,7 @@ void ListMenuScreen::draw_all_(DrawBuffer& buf) const {
     }
 
     const int ix = (W - iw) / 2;
-    const int iy = items_y + row * line_h;
+    const int iy = y;
     if (i == selected_) {
       const int bar_h = ui_font_.y_advance();
       buf.fill_rect(ix - 4, iy - 1, iw + 8, bar_h, false);
@@ -117,6 +127,7 @@ void ListMenuScreen::draw_all_(DrawBuffer& buf) const {
     } else {
       buf.draw_text_proportional(ix, iy + baseline, label, len, ui_font_, false);
     }
+    y += line_h;
   }
 
   // Scrollbar on the right edge when items overflow
@@ -124,7 +135,7 @@ void ListMenuScreen::draw_all_(DrawBuffer& buf) const {
     const int sb_x = W - 8;
     const int sb_w = 3;
     const int sb_top = items_y - 1;
-    const int sb_bottom = items_y + (draw_count - 1) * line_h + ui_font_.y_advance() - 1;
+    const int sb_bottom = items_y + total_h - 1;
     const int sb_total_h = sb_bottom - sb_top;
     const int thumb_h = sb_total_h * visible / n < 6 ? 6 : sb_total_h * visible / n;
     const int track = sb_total_h - thumb_h;
@@ -146,12 +157,20 @@ bool ListMenuScreen::update(const ButtonState& buttons, DrawBuffer& buf, IRuntim
 
   bool moved = false;
   if (buttons.is_pressed(Button::Button3)) {
-    selected_ = selected_ > 0 ? selected_ - 1 : n - 1;
+    int next = selected_ > 0 ? selected_ - 1 : n - 1;
+    // skip separators
+    while (next != selected_ && next < (int)separators_.size() && separators_[next])
+      next = next > 0 ? next - 1 : n - 1;
+    selected_ = next;
     ensure_visible_();
     moved = true;
   }
   if (buttons.is_pressed(Button::Button2)) {
-    selected_ = selected_ < n - 1 ? selected_ + 1 : 0;
+    int next = selected_ < n - 1 ? selected_ + 1 : 0;
+    // skip separators
+    while (next != selected_ && next < (int)separators_.size() && separators_[next])
+      next = next < n - 1 ? next + 1 : 0;
+    selected_ = next;
     ensure_visible_();
     moved = true;
   }
