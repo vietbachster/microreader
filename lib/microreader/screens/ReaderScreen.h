@@ -72,7 +72,7 @@ class ReaderScreen final : public IScreen {
   static constexpr int kScale = 2;
   static constexpr int kGlyphW = 8;
   static constexpr int kGlyphH = 8;
-  static constexpr int kPaddingTop = 6;
+  static constexpr int kPaddingTop = 2;
   static constexpr int kPaddingRight = 12;
   static constexpr int kPaddingBottom = 14;
   static constexpr int kPaddingLeft = 12;
@@ -138,6 +138,15 @@ class ReaderScreen final : public IScreen {
   void load_chapter_(size_t idx);
   void save_position_();
   void load_position_();
+
+ public:
+  // Access to user-adjustable display settings (read/write by Application for persistence).
+  ReaderSettings& reader_settings() {
+    return reader_settings_;
+  }
+  const ReaderSettings& reader_settings() const {
+    return reader_settings_;
+  }
 };
 
 }  // namespace microreader

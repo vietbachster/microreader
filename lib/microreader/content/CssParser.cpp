@@ -276,28 +276,31 @@ CssRule CssRule::parse(const char* decl, size_t length, const CssConfig& config)
             rule.font_size = FontSize::Small;
         }
       } else if (key == "line-height") {
-        // Parse line-height as percentage of default (100 = normal ~1.2)
+        // Parse line-height as percentage of our natural y_advance.
+        // Our fonts have y_advance ≈ 1.5× em-size, so CSS line-height: 1.5 = 100% (use y_advance as-is).
+        // CSS line-height: 1.2 (browser normal) = 80% (slightly tighter than y_advance).
         // Common values: "normal", "1.2", "1.5", "140%", "1.4em"
+        static constexpr float kNormFactor = 1.5f;
         char* end = nullptr;
         if (value == "normal" || value == "inherit") {
           rule.line_height_pct = 100;
         } else if (value.size() > 1 && value.back() == '%') {
           float pct = std::strtof(value.c_str(), &end);
           if (end != value.c_str()) {
-            uint8_t val = static_cast<uint8_t>(std::clamp(pct * 100.0f / 120.0f, 70.0f, 200.0f));
+            uint8_t val = static_cast<uint8_t>(std::clamp(pct / kNormFactor, 70.0f, 200.0f));
             rule.line_height_pct = val;
           }
         } else if (value.size() > 2 && value.substr(value.size() - 2) == "em") {
           float em = std::strtof(value.c_str(), &end);
           if (end != value.c_str()) {
-            uint8_t val = static_cast<uint8_t>(std::clamp(em * 100.0f / 1.2f, 70.0f, 200.0f));
+            uint8_t val = static_cast<uint8_t>(std::clamp(em * 100.0f / kNormFactor, 70.0f, 200.0f));
             rule.line_height_pct = val;
           }
         } else {
           // Unitless number (e.g. "1.5")
           float num = std::strtof(value.c_str(), &end);
           if (end != value.c_str()) {
-            uint8_t val = static_cast<uint8_t>(std::clamp(num * 100.0f / 1.2f, 70.0f, 200.0f));
+            uint8_t val = static_cast<uint8_t>(std::clamp(num * 100.0f / kNormFactor, 70.0f, 200.0f));
             rule.line_height_pct = val;
           }
         }

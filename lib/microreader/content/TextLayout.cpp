@@ -584,12 +584,13 @@ static bool item_is_block(const PageContentItem& ci) {
 }
 
 // Distribute slack proportionally across inter-item gaps when the page is nearly full.
+// padding_bottom defines the distance from the screen bottom to the last text line's baseline,
+// so slack is measured as (ph - last_text_baseline). After spreading the last baseline sits
+// exactly at ph, and bake_y(padding_top) moves it to height - padding_bottom.
 static void spread_text_items(PageContent& page, const PageOptions& opts, const IFont& font, uint16_t y) {
   const uint16_t dy = font.y_advance();
   const uint16_t ph =
       opts.height > opts.padding_top + opts.padding_bottom ? opts.height - opts.padding_top - opts.padding_bottom : 0;
-  if (y >= ph || ph - y >= dy * 2)
-    return;
 
   // Collect spreadable item indices (skip non-promoted inline images).
   std::vector<size_t> idxs;
@@ -603,8 +604,25 @@ static void spread_text_items(PageContent& page, const PageOptions& opts, const 
     return;
 
   const size_t N = idxs.size();
-  int32_t slack = static_cast<int32_t>(ph) - static_cast<int32_t>(y);
-  if (slack <= 0)
+
+  // Compute slack based on the last text item's baseline reaching ph.
+  // If there are no text items (only images/hr), fall back to slot-bottom semantics.
+  int32_t slack;
+  {
+    bool found = false;
+    for (int i = static_cast<int>(N) - 1; i >= 0; --i) {
+      if (const PageTextItem* ti = std::get_if<PageTextItem>(&page.items[idxs[i]])) {
+        uint16_t last_baseline_y = item_y(page.items[idxs[i]]) + ti->baseline;
+        slack = static_cast<int32_t>(ph) - static_cast<int32_t>(last_baseline_y);
+        found = true;
+        break;
+      }
+    }
+    if (!found)
+      slack = static_cast<int32_t>(ph) - static_cast<int32_t>(y);
+  }
+
+  if (slack <= 0 || slack >= static_cast<int32_t>(dy) * 2)
     return;
 
   // Compute raw gaps and weights between consecutive spreadable items.
@@ -616,7 +634,7 @@ static void spread_text_items(PageContent& page, const PageOptions& opts, const 
     raw_gaps[i] = std::max(INT32_C(0), static_cast<int32_t>(item_y(b)) - static_cast<int32_t>(item_y(a)) -
                                            static_cast<int32_t>(item_height(a)));
     bool inter_para = !item_is_block(a) && !item_is_block(b) && item_para_idx(a) != item_para_idx(b);
-    weights[i] = (item_is_block(a) || item_is_block(b)) ? 8 : (inter_para ? 4 : 0);
+    weights[i] = (item_is_block(a) || item_is_block(b)) ? 8 : (inter_para ? 4 : 1);
     total_weight += weights[i];
   }
   if (total_weight == 0)

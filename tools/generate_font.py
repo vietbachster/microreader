@@ -53,6 +53,7 @@ RANGE_PRESETS = {
     "spacing-mod": [(0x02B0, 0x02FF)],  # Spacing Modifier Letters
     "latin-ext-add": [(0x1E00, 0x1EFF)],  # Latin Extended Additional (Vietnamese etc.)
     "super-sub": [(0x2070, 0x209F)],  # Superscripts and Subscripts
+    "specials": [(0xFFF0, 0xFFFF)],  # Specials (includes U+FFFD replacement character �)
 }
 
 DEFAULT_RANGES = [
@@ -69,6 +70,7 @@ DEFAULT_RANGES = [
     "letterlike",
     "number-forms",
     "latin-ext-add",
+    "specials",
 ]
 
 # ---------------------------------------------------------------------------
@@ -300,7 +302,7 @@ def build_mbf(face, size, codepoint_ranges, bw_only=False):
     face.set_pixel_sizes(0, size)
     ascender = face.size.ascender >> 6
     descender = face.size.descender >> 6
-    y_advance = ascender - descender + 2
+    y_advance = ascender - descender
     baseline = ascender
     default_advance = size // 2
 
@@ -379,7 +381,7 @@ def build_multi_style_mbf(faces, size, codepoint_ranges, bw_only=False):
     reg_face.set_pixel_sizes(0, size)
     ascender = reg_face.size.ascender >> 6
     descender = reg_face.size.descender >> 6
-    y_advance = ascender - descender + 2
+    y_advance = ascender - descender
     baseline = ascender
     default_advance = size // 2
 

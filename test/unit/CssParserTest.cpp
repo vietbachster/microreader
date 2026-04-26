@@ -818,46 +818,46 @@ TEST(CssParserTest, LineHeightInherit) {
   EXPECT_EQ(*rule.line_height_pct, 100);
 }
 
-TEST(CssParserTest, LineHeightPercent120IsDefault) {
-  // 120% is browser default, maps to our 100%
-  auto rule = CssRule::parse("line-height: 120%");
+TEST(CssParserTest, LineHeightPercent150IsDefault) {
+  // 150% / 150 = 100% — 150% CSS equals our natural y_advance
+  auto rule = CssRule::parse("line-height: 150%");
   ASSERT_TRUE(rule.line_height_pct.has_value());
   EXPECT_EQ(*rule.line_height_pct, 100);
 }
 
-TEST(CssParserTest, LineHeightPercent150) {
-  // 150% / 120% * 100 = 125
-  auto rule = CssRule::parse("line-height: 150%");
+TEST(CssParserTest, LineHeightPercent120) {
+  // 120% / 1.5 * 100 = 80 — browser default is tighter than our y_advance
+  auto rule = CssRule::parse("line-height: 120%");
   ASSERT_TRUE(rule.line_height_pct.has_value());
-  EXPECT_EQ(*rule.line_height_pct, 125);
+  EXPECT_EQ(*rule.line_height_pct, 80);
 }
 
 TEST(CssParserTest, LineHeightPercent100) {
-  // 100% / 120% * 100 = ~83
+  // 100% / 1.5 * 100 = ~66 → clamped to 70
   auto rule = CssRule::parse("line-height: 100%");
   ASSERT_TRUE(rule.line_height_pct.has_value());
-  EXPECT_EQ(*rule.line_height_pct, 83);
+  EXPECT_EQ(*rule.line_height_pct, 70);
 }
 
-TEST(CssParserTest, LineHeightUnitless1_2IsDefault) {
-  // 1.2 is browser default, maps to our 100%
-  auto rule = CssRule::parse("line-height: 1.2");
+TEST(CssParserTest, LineHeightUnitless1_5IsDefault) {
+  // 1.5 / 1.5 * 100 = 100% — equals our natural y_advance
+  auto rule = CssRule::parse("line-height: 1.5");
   ASSERT_TRUE(rule.line_height_pct.has_value());
   EXPECT_EQ(*rule.line_height_pct, 100);
 }
 
-TEST(CssParserTest, LineHeightUnitless1_5) {
-  // 1.5 / 1.2 * 100 = 124 (float truncation)
-  auto rule = CssRule::parse("line-height: 1.5");
+TEST(CssParserTest, LineHeightUnitless1_2) {
+  // 1.2 / 1.5 * 100 = 80 — browser normal is tighter than our y_advance
+  auto rule = CssRule::parse("line-height: 1.2");
   ASSERT_TRUE(rule.line_height_pct.has_value());
-  EXPECT_EQ(*rule.line_height_pct, 124);
+  EXPECT_EQ(*rule.line_height_pct, 80);
 }
 
 TEST(CssParserTest, LineHeightEm1_5) {
-  // 1.5em / 1.2 * 100 = 124 (float truncation)
+  // 1.5em / 1.5 * 100 = 100
   auto rule = CssRule::parse("line-height: 1.5em");
   ASSERT_TRUE(rule.line_height_pct.has_value());
-  EXPECT_EQ(*rule.line_height_pct, 124);
+  EXPECT_EQ(*rule.line_height_pct, 100);
 }
 
 TEST(CssParserTest, LineHeightClampLow) {
@@ -879,8 +879,8 @@ TEST(CssParserTest, LineHeightMerge) {
   auto rhs = CssRule::parse("line-height: 1.2");
   auto merged = lhs + rhs;
   ASSERT_TRUE(merged.line_height_pct.has_value());
-  // rhs wins in merge (operator+ prefers rhs)
-  EXPECT_EQ(*merged.line_height_pct, 100);
+  // rhs wins in merge (operator+ prefers rhs); 1.2 / 1.5 * 100 = 80
+  EXPECT_EQ(*merged.line_height_pct, 80);
 }
 
 TEST(CssParserTest, LineHeightNoValue) {

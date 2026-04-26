@@ -19,9 +19,19 @@ void MainMenu::on_start() {
   HEAP_LOG("MainMenu: start enter");
   scan_directory_();
   HEAP_LOG("MainMenu: after scan");
+  // Restore previously selected book position.
+  if (!initial_selection_.empty()) {
+    for (int i = 0; i < static_cast<int>(entries_.size()); ++i) {
+      if (entries_[i].path == initial_selection_) {
+        set_selected(i);
+        break;
+      }
+    }
+  }
 }
 
 bool MainMenu::on_select(int index) {
+  last_selected_path_ = entries_[index].path;
   reader_.set_path(entries_[index].path.c_str());
   chosen_ = &reader_;
   return false;
@@ -36,6 +46,7 @@ void MainMenu::scan_directory_() {
   if (!books_dir_)
     return;
 
+  clear_items();
   entries_.clear();
 
   auto add_book = [this](std::string path, std::string label) {

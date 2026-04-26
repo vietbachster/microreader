@@ -25,6 +25,26 @@ class MainMenu final : public ListMenuScreen {
     settings_.set_data_dir(dir);
   }
 
+  // Restore the book list selection to the entry matching this path.
+  // Call before start(); applied after directory scan.
+  void set_initial_selection(const char* path) {
+    initial_selection_ = path ? path : "";
+  }
+
+  // The full path of the most recently selected (opened) book.
+  const std::string& last_selected_book_path() const {
+    return last_selected_path_;
+  }
+
+  // The full path of the currently highlighted entry (even if not yet opened).
+  const std::string& current_book_path() const {
+    int idx = selected();
+    if (idx >= 0 && idx < static_cast<int>(entries_.size()))
+      return entries_[idx].path;
+    static const std::string kEmpty;
+    return kEmpty;
+  }
+
   bool has_books_dir() const {
     return books_dir_ != nullptr;
   }
@@ -55,6 +75,8 @@ class MainMenu final : public ListMenuScreen {
 
  private:
   const char* books_dir_ = nullptr;
+  std::string initial_selection_;   // path to pre-select after scan
+  std::string last_selected_path_;  // path of the most recently opened book
 
   struct BookEntry {
     std::string path;

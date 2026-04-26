@@ -1141,8 +1141,8 @@ TEST(XhtmlBody, LineHeightPropagated) {
   ASSERT_NE(tall, nullptr);
   ASSERT_NE(normal, nullptr);
 
-  // 150% / 120% * 100 = 125
-  EXPECT_EQ(tall->text.line_height_pct, 125u);
+  // 150% / 1.5 * 100 = 100
+  EXPECT_EQ(tall->text.line_height_pct, 100u);
   EXPECT_EQ(normal->text.line_height_pct, 100u);
 }
 

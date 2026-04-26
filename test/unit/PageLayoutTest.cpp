@@ -55,9 +55,9 @@ TEST(PageLayout, SpreadLinesToBottomPadding) {
 
   EXPECT_EQ(page.text_items().size(), 4);
 
-  uint16_t standard_descent = font8.y_advance(FontSize::Normal) - font8.baseline(FontSize::Normal);
-  uint16_t expected_baseline = opts.height - opts.padding_bottom - standard_descent;
-  uint16_t actual_baseline = page.text_items().back().y_offset + font8.baseline(FontSize::Normal);
+  // padding_bottom defines baseline-to-screen-bottom distance.
+  uint16_t expected_baseline = opts.height - opts.padding_bottom;
+  uint16_t actual_baseline = page.text_items().back().y_offset + page.text_items().back().baseline;
   EXPECT_EQ(actual_baseline, expected_baseline);
 }
 
@@ -79,8 +79,9 @@ TEST(PageLayout, SpreadLinesAlignsBottomWithMixedLineHeights) {
   auto page = TextLayout(font8, opts, src, PagePosition(0, 0)).layout();
 
   ASSERT_EQ(page.text_items().size(), 5);
-  uint16_t last_bottom = page.text_items().back().y_offset + page.text_items().back().height;
-  EXPECT_EQ(last_bottom, opts.height - opts.padding_bottom);
+  // padding_bottom defines baseline-to-screen-bottom distance.
+  uint16_t last_baseline = page.text_items().back().y_offset + page.text_items().back().baseline;
+  EXPECT_EQ(last_baseline, opts.height - opts.padding_bottom);
 }
 
 // Spreading: page with a block image followed by two text lines.
@@ -125,13 +126,15 @@ TEST(PageLayout, SpreadWithImagePrefersImageTextGap) {
   // The image should be at y=0.
   EXPECT_EQ(page.image_items()[0].y_offset, 0u);
 
-  // After spreading: image→text1 gap gets 8px, text1→text2 gap gets 1px.
-  // text_item[0].y_offset = 50 + 8 = 58
-  // text_item[1].y_offset = 58 + 16 + 1 = 75
-  // Then fine-tune baseline: last text baseline = 75 + font8.baseline() = 75+12=87.
-  // target_baseline = padded_height(91) - standard_descent(16-12=4) = 87. delta=0.
-  EXPECT_EQ(page.text_items()[0].y_offset, 59u) << "Image->text gap should be 9px (all slack, intra-para weight=0)";
-  EXPECT_EQ(page.text_items()[1].y_offset, 75u) << "Text→text gap should be 1px";
+  // Slack is measured from last text baseline to ph.
+  // last_baseline_pre_spread = 66 + 12 = 78. slack = 91 - 78 = 13.
+  // total_weight=9 (image→text: 8, same-para text→text: 1).
+  // base=1, leftover=4, total_weight-leftover=5.
+  // gap[0]: 8 units → 0..4 get 1, 5..7 get 2 → 11.
+  // gap[1]: 1 unit  → unit 8 gets 2 → 2. Total: 11+2=13. ✓
+  // text[0].y = 50+11=61, text[1].y = 61+16+2=79. Last baseline = 79+12=91=ph. ✓
+  EXPECT_EQ(page.text_items()[0].y_offset, 61u) << "Image->text gap should be 11px";
+  EXPECT_EQ(page.text_items()[1].y_offset, 79u) << "Text→text gap should be 2px";
 }
 
 TEST(PageLayout, SpreadWithHrPrefersHrTextGap) {
@@ -154,7 +157,13 @@ TEST(PageLayout, SpreadWithHrPrefersHrTextGap) {
   tp2.runs.push_back(microreader::Run("Second text", FontStyle::Regular, false));
   ch.paragraphs.push_back(Paragraph::make_text(std::move(tp2)));
 
-  // HR slot = 16px, text1 = 16px, text2 = 16px. Total = 48. page_height = 57. slack = 9.
+  // HR slot = 16px, text1 = 16px, text2 = 16px. Total = 48. page_height = 57.
+  // Slack measured from last text baseline to ph: last_baseline = 32+12=44. slack=57-44=13.
+  // total_weight=12 (hr→text: 8, inter-para text→text: 4).
+  // base=1, leftover=1, total_weight-leftover=11.
+  // gap[0]: 8 units → 0..7 all < 11 → 1 each → 8.
+  // gap[1]: 4 units → units 8..10 get 1, unit 11 gets 2 → 5. Total: 8+5=13. ✓
+  // text[0].y = 16+8=24, text[1].y = 24+16+5=45. Last baseline = 45+12=57=ph. ✓
   TestChapterSource src(ch);
   PageOptions opts(200, 57, 0, 0);
   opts.center_text = true;
@@ -165,11 +174,11 @@ TEST(PageLayout, SpreadWithHrPrefersHrTextGap) {
   // hr_item[0].y_offset = slot top = 0.
   EXPECT_EQ(page.hr_items()[0].y_offset, 0u) << "HR slot top should be at y=0";
 
-  // text[0].y_offset = 16 + 5 = 21 (HR slot 16 + gap 5).
-  EXPECT_EQ(page.text_items()[0].y_offset, 21u) << "First text should be at y=21";
+  // text[0].y_offset = 16 + 8 = 24 (HR slot 16 + gap 8).
+  EXPECT_EQ(page.text_items()[0].y_offset, 24u) << "First text should be at y=24";
 
-  // text[1].y_offset = 21 + 16 + 4 = 41.
-  EXPECT_EQ(page.text_items()[1].y_offset, 41u) << "Second text should be at y=41";
+  // text[1].y_offset = 24 + 16 + 5 = 45.
+  EXPECT_EQ(page.text_items()[1].y_offset, 45u) << "Second text should be at y=45";
 }
 
 TEST(PageLayout, SpreadNoOpWhenTooMuchSlack) {
@@ -1709,17 +1718,26 @@ TEST(PageLayout, PromotedInlineImageSlicedWhenNoSpace) {
 // Bounds checks � items must stay within the padded area
 // ---------------------------------------------------------------------------
 
-// Verify that every item on `page` has y_offset + height <= opts.height - opts.padding_bottom.
+// Verify that every item on `page` stays within the padded area.
+// For text items: the baseline must be <= opts.height - opts.padding_bottom
+//   (padding_bottom is defined as the distance from screen bottom to the last baseline).
+// For image/hr items: the slot bottom must be <= opts.height - opts.padding_bottom.
 static void assert_items_in_bounds(const PageContent& page, const PageOptions& opts, const std::string& context = "") {
   const uint16_t bottom_bound = opts.height - opts.padding_bottom;
   for (const auto& ci : page.items) {
-    std::visit(
-        [&](const auto& it) {
-          uint16_t item_bottom = it.y_offset + it.height;
-          EXPECT_LE(item_bottom, bottom_bound)
-              << context << " item bottom=" << item_bottom << " exceeds bound=" << bottom_bound;
-        },
-        ci);
+    if (const PageTextItem* ti = std::get_if<PageTextItem>(&ci)) {
+      uint16_t item_baseline = ti->y_offset + ti->baseline;
+      EXPECT_LE(item_baseline, bottom_bound)
+          << context << " text baseline=" << item_baseline << " exceeds bound=" << bottom_bound;
+    } else if (const PageImageItem* img = std::get_if<PageImageItem>(&ci)) {
+      uint16_t item_bottom = img->y_offset + img->height;
+      EXPECT_LE(item_bottom, bottom_bound)
+          << context << " image bottom=" << item_bottom << " exceeds bound=" << bottom_bound;
+    } else if (const PageHrItem* hr = std::get_if<PageHrItem>(&ci)) {
+      uint16_t item_bottom = hr->y_offset + hr->height;
+      EXPECT_LE(item_bottom, bottom_bound)
+          << context << " hr bottom=" << item_bottom << " exceeds bound=" << bottom_bound;
+    }
   }
 }
 

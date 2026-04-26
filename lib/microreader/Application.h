@@ -25,12 +25,14 @@ class Application {
   }
   // Path to data directory for settings/state persistence
   const char* data_dir_ = nullptr;
-  // Path to the settings file (cached after set_data_dir)
+  // Path to the single unified settings file (cached after set_data_dir)
   std::string settings_path_;
-  // Save last screen and book info to settings file
+  // Book path to auto-open on next start() (set by load_settings_)
+  std::string pending_book_path_;
+  // Save all persistent state to the settings file
   void save_settings_();
-  // Load last screen and book info from settings file
-  bool load_settings_(std::string& last_screen, std::string& last_book_path);
+  // Load all persistent state from the settings file
+  void load_settings_();
 
   // Set the proportional font set for the reader screen. Must outlive the app.
   void set_reader_font(const BitmapFontSet* fonts) {

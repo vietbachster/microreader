@@ -33,20 +33,19 @@ void Application::start(DrawBuffer& buf) {
     menu_.set_reader_font(reader_font_);
 
   // Set up settings file path if data_dir_ is set
-  if (data_dir_) {
+  if (data_dir_)
     settings_path_ = std::string(data_dir_) + "/settings";
-  }
+
+  // Load settings first so initial_selection_ and reader settings are ready
+  // before the menu's on_start() (directory scan + selection restore) runs.
+  load_settings_();
 
   screen_mgr_.push(&menu_, buf);
 
-  // Try to restore last screen/book from settings
-  std::string last_screen, last_book_path;
-  bool restored = false;
-  if (!settings_path_.empty() && load_settings_(last_screen, last_book_path)) {
-    if (last_screen == "reader" && !last_book_path.empty()) {
-      auto_open_book(last_book_path.c_str(), buf);
-      restored = true;
-    }
+  // Auto-open last book if one was active at shutdown.
+  if (!pending_book_path_.empty()) {
+    auto_open_book(pending_book_path_.c_str(), buf);
+    pending_book_path_.clear();
   }
 
   buf.full_refresh();
@@ -77,7 +76,7 @@ void Application::update(const ButtonState& buttons, uint32_t dt_ms, DrawBuffer&
     if (IScreen* top = screen_mgr_.top())
       top->stop();
 
-    // Save last screen and book info
+    // Save all persistent settings
     save_settings_();
 
     // draw sleeping screen before powering down
@@ -120,6 +119,9 @@ void Application::update(const ButtonState& buttons, uint32_t dt_ms, DrawBuffer&
         } else {
           // Pop back to the previous screen.
           screen_mgr_.pop(buf);
+          // If the reader just exited, persist all settings.
+          if (top == menu_.reader())
+            save_settings_();
           buf.refresh();
         }
       }
@@ -135,49 +137,80 @@ void microreader::Application::save_settings_() {
   FILE* f = std::fopen(settings_path_.c_str(), "w");
   if (!f)
     return;
-  // Only two screens are relevant for persistence: menu and reader
-  IScreen* top = screen_mgr_.top();
-  std::string screen_type = "menu";
-  std::string book_path;
 
+  // Version tag
+  std::fprintf(f, "v=1\n");
+
+  // Last screen / book — treat reader-is-anywhere-in-stack as "reader" so
+  // shutting down from ReaderOptionsScreen still boots back into the reader.
   ReaderScreen* reader = menu_.reader();
-  if (top == reader) {
-    screen_type = "reader";
-    // Save the current book path if possible
-    if (reader && reader->has_path()) {
-      book_path = reader->get_path();
-    }
-  }
-  std::fprintf(f, "%s\n%s\n", screen_type.c_str(), book_path.c_str());
-  std::fflush(f);
+  const bool reader_active = screen_mgr_.contains(reader);
+  std::fprintf(f, "screen=%s\n", reader_active ? "reader" : "menu");
+  if (reader_active && reader->has_path())
+    std::fprintf(f, "book_path=%s\n", reader->get_path().c_str());
+
+  // Last book-list selection: prefer the currently highlighted entry so
+  // power-off while browsing still saves position; fall back to last opened.
+  const std::string& sel =
+      !menu_.current_book_path().empty() ? menu_.current_book_path() : menu_.last_selected_book_path();
+  if (!sel.empty())
+    std::fprintf(f, "book_sel=%s\n", sel.c_str());
+
+  // Reader display settings
+  const ReaderSettings& rs = reader->reader_settings();
+  std::fprintf(f, "justify=%d\n", rs.justify ? 1 : 0);
+  std::fprintf(f, "padding_h=%u\n", static_cast<unsigned>(rs.padding_h_idx));
+  std::fprintf(f, "padding_v=%u\n", static_cast<unsigned>(rs.padding_v_idx));
+  std::fprintf(f, "line_spacing=%u\n", static_cast<unsigned>(rs.line_spacing_idx));
+
   std::fclose(f);
 }
 
-bool microreader::Application::load_settings_(std::string& last_screen, std::string& last_book_path) {
+void microreader::Application::load_settings_() {
   if (settings_path_.empty())
-    return false;
+    return;
   FILE* f = std::fopen(settings_path_.c_str(), "r");
   if (!f)
-    return false;
-  char screen_buf[32] = {0};
-  char book_buf[512] = {0};
-  bool ok = false;
-  if (std::fgets(screen_buf, sizeof(screen_buf), f)) {
-    // Remove trailing newline
-    char* nl = std::strchr(screen_buf, '\n');
+    return;
+
+  char line[512];
+  std::string last_screen, last_book_path, book_sel;
+  ReaderSettings& rs = menu_.reader()->reader_settings();
+
+  while (std::fgets(line, sizeof(line), f)) {
+    // Strip trailing newline
+    char* nl = std::strchr(line, '\n');
     if (nl)
       *nl = 0;
-    last_screen = screen_buf;
-    if (std::fgets(book_buf, sizeof(book_buf), f)) {
-      nl = std::strchr(book_buf, '\n');
-      if (nl)
-        *nl = 0;
-      last_book_path = book_buf;
-    }
-    ok = true;
+
+    char sval[512];
+    unsigned uval = 0;
+    if (std::sscanf(line, "screen=%511s", sval) == 1)
+      last_screen = sval;
+    else if (std::sscanf(line, "book_path=%511[^\n]", sval) == 1)
+      last_book_path = sval;
+    else if (std::sscanf(line, "book_sel=%511[^\n]", sval) == 1)
+      book_sel = sval;
+    else if (std::sscanf(line, "justify=%u", &uval) == 1)
+      rs.justify = (uval != 0);
+    else if (std::sscanf(line, "padding_h=%u", &uval) == 1)
+      rs.padding_h_idx = uval < ReaderSettings::kNumPresets ? static_cast<uint8_t>(uval) : 1;
+    else if (std::sscanf(line, "padding_v=%u", &uval) == 1)
+      rs.padding_v_idx = uval < ReaderSettings::kNumPresets ? static_cast<uint8_t>(uval) : 1;
+    else if (std::sscanf(line, "line_spacing=%u", &uval) == 1)
+      rs.line_spacing_idx = uval < ReaderSettings::kNumSpacingPresets ? static_cast<uint8_t>(uval) : 2;
   }
   std::fclose(f);
-  return ok;
+  MR_LOGI("app", "Loaded settings: justify=%d ph=%u pv=%u ls=%u sel=%s", rs.justify, rs.padding_h_idx, rs.padding_v_idx,
+          rs.line_spacing_idx, book_sel.c_str());
+
+  // Restore book list selection highlight
+  if (!book_sel.empty())
+    menu_.set_initial_selection(book_sel.c_str());
+
+  // Store the book to auto-open; actual push happens in start() after buf is ready.
+  if (last_screen == "reader" && !last_book_path.empty())
+    pending_book_path_ = last_book_path;
 }
 
 bool Application::running() const {

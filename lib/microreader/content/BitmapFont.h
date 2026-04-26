@@ -80,7 +80,7 @@ class BitmapFont : public IFont {
     styles_[0].glyphs = reinterpret_cast<const MbfGlyph*>(data + ranges_end);
     styles_[0].num_ranges = hdr->num_ranges;
     styles_[0].num_glyphs = hdr->num_glyphs;
-    styles_[0].fallback_glyph_idx = find_glyph_index_in(styles_[0], '?');
+    styles_[0].fallback_glyph_idx = find_glyph_index_in(styles_[0], 0xFFFD);
 
     // Load additional styles if present
     load_style_(data, size, hdr->bold_offset, styles_[1]);
@@ -202,7 +202,7 @@ class BitmapFont : public IFont {
     out.glyphs = reinterpret_cast<const MbfGlyph*>(data + ranges_end);
     out.num_ranges = sec->num_ranges;
     out.num_glyphs = sec->num_glyphs;
-    out.fallback_glyph_idx = find_glyph_index_in(out, '?');
+    out.fallback_glyph_idx = find_glyph_index_in(out, 0xFFFD);
   }
 
   // Find glyph table index for a codepoint within a style. Returns -1 if not found.

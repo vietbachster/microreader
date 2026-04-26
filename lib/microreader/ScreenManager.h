@@ -48,6 +48,12 @@ class ScreenManager {
   IScreen* top() const {
     return depth_ > 0 ? stack_[depth_ - 1] : nullptr;
   }
+  bool contains(const IScreen* screen) const {
+    for (int i = 0; i < depth_; ++i)
+      if (stack_[i] == screen)
+        return true;
+    return false;
+  }
   int depth() const {
     return depth_;
   }

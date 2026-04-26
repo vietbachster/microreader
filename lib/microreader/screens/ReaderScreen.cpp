@@ -332,7 +332,7 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
   opts.padding_right = reader_settings_.h_padding();
   opts.padding_bottom = static_cast<uint16_t>(kPaddingBottom + reader_settings_.v_padding());
   opts.padding_left = reader_settings_.h_padding();
-  opts.padding_top = reader_settings_.v_padding();
+  opts.padding_top = static_cast<uint16_t>(kPaddingTop + reader_settings_.v_padding());
   opts.extra_line_spacing = reader_settings_.extra_line_spacing();
   opts.center_text = true;
   layout_engine_.set_font(font);

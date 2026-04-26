@@ -19,10 +19,10 @@ struct ReaderSettings {
   uint8_t line_spacing_idx = 2;  // paragraph spacing preset index (2 = Normal)
 
   static constexpr uint16_t kHPaddingPresets[] = {4, 12, 24, 40};
-  static constexpr uint16_t kVPaddingPresets[] = {2, 6, 14, 24};
+  static constexpr uint16_t kVPaddingPresets[] = {0, 4, 8, 12};
   // Extra pixels added to every line's height. 0 = Normal (font default).
   // Negative values tighten lines; positive values open them up.
-  static constexpr int16_t kSpacingPresets[] = {-4, -2, 0, 3, 6};
+  static constexpr int16_t kSpacingPresets[] = {-8, -4, 0, 4, 8};
   static constexpr const char* kHPaddingNames[] = {"Narrow", "Normal", "Wide", "Wider"};
   static constexpr const char* kVPaddingNames[] = {"Tight", "Normal", "Loose", "Looser"};
   static constexpr const char* kSpacingNames[] = {"Tighter", "Tight", "Normal", "Loose", "Looser"};
