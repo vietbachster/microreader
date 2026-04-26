@@ -947,9 +947,9 @@ class BodyParser {
       if (pending_margin_top_.has_value() || pending_margin_bottom_.has_value()) {
         uint16_t top = pending_margin_top_.value_or(0);
         uint16_t bot = pending_margin_bottom_.value_or(0);
-        // Cap spacing to ~1.5 line heights to avoid huge CSS margins (e.g. 5em) creating
-        // excessive whitespace on a small e-reader screen.
-        static constexpr uint16_t kMaxSpacing = 20;  // ~1 × 22px line height
+        // Cap spacing to avoid huge CSS margins (e.g. 5em) creating excessive whitespace
+        // on a small e-reader screen.
+        static constexpr uint16_t kMaxSpacing = 60;  // ~2.7 × 22px line height
         para.spacing_before = std::min(std::max(top, bot), kMaxSpacing);
         pending_margin_top_.reset();
         pending_margin_bottom_.reset();

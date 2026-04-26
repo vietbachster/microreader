@@ -235,12 +235,6 @@ CssRule CssRule::parse(const char* decl, size_t length, const CssConfig& config)
         else if (value.find("solid") != std::string::npos || value.find("dashed") != std::string::npos ||
                  value.find("dotted") != std::string::npos || value.find("double") != std::string::npos)
           rule.border_top = true;
-      } else if (key == "border") {
-        if (value == "none" || value == "0")
-          rule.border_top = false;
-        else if (value.find("solid") != std::string::npos || value.find("dashed") != std::string::npos ||
-                 value.find("dotted") != std::string::npos || value.find("double") != std::string::npos)
-          rule.border_top = true;
       } else if (key == "page-break-before") {
         if (value == "always" || value == "left" || value == "right")
           rule.page_break_before = true;

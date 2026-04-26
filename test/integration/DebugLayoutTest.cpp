@@ -262,3 +262,119 @@ TEST(DebugLayoutTest, PositionRestoreAtCroppedImage) {
   EXPECT_GT(checked, 0) << "No cropped images found — alice-illustrated should have split images";
   std::cout << "Checked " << checked << " cropped-image position restores.\n";
 }
+
+// ---------------------------------------------------------------------------
+// BorderHrSanityCheck — verifies that:
+//   - animal.epub  (chapter-header border-top rules) → has ≥1 HR item
+//   - alice-illustrated.epub (border on box containers) → has 0 HR items
+//
+// For each book, dumps a human-readable text file to test/output/ listing
+// every page that contains HR items, so failures are easy to diagnose.
+// ---------------------------------------------------------------------------
+static int count_hr_items_in_book(const fs::path& epub_path, const fs::path& out_path) {
+  Book book;
+  if (book.open(epub_path.string().c_str()) != EpubError::Ok)
+    return -1;
+
+  auto mrb_path = (fs::temp_directory_path() / (epub_path.stem().string() + "_hr_check.mrb")).string();
+  if (!convert_epub_to_mrb_streaming(book, mrb_path.c_str())) {
+    book.close();
+    return -1;
+  }
+  book.close();
+
+  MrbReader mrb;
+  if (!mrb.open(mrb_path.c_str())) {
+    std::remove(mrb_path.c_str());
+    return -1;
+  }
+
+  auto font = ReaderScreen::make_fixed_font();
+  auto opts = ReaderScreen::make_page_opts();
+  auto size_fn = make_image_size_query(mrb, epub_path.string(), opts.width);
+
+  fs::create_directories(out_path.parent_path());
+  std::ofstream out(out_path);
+
+  out << "Book: " << epub_path.filename().string() << "\n";
+  out << "Checking for HR (horizontal rule) items from CSS border-top\n";
+  out << std::string(80, '=') << "\n";
+
+  int total_hrs = 0;
+  int global_page = 0;
+
+  for (uint16_t ci = 0; ci < mrb.chapter_count(); ++ci) {
+    MrbChapterSource src(mrb, ci);
+    TextLayout tl(font, opts, src, size_fn);
+
+    while (true) {
+      auto pc = tl.layout();
+      ++global_page;
+
+      auto hrs = pc.hr_items();
+      if (!hrs.empty()) {
+        out << "  Page " << global_page << " (ch=" << ci << ")  " << hrs.size() << " HR(s):\n";
+        for (const auto& hr : hrs) {
+          // Find the first text item after the HR to give context
+          std::string next_text;
+          for (const auto& ti : pc.text_items()) {
+            if (ti.y_offset > hr.y_offset) {
+              for (const auto& w : ti.line.words) {
+                if (!next_text.empty())
+                  next_text += ' ';
+                next_text.append(w.text, w.len);
+                if (next_text.size() > 60)
+                  break;
+              }
+              break;
+            }
+          }
+          char buf[256];
+          std::snprintf(buf, sizeof(buf), "    HR  y=%4d  x=%u  w=%u  next_text: \"%s\"\n", hr.y_offset, hr.x_offset,
+                        hr.width, next_text.c_str());
+          out << buf;
+        }
+        total_hrs += static_cast<int>(hrs.size());
+      }
+
+      if (pc.at_chapter_end)
+        break;
+      if (global_page > 50000)
+        break;
+      tl.set_position(pc.end);
+    }
+  }
+
+  out << std::string(80, '=') << "\n";
+  out << "Total HR items: " << total_hrs << "\n";
+  out.close();
+
+  mrb.close();
+  std::remove(mrb_path.c_str());
+  return total_hrs;
+}
+
+TEST(DebugLayoutTest, BorderHrSanityCheck) {
+  fs::path out_dir = fs::path(repo_root()) / "test" / "output";
+
+  // animal.epub: chapter headers have border-top-style:solid → should produce HRs
+  fs::path animal_path = fs::path(small_books_dir()) / "animal.epub";
+  ASSERT_TRUE(fs::exists(animal_path)) << "animal.epub not found";
+  int animal_hrs = count_hr_items_in_book(animal_path, out_dir / "border_hr_animal.txt");
+  ASSERT_GE(animal_hrs, 0) << "animal.epub failed to open/convert";
+  std::cout << "animal.epub HR items: " << animal_hrs << "  -> " << (out_dir / "border_hr_animal.txt") << "\n";
+  EXPECT_GT(animal_hrs, 0) << "animal.epub should have HR items from chapter-header border-top rules";
+
+  // alice-illustrated.epub: border is only on box containers, NOT border-top-style → should be 0
+  fs::path alice_path = fs::path(small_books_dir()) / "alice-illustrated.epub";
+  ASSERT_TRUE(fs::exists(alice_path)) << "alice-illustrated.epub not found";
+  int alice_hrs = count_hr_items_in_book(alice_path, out_dir / "border_hr_alice.txt");
+  ASSERT_GE(alice_hrs, 0) << "alice-illustrated.epub failed to open/convert";
+  std::cout << "alice-illustrated.epub HR items: " << alice_hrs << "  -> " << (out_dir / "border_hr_alice.txt") << "\n";
+  // alice-illustrated has 20 real <hr> elements in its XHTML (verified by inspection).
+  // Before the border-shorthand fix, CSS border on .sidenote/.bbox etc also produced HRs,
+  // inflating this number.  We assert it equals exactly 20 to catch any regression in
+  // either direction (spurious CSS-border HRs would push it above 20).
+  EXPECT_EQ(alice_hrs, 20) << "alice-illustrated.epub should have exactly 20 HR items "
+                              "(all from real <hr> elements; CSS border shorthand must NOT produce HRs)";
+}
