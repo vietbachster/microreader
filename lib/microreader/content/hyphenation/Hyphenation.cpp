@@ -133,8 +133,22 @@ size_t find_hyphen_break(const IFont& font, const char* word_ptr, size_t len, Fo
   size_t copy_len = len < 128 ? len : 128;
   memcpy(buf, word_ptr, copy_len);
   buf[copy_len] = '\0';
+
+  // Strip trailing punctuation before hyphenating so Liang doesn't produce
+  // ugly splits like "befördert-|." where the suffix is just punctuation.
+  size_t hyph_len = copy_len;
+  while (hyph_len > 0) {
+    unsigned char c = (unsigned char)buf[hyph_len - 1];
+    if (c < 0x80 && (c == '.' || c == ',' || c == '!' || c == '?' || c == ':' || c == ';' || c == ')' || c == ']' ||
+                     c == '"' || c == '\'' || c == '\xbb' /* » */))
+      --hyph_len;
+    else
+      break;
+  }
+  buf[hyph_len] = '\0';
+
   size_t positions[32];
-  int n = hyphenate_word(buf, copy_len, lang, positions, 32);
+  int n = hyphenate_word(buf, hyph_len, lang, positions, 32);
   if (n <= 0)
     return 0;
   const uint16_t hyphen_w = font.char_width('-', style, size);

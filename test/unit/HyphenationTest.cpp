@@ -185,3 +185,31 @@ TEST(FindHyphenBreak, CompoundWordNeverDoubleHyphen) {
     }
   }
 }
+
+// Trailing punctuation must not produce a split where the suffix is only
+// punctuation characters. E.g. "befördert." must not split as "befördert-|."
+TEST(FindHyphenBreak, TrailingPunctuationNotSuffix) {
+  // "befördert." in UTF-8: 'ö' = 2 bytes, total 11 bytes
+  const char* word = "bef\xc3\xb6rdert.";
+  size_t len = std::strlen(word);  // 11
+  // avail just too small for the whole word, forcing a split candidate search
+  // glyph_width=8, hyphen=8: "befördert-" = 10 codepoints + '-' = 11 * 8 = 88px
+  // avail=80 means the whole word doesn't fit but most of it does
+  bool has_hyphen = false;
+  size_t r = find_hyphen_break(font8, word, len, FontStyle::Regular, FontSize::Normal, HyphenationLang::German, 80,
+                               has_hyphen);
+  // Whatever split point is chosen, the suffix (word+r) must NOT be purely punctuation
+  if (r > 0 && r < len) {
+    const char* suffix = word + r;
+    bool suffix_is_only_punct = true;
+    for (size_t i = 0; i < len - r; ++i) {
+      unsigned char c = (unsigned char)suffix[i];
+      if (c >= 0x80 || std::isalpha(c)) {
+        suffix_is_only_punct = false;
+        break;
+      }
+    }
+    EXPECT_FALSE(suffix_is_only_punct) << "Split at pos=" << r << " leaves suffix=\"" << suffix
+                                       << "\" which is only punctuation";
+  }
+}
