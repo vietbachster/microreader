@@ -11,6 +11,7 @@
 #include "ContentModel.h"
 #include "Font.h"
 #include "IParagraphSource.h"
+#include "hyphenation/Hyphenation.h"
 
 namespace microreader {
 
@@ -41,6 +42,7 @@ struct LayoutOptions {
   uint16_t width = 300;  // available line width in pixels
   Alignment alignment = Alignment::Justify;
   uint16_t first_line_extra_indent = 0;  // extra left indent for inline images on first line
+  HyphenationLang hyphenation_lang = HyphenationLang::None;
 
   LayoutOptions() = default;
   LayoutOptions(uint16_t w, Alignment a = Alignment::Justify) : width(w), alignment(a) {}
@@ -194,6 +196,14 @@ class TextLayout {
     cache_valid_ = false;
   }
 
+  // Set the hyphenation language (detected from EPUB metadata).
+  void set_hyphenation_lang(HyphenationLang lang) {
+    if (hyphenation_lang_ == lang)
+      return;
+    hyphenation_lang_ = lang;
+    cache_valid_ = false;
+  }
+
   // Break a single paragraph into lines using the stored font.
   std::vector<LayoutLine> layout_paragraph(const LayoutOptions& opts, const TextParagraph& para) const;
 
@@ -291,6 +301,7 @@ class TextLayout {
   IParagraphSource* source_ = nullptr;
   ImageSizeQuery size_fn_;
   PagePosition position_;
+  HyphenationLang hyphenation_lang_ = HyphenationLang::None;
 
   static constexpr size_t kCacheCapacity = 8;
   mutable std::array<LaidOutParagraph, kCacheCapacity> para_cache_{};

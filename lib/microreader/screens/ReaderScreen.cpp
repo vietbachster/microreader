@@ -228,6 +228,7 @@ void ReaderScreen::start(DrawBuffer& buf) {
   layout_engine_ = TextLayout{};
   layout_engine_.set_source(*chapter_src_);
   layout_engine_.set_image_size_fn(image_size_fn_);
+  layout_engine_.set_hyphenation_lang(detect_language(mrb_.metadata().language));
   render_page_(buf);
 #ifdef ESP_PLATFORM
   ESP_LOGI("reader", "BOOK_OK: %s", path_);

@@ -64,6 +64,7 @@ add_library(microreader_content STATIC
     ${LIB_DIR}/content/PngDecoder.cpp
     ${LIB_DIR}/content/Book.cpp
     ${LIB_DIR}/content/TextLayout.cpp
+    ${LIB_DIR}/content/hyphenation/Hyphenation.cpp
     ${LIB_DIR}/content/mrb/MrbWriter.cpp
     ${LIB_DIR}/content/mrb/MrbReader.cpp
     ${LIB_DIR}/content/mrb/MrbConverter.cpp

@@ -19,6 +19,7 @@ set(lib_sources
     ${LIB}/content/CssParser.cpp
     ${LIB}/content/EpubParser.cpp
     ${LIB}/content/TextLayout.cpp
+    ${LIB}/content/hyphenation/Hyphenation.cpp
     ${LIB}/content/Book.cpp
     ${LIB}/content/mrb/MrbWriter.cpp
     ${LIB}/content/mrb/MrbReader.cpp
