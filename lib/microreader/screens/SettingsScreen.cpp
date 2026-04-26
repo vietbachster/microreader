@@ -64,7 +64,7 @@ void SettingsScreen::clear_converted_() {
   if (!data_dir_)
     return;
 #ifdef ESP_PLATFORM
-  char cache_dir[300];
+  char cache_dir[768];
   std::snprintf(cache_dir, sizeof(cache_dir), "%s/cache", data_dir_);
   DIR* d = opendir(cache_dir);
   if (!d) {
@@ -72,7 +72,7 @@ void SettingsScreen::clear_converted_() {
     return;
   }
   struct dirent* ent;
-  char subdir_path[300];
+  char subdir_path[768];
   while ((ent = readdir(d)) != nullptr) {
     if (ent->d_name[0] == '.')
       continue;
@@ -81,7 +81,7 @@ void SettingsScreen::clear_converted_() {
     DIR* sd = opendir(subdir_path);
     if (sd) {
       struct dirent* sf;
-      char file_path[300];
+      char file_path[768];
       while ((sf = readdir(sd)) != nullptr) {
         if (sf->d_name[0] == '.')
           continue;

@@ -1,7 +1,11 @@
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <string>
+
+#include "microreader/content/Font.h"
 
 namespace microreader {
 
@@ -16,5 +20,14 @@ int hyphenate_word(const char* word, size_t len, HyphenationLang lang, size_t* o
 // Detect hyphenation language from an IETF language tag (e.g. "de", "de-DE",
 // "en", "en-US"). Case-insensitive prefix match. Returns None if unrecognised.
 HyphenationLang detect_language(const std::optional<std::string>& lang_tag);
+
+// Find the best byte offset at which to break word_ptr[0..len) so that the
+// prefix (plus a synthetic '-' if needed) fits within avail pixels.
+// Prefers breaking after an existing '-' in the token; falls back to Liang.
+// Returns 0 if no split fits. avail must already exclude any inter-word space.
+// out_prefix_has_hyphen is set to true when the prefix already ends with '-'
+// (i.e. no synthetic hyphen should be drawn).
+size_t find_hyphen_break(const IFont& font, const char* word_ptr, size_t len, FontStyle style, FontSize size,
+                         HyphenationLang lang, uint16_t avail, bool& out_prefix_has_hyphen);
 
 }  // namespace microreader

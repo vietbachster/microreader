@@ -39,7 +39,7 @@
 #include "driver/uart_vfs.h"
 #else
 #include "driver/usb_serial_jtag.h"
-#include "esp_vfs_usb_serial_jtag.h"
+#include "driver/usb_serial_jtag_vfs.h"
 #endif
 #include "esp_log.h"
 #include "esp_rom_crc.h"
@@ -488,7 +488,7 @@ static void handle_serial_cmd() {
         DIR* sd = opendir(subdir);
         if (sd) {
           struct dirent* sf;
-          char fpath[300];
+          char fpath[768];
           while ((sf = readdir(sd)) != nullptr) {
             if (sf->d_name[0] == '.')
               continue;
@@ -631,7 +631,7 @@ inline void serial_start() {
       .rx_buffer_size = 4096,
   };
   usb_serial_jtag_driver_install(&cfg);
-  esp_vfs_dev_usb_serial_jtag_register();
+  usb_serial_jtag_vfs_register();
 #endif
   xTaskCreate(serial_receiver_task, "serial_rx", 8192, nullptr, 3, nullptr);
 }

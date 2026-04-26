@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cstdio>
-#include <cstring>
 #include <optional>
 
 #include "hyphenation/Hyphenation.h"
@@ -132,33 +131,6 @@ static void align_line(Alignment alignment, uint16_t room, std::vector<LayoutWor
 // layout_paragraph() — greedy line-breaking with styled runs
 // ---------------------------------------------------------------------------
 
-// Returns the best hyphenation split byte-offset within [word_ptr, word_ptr+len),
-// or 0 if no split fits within avail pixels. avail must already exclude any
-// inter-word space (i.e. pass line_width - x - space_width when needs_space).
-static size_t find_hyphen_split(const IFont& font, const char* word_ptr, size_t len, FontStyle style, FontSize size,
-                                HyphenationLang lang, uint16_t avail) {
-  if (lang == HyphenationLang::None || len < 6 || avail == 0)
-    return 0;
-  char buf[129];
-  size_t copy_len = len < 128 ? len : 128;
-  memcpy(buf, word_ptr, copy_len);
-  buf[copy_len] = '\0';
-  size_t positions[32];
-  int n = hyphenate_word(buf, copy_len, lang, positions, 32);
-  if (n <= 0)
-    return 0;
-  const uint16_t hyphen_w = font.char_width('-', style, size);
-  for (int i = n - 1; i >= 0; --i) {
-    size_t pos = positions[i];
-    if (pos == 0 || pos >= len)
-      continue;
-    uint16_t prefix_w = font.word_width(word_ptr, static_cast<uint16_t>(pos), style, size);
-    if (prefix_w + hyphen_w <= avail)
-      return pos;
-  }
-  return 0;
-}
-
 static std::vector<LayoutLine> layout_para_lines(const IFont& font, const LayoutOptions& opts,
                                                  const TextParagraph& para,
                                                  HyphenationLang hyph_lang = HyphenationLang::None) {
@@ -217,41 +189,64 @@ static std::vector<LayoutLine> layout_para_lines(const IFont& font, const Layout
     bool first_word_of_run = true;
     for (const auto& span : spans) {
       const char* word_ptr = text + span.start;
-      uint16_t word_w = font.word_width(word_ptr, span.len, run.style, run.size);
+      uint16_t word_len = span.len;
       bool needs_space = !current.words.empty();
       if (first_word_of_run && !prev_run_ended_space && text_len > 0 && ws_len(text, text_len, 0) == 0)
         needs_space = false;
       first_word_of_run = false;
 
-      uint16_t needed = word_w + (needs_space ? space_width : 0);
-      if (x + needed > line_width && !current.words.empty()) {
-        uint16_t avail =
-            line_width > x + (needs_space ? space_width : 0) ? line_width - x - (needs_space ? space_width : 0) : 0;
-        size_t split = find_hyphen_split(font, word_ptr, span.len, run.style, run.size, hyph_lang, avail);
-        if (split > 0) {
-          const uint16_t prefix_w = font.word_width(word_ptr, static_cast<uint16_t>(split), run.style, run.size);
-          const uint16_t hyphen_w = font.char_width('-', run.style, run.size);
+      // Loop handles multi-line hyphenation: each iteration places a chunk or
+      // emits a hyphenated prefix and continues with the remaining suffix.
+      while (true) {
+        uint16_t word_w = font.word_width(word_ptr, word_len, run.style, run.size);
+        uint16_t needed = word_w + (needs_space ? space_width : 0);
+        if (x + needed <= line_width) {
+          // Fits normally.
           if (needs_space)
             x += space_width;
-          current.words.push_back(LayoutWord{word_ptr, static_cast<uint16_t>(split), x, run.style, run.size,
-                                             run.vertical_align, /*continues_prev=*/false});
-          x += prefix_w;
+          current.words.push_back(LayoutWord{word_ptr, word_len, x, run.style, run.size, run.vertical_align,
+                                             !needs_space && !current.words.empty()});
+          x += word_w;
+          break;
+        }
+        // Doesn't fit — try to hyphenate at the best break point.
+        uint16_t avail =
+            line_width > x + (needs_space ? space_width : 0) ? line_width - x - (needs_space ? space_width : 0) : 0;
+        bool prefix_has_hyphen = false;
+        size_t split =
+            find_hyphen_break(font, word_ptr, word_len, run.style, run.size, hyph_lang, avail, prefix_has_hyphen);
+        if (split > 0) {
+          // Emit prefix + hyphen, flush, then loop with the suffix.
+          const uint16_t prefix_w = font.word_width(word_ptr, static_cast<uint16_t>(split), run.style, run.size);
+          // Don't add a synthetic hyphen if the prefix already ends with one.
+          const uint16_t hyphen_w = prefix_has_hyphen ? 0 : font.char_width('-', run.style, run.size);
+          if (needs_space)
+            x += space_width;
           current.words.push_back(
-              LayoutWord{"-", 1, x, run.style, run.size, run.vertical_align, /*continues_prev=*/true});
-          x += hyphen_w;
+              LayoutWord{word_ptr, static_cast<uint16_t>(split), x, run.style, run.size, run.vertical_align, false});
+          x += prefix_w;
+          if (!prefix_has_hyphen) {
+            current.words.push_back(LayoutWord{"-", 1, x, run.style, run.size, run.vertical_align, true});
+            x += hyphen_w;
+          }
           current.hyphenated = true;
           flush_line(line_width, current.words, false);
           lines.push_back(std::move(current));
           current = LayoutLine{};
           x = run.margin_left;
           first_line = false;
-          const char* suffix_ptr = word_ptr + split;
-          uint16_t suffix_len = static_cast<uint16_t>(span.len - split);
-          current.words.push_back(
-              LayoutWord{suffix_ptr, suffix_len, x, run.style, run.size, run.vertical_align, false});
-          x += font.word_width(suffix_ptr, suffix_len, run.style, run.size);
-          continue;  // word already placed — skip normal placement below
+          word_ptr += split;
+          word_len -= static_cast<uint16_t>(split);
+          needs_space = false;
+          continue;
         }
+        if (current.words.empty()) {
+          // No hyphenation and line is empty — force placement to avoid infinite loop.
+          current.words.push_back(LayoutWord{word_ptr, word_len, x, run.style, run.size, run.vertical_align, false});
+          x += word_w;
+          break;
+        }
+        // No hyphenation possible — flush line and retry on the next line.
         flush_line(line_width, current.words, false);
         lines.push_back(std::move(current));
         current = LayoutLine{};
@@ -259,12 +254,6 @@ static std::vector<LayoutLine> layout_para_lines(const IFont& font, const Layout
         first_line = false;
         needs_space = false;
       }
-
-      if (needs_space)
-        x += space_width;
-      current.words.push_back(LayoutWord{word_ptr, static_cast<uint16_t>(span.len), x, run.style, run.size,
-                                         run.vertical_align, !needs_space && !current.words.empty()});
-      x += word_w;
     }
 
     prev_run_ended_space = text_len == 0;

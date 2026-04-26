@@ -601,3 +601,95 @@ TEST(TextLayout, CrossRunDifferentStyles) {
   EXPECT_EQ(lines[0].words[0].x, 0);
   EXPECT_EQ(lines[0].words[1].x, 8);  // no space between them
 }
+
+// ---------------------------------------------------------------------------
+// Hyphenation tests
+// ---------------------------------------------------------------------------
+
+// Helper: collect all word strings from all lines (no space joining).
+static std::vector<std::string> all_words(const std::vector<LayoutLine>& lines) {
+  std::vector<std::string> result;
+  for (auto& line : lines)
+    for (auto& w : line.words)
+      result.push_back(word_str(w));
+  return result;
+}
+
+TEST(TextLayout, HyphenationSplitsLongGermanWord) {
+  // "Abendessen" = 10 chars = 80px at 8px/char.
+  // Line width = 60px → word doesn't fit on its own, must be hyphenated.
+  TextParagraph para;
+  para.runs.push_back(microreader::Run("Abendessen", FontStyle::Regular));
+
+  LayoutOptions opts;
+  opts.width = 60;
+  opts.hyphenation_lang = HyphenationLang::German;
+
+  auto lines = TextLayout(font8).layout_paragraph(opts, para);
+
+  // Should produce at least 2 lines.
+  ASSERT_GE(lines.size(), 2u);
+
+  // Last word on line 0 must be "-".
+  ASSERT_FALSE(lines[0].words.empty());
+  EXPECT_EQ(word_str(lines[0].words.back()), "-");
+
+  // line 0 must be marked hyphenated.
+  EXPECT_TRUE(lines[0].hyphenated);
+
+  // Concatenating all non-hyphen words must reconstruct "Abendessen".
+  std::string reconstructed;
+  for (auto& w : all_words(lines))
+    if (w != "-")
+      reconstructed += w;
+  EXPECT_EQ(reconstructed, "Abendessen");
+}
+
+TEST(TextLayout, HyphenationNoneDoesNotSplit) {
+  // Same word, same narrow line, but no hyphenation language set.
+  // Word should be forced onto its own line unbroken.
+  TextParagraph para;
+  para.runs.push_back(microreader::Run("Abendessen", FontStyle::Regular));
+
+  LayoutOptions opts;
+  opts.width = 60;
+  // hyphenation_lang defaults to None
+
+  auto lines = TextLayout(font8).layout_paragraph(opts, para);
+
+  // The word is forced onto a single line (no split).
+  bool found_hyphen = false;
+  for (auto& w : all_words(lines))
+    if (w == "-")
+      found_hyphen = true;
+  EXPECT_FALSE(found_hyphen);
+
+  // All characters of the word must be present as one token.
+  std::string reconstructed;
+  for (auto& w : all_words(lines))
+    reconstructed += w;
+  EXPECT_EQ(reconstructed, "Abendessen");
+}
+
+TEST(TextLayout, HyphenationPrefixFitsOnLine) {
+  // "Abendessen" at 8px/char = 80px. Line = 60px.
+  // Hyphenation points from Liang DE for "Abendessen": after "Abend" (5 chars = 40px).
+  // 40px prefix + 8px hyphen = 48px ≤ 60px → prefix fits.
+  TextParagraph para;
+  para.runs.push_back(microreader::Run("Abendessen", FontStyle::Regular));
+
+  LayoutOptions opts;
+  opts.width = 60;
+  opts.hyphenation_lang = HyphenationLang::German;
+
+  auto lines = TextLayout(font8).layout_paragraph(opts, para);
+
+  ASSERT_GE(lines.size(), 2u);
+  // First word on line 0 must start at x=0.
+  EXPECT_EQ(lines[0].words.front().x, 0u);
+  // Width used on line 0: prefix_w + hyphen_w ≤ 60.
+  uint16_t used = 0;
+  for (auto& w : lines[0].words)
+    used = w.x + font8.word_width(w.text, w.len, FontStyle::Regular);
+  EXPECT_LE(used, 60u);
+}

@@ -110,6 +110,7 @@ add_executable(unit_tests
     unit/MrbLayoutComparisonTest.cpp
     unit/StreamingPipelineTest.cpp
     unit/NavigationTest.cpp
+    unit/HyphenationTest.cpp
 )
 target_include_directories(unit_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/support
