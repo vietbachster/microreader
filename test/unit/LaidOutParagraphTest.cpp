@@ -466,8 +466,10 @@ TEST(CollectText, InlineExtra_Backward_Line0) {
   EXPECT_EQ(r->item.height, 24);
   EXPECT_EQ(r->next_idx, 0u);
 
-  // Backward with available=20 < 24 → line 0 doesn't fit.
-  EXPECT_FALSE(lp.collect_backward(1, 20).has_value());
+  // Backward with available=19 < baseline=20 → line 0 doesn't fit.
+  EXPECT_FALSE(lp.collect_backward(1, 19).has_value());
+  // available=20 == baseline=20 → now accepted (baseline-fit rule).
+  EXPECT_TRUE(lp.collect_backward(1, 20).has_value());
 }
 
 // ===================================================================
@@ -746,6 +748,88 @@ TEST(LeadingSpacer, RoundTrip_AllItems) {
   // Spacer + 3 lines = 4 items, final idx = 4.
   EXPECT_EQ(count, 4);
   EXPECT_EQ(idx, 4u);
+}
+
+// ===================================================================
+// collect_text — baseline-fit acceptance (lh > available but bl <= available)
+// ===================================================================
+
+// Helper: build a text LP with custom baseline (different from default 12).
+static TextLayout::LaidOutParagraph make_text_lp_bl(uint16_t para_idx, int num_lines, uint16_t line_h,
+                                                    uint16_t baseline) {
+  TextLayout::LaidOutParagraph lp;
+  lp.para_idx = para_idx;
+  lp.type = ParagraphType::Text;
+  lp.text_runs_empty = false;
+  for (int i = 0; i < num_lines; ++i) {
+    lp.lines.push_back(LayoutLine{});
+    lp.line_heights.push_back(line_h);
+    lp.line_baselines.push_back(baseline);
+  }
+  return lp;
+}
+
+// Forward: line accepted when baseline fits but full height does not.
+TEST(CollectText, BaselineFit_Forward_Accepts) {
+  // lh=20, bl=16. available=18: bl(16) <= 18 < lh(20) → accept.
+  auto lp = make_text_lp_bl(0, 3, 20, 16);
+  auto r = lp.collect(0, 18);
+  ASSERT_TRUE(r.has_value());
+  EXPECT_EQ(r->item.kind, TextLayout::PageItem::TextLine);
+  // Height is always lh; the extended backward budget (ph+desc) ensures symmetry.
+  EXPECT_EQ(r->item.height, 20);  // lh, not bl
+  EXPECT_EQ(r->item.baseline, 16);
+  EXPECT_EQ(r->next_idx, 1u);
+}
+
+// Forward: line rejected when even baseline doesn't fit.
+TEST(CollectText, BaselineFit_Forward_Rejects) {
+  // lh=20, bl=16. available=15 < bl(16) → reject.
+  auto lp = make_text_lp_bl(0, 3, 20, 16);
+  EXPECT_FALSE(lp.collect(0, 15).has_value());
+}
+
+// Forward: line accepted when baseline exactly equals available.
+TEST(CollectText, BaselineFit_Forward_ExactBaseline) {
+  auto lp = make_text_lp_bl(0, 1, 20, 16);
+  EXPECT_TRUE(lp.collect(0, 16).has_value());
+}
+
+// Backward: same baseline-fit rule applies.
+TEST(CollectText, BaselineFit_Backward_Accepts) {
+  auto lp = make_text_lp_bl(0, 3, 20, 16);
+  // end_idx=1 → line 0. available=18: bl(16) <= 18 → accept.
+  auto r = lp.collect_backward(1, 18);
+  ASSERT_TRUE(r.has_value());
+  // Height is always lh; the extended backward budget (ph+desc) ensures symmetry.
+  EXPECT_EQ(r->item.height, 20);  // lh, not bl
+  EXPECT_EQ(r->item.baseline, 16);
+  EXPECT_EQ(r->next_idx, 0u);
+}
+
+// Backward: line rejected when baseline doesn't fit.
+TEST(CollectText, BaselineFit_Backward_Rejects) {
+  auto lp = make_text_lp_bl(0, 3, 20, 16);
+  EXPECT_FALSE(lp.collect_backward(1, 15).has_value());
+}
+
+// Round-trip: collect forward with baseline-fit available, then backward from next_idx.
+TEST(CollectText, BaselineFit_RoundTrip) {
+  // 3-line paragraph, lh=20, bl=16.
+  // available=18 accepts each line individually.
+  auto lp = make_text_lp_bl(0, 3, 20, 16);
+
+  // Forward line 0 with tight available=18.
+  auto fwd = lp.collect(0, 18);
+  ASSERT_TRUE(fwd.has_value());
+  EXPECT_EQ(fwd->next_idx, 1u);
+
+  // Backward from next_idx=1 with same available → same line.
+  auto bwd = lp.collect_backward(fwd->next_idx, 18);
+  ASSERT_TRUE(bwd.has_value());
+  EXPECT_EQ(bwd->item.line_idx, fwd->item.line_idx);
+  EXPECT_EQ(bwd->item.height, fwd->item.height);
+  EXPECT_EQ(bwd->next_idx, 0u);
 }
 
 // leading_spacer on an Hr paragraph.

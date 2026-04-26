@@ -796,7 +796,9 @@ static std::optional<Collected> collect_text(const LaidOut& lp, size_t idx, uint
     lh += lp.inline_extra;
     bl += lp.inline_extra;
   }
-  if (lh > available)
+  // Accept a line if its baseline fits — spread_text_items aligns by baseline so
+  // a line whose descenders extend slightly past the slot boundary is OK.
+  if (bl > available)
     return std::nullopt;
 
   PageItem item{PageItem::TextLine, lp.para_idx, static_cast<uint16_t>(line_idx), lp.lines[line_idx], lh, bl};
@@ -1077,23 +1079,33 @@ static size_t paragraph_end_idx(const LaidOut& lp) {
 
 // Mirror of collect_para_items, going backward.
 // Collects from end_idx down to 0 (or until the page is full).
+// desc is the font's descender height (y_advance - baseline).  When a leading
+// spacer at index 0 doesn't quite fit (overflow ≤ desc), it is accepted anyway
+// because the overflow was caused by a baseline-fit text line earlier on the
+// page.  This is safe: mathematical analysis shows the spacer only fails to fit
+// in backward when used_fwd > ph (baseline-fit overflow), never for normal pages.
 // Returns the remaining start offset within the paragraph (0 = fully consumed).
-static size_t collect_para_items_bwd(const LaidOut& lp, size_t end_idx, uint16_t spc, uint16_t ph, uint16_t& used,
-                                     bool& page_full, std::vector<PageItem>& rev_items) {
+static size_t collect_para_items_bwd(const LaidOut& lp, size_t end_idx, uint16_t spc, uint16_t ph, uint16_t desc,
+                                     uint16_t& used, bool& page_full, std::vector<PageItem>& rev_items) {
   size_t idx = end_idx;
   bool first_item = true;
   while (idx > 0 && !page_full) {
     uint16_t gap = (first_item && !rev_items.empty()) ? spc : 0;
-    uint16_t avail = rev_items.empty() ? ph : (used + gap < ph ? ph - used - gap : 0);
+    uint16_t avail = (used + gap < ph) ? static_cast<uint16_t>(ph - used - gap) : 0;
 
-    if (avail == 0) {
+    // Leading spacer at index 0 of a paragraph: extend available by the font's
+    // descender height to absorb baseline-fit overflow from the last text line.
+    bool is_spacer = (idx == 1 && lp.leading_spacer > 0 && end_idx > 1);
+    uint16_t effective_avail = is_spacer ? static_cast<uint16_t>(avail + desc) : avail;
+
+    if (effective_avail == 0) {
       auto probe = lp.collect_backward(idx, ph);
       if (probe)
         page_full = true;
       break;
     }
 
-    auto r = lp.collect_backward(idx, avail);
+    auto r = lp.collect_backward(idx, effective_avail);
     if (!r) {
       // Distinguish exhausted vs. item too tall for remaining space.
       auto probe = lp.collect_backward(idx, ph);
@@ -1116,6 +1128,10 @@ static size_t collect_para_items_bwd(const LaidOut& lp, size_t end_idx, uint16_t
 
 TextLayout::CollectResult TextLayout::collect_page_items_backward(PagePosition end_pos) const {
   const uint16_t ph = opts_.height - opts_.padding_top - opts_.padding_bottom;
+  // Extend backward budget by the normal-font descender height so that a
+  // leading spacer at para 0 is accepted even when a baseline-fit text line
+  // caused a tiny overflow (≤ desc pixels) in the forward pass.
+  const uint16_t desc = static_cast<uint16_t>(font_->y_advance() - font_->baseline());
   const size_t pcnt = source_->paragraph_count();
 
   if (pcnt == 0 || (end_pos.paragraph == 0 && end_pos.offset == 0))
@@ -1183,7 +1199,7 @@ TextLayout::CollectResult TextLayout::collect_page_items_backward(PagePosition e
                     : 0;
     uint16_t spc = static_cast<uint16_t>(spc_i < 0 ? 0 : spc_i);
 
-    size_t remaining = collect_para_items_bwd(lp, para_end_idx, spc, ph, used, page_full, rev_items);
+    size_t remaining = collect_para_items_bwd(lp, para_end_idx, spc, ph, desc, used, page_full, rev_items);
 
     // Update start only when at least one item was collected from this paragraph.
     if (!rev_items.empty() && remaining < para_end_idx)

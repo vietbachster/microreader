@@ -1815,3 +1815,115 @@ TEST(PageLayout, AllPagesInBoundsMultiPage) {
       break;  // safety
   }
 }
+
+// ===================================================================
+// Baseline-fit collection: collect_text accepts a line when its baseline
+// fits (bl <= available) even if the full slot height (lh) does not.
+// ===================================================================
+
+// font8: lh=16, bl=12.  ph=44.
+// After 2 lines (used=32) available=12.  bl=12 <= 12 → 3rd line accepted.
+// Without the baseline-fit rule only 2 lines would fit.
+TEST(PageLayout, BaselineFit_LastLineAccepted) {
+  Chapter ch;
+  for (int i = 0; i < 4; ++i) {
+    TextParagraph tp;
+    tp.runs.push_back(microreader::Run("Line", FontStyle::Regular, false));
+    ch.paragraphs.push_back(Paragraph::make_text(std::move(tp)));
+  }
+  TestChapterSource src(ch);
+  // ph = height - padding_top - padding_bottom = 44 - 0 - 0 = 44.
+  // para_spacing = 0 so no gaps between the single-line paragraphs.
+  PageOptions opts(200, 44, 0, 0);
+  opts.para_spacing = 0;
+  auto page = TextLayout(font8, opts, src, PagePosition(0, 0)).layout();
+
+  // Three lines must be on this page (the 4th is on the next page).
+  ASSERT_EQ(page.text_items().size(), 3u)
+      << "Baseline-fit: 3rd line (baseline=12 <= avail=12) must be collected";
+
+  // Page is full — boundary is para 3 (the 4th paragraph), offset 0.
+  EXPECT_EQ(page.end.paragraph, 3);
+  EXPECT_EQ(page.end.offset, 0);
+  EXPECT_FALSE(page.at_chapter_end);
+
+  // Last baseline must sit exactly at ph (no spreading needed since slack=0).
+  uint16_t last_baseline = page.text_items().back().y_offset + page.text_items().back().baseline;
+  EXPECT_EQ(last_baseline, 44u) << "Last baseline should be at ph=44";
+}
+
+// Backward from the boundary produced by BaselineFit_LastLineAccepted should
+// reconstruct exactly the same three items and start position.
+TEST(PageLayout, BaselineFit_ForwardBackwardRoundTrip) {
+  Chapter ch;
+  for (int i = 0; i < 4; ++i) {
+    TextParagraph tp;
+    tp.runs.push_back(microreader::Run("Line", FontStyle::Regular, false));
+    ch.paragraphs.push_back(Paragraph::make_text(std::move(tp)));
+  }
+  TestChapterSource src(ch);
+  PageOptions opts(200, 44, 0, 0);
+  opts.para_spacing = 0;
+
+  // Forward layout.
+  TextLayout tl(font8, opts, src);
+  auto fwd = tl.layout();
+  ASSERT_EQ(fwd.text_items().size(), 3u);
+  PagePosition boundary = fwd.end;  // {3, 0}
+
+  // Backward from that boundary.
+  tl.set_position(boundary);
+  auto bwd = tl.layout_backward();
+
+  EXPECT_EQ(bwd.start, fwd.start)
+      << "Backward start must equal forward start";
+  EXPECT_EQ(bwd.end, boundary)
+      << "Backward end must equal the forward boundary";
+  ASSERT_EQ(bwd.text_items().size(), fwd.text_items().size())
+      << "Backward page must contain the same number of items";
+
+  for (size_t i = 0; i < fwd.text_items().size(); ++i) {
+    EXPECT_EQ(bwd.text_items()[i].paragraph_index, fwd.text_items()[i].paragraph_index)
+        << "Item " << i << ": paragraph_index mismatch";
+    EXPECT_EQ(bwd.text_items()[i].y_offset, fwd.text_items()[i].y_offset)
+        << "Item " << i << ": y_offset mismatch";
+  }
+}
+
+// With center_text=true and baseline-fit acceptance, spread_text_items still places
+// the last baseline exactly at height - padding_bottom.
+TEST(PageLayout, BaselineFit_SpreadPinsLastBaseline) {
+  Chapter ch;
+  for (int i = 0; i < 4; ++i) {
+    TextParagraph tp;
+    tp.runs.push_back(microreader::Run("Line", FontStyle::Regular, false));
+    ch.paragraphs.push_back(Paragraph::make_text(std::move(tp)));
+  }
+  TestChapterSource src(ch);
+  // Use asymmetric padding so baseline-fit triggers.
+  // ph = height - padding_top - padding_bottom = 44 - 4 - 0 = 40.
+  // lh=16, bl=12. 2 lines use 32px. avail=8. bl=12 > 8 → no baseline-fit at ph=40.
+  // Use padding_bottom=0 only. PageOptions uniform ctor sets all 4 sides equal,
+  // so we set fields directly.
+  // ph = 44. padding_top=4, padding_bottom=0 → height=48.
+  // But uniform ctor sets padding_bottom=pad too. Build manually:
+  PageOptions opts;
+  opts.width = 200;
+  opts.height = 48;
+  opts.padding_top = 4;
+  opts.padding_bottom = 0;
+  opts.padding_left = 0;
+  opts.padding_right = 0;
+  opts.para_spacing = 0;
+  opts.center_text = true;
+  // ph = 48 - 4 - 0 = 44. lh=16, bl=12.
+  // line0 used=16, line1 used=32, line2: avail=12, bl=12<=12 → baseline-fit. used=48.
+  // Line3 avail underflows → page_full. 3 lines on first page.
+
+  auto page = TextLayout(font8, opts, src, PagePosition(0, 0)).layout();
+
+  ASSERT_EQ(page.text_items().size(), 3u);
+  uint16_t last_baseline = page.text_items().back().y_offset + page.text_items().back().baseline;
+  EXPECT_EQ(last_baseline, opts.height - opts.padding_bottom)
+      << "Last baseline must sit at height - padding_bottom after spreading";
+}

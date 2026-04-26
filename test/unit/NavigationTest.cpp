@@ -199,7 +199,6 @@ TEST_P(BackwardNavTest, NavigateBackwardAllPages) {
       end_pos = page.start;
     }
 
-    // Forward and backward page counts should match.
     EXPECT_EQ(fwd_pages, bwd_pages) << name << " ch" << ci << " page count mismatch (fwd=" << fwd_pages
                                     << " bwd=" << bwd_pages << ")";
 
