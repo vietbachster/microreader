@@ -45,7 +45,8 @@ int main() {
 
     // Data directory for converted books, settings, reading state.
     static std::string data_path = std::filesystem::absolute("sd/.microreader").string();
-    std::filesystem::create_directories(data_path);
+    std::filesystem::create_directories(data_path + "/cache");
+    std::filesystem::create_directories(data_path + "/data");
     app.set_data_dir(data_path.c_str());
 
     // Load proportional fonts (5 sizes) if available.

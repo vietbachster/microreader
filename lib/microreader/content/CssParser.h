@@ -35,14 +35,18 @@ struct CssRule {
   std::optional<bool> page_break_after;   // true if page-break-after: always|left|right
   std::optional<TextTransform> text_transform;
   std::optional<VerticalAlign> vertical_align;
-  std::optional<uint8_t> line_height_pct;  // line-height as % of default (100 = normal)
+  std::optional<uint8_t> line_height_pct;       // line-height as % of default (100 = normal)
+  std::optional<bool> list_style_none;          // true if list-style-type: none
+  std::optional<bool> font_variant_small_caps;  // true if font-variant: small-caps
+  std::optional<bool> border_top;               // true if border-top is visible (solid/dashed/etc.)
 
   bool has_any() const {
     return alignment.has_value() || italic.has_value() || bold.has_value() || indent.has_value() ||
            font_size.has_value() || margin_left.has_value() || margin_right.has_value() || margin_top.has_value() ||
            margin_bottom.has_value() || is_float.has_value() || is_hidden.has_value() ||
            page_break_before.has_value() || page_break_after.has_value() || text_transform.has_value() ||
-           vertical_align.has_value() || line_height_pct.has_value();
+           vertical_align.has_value() || line_height_pct.has_value() || list_style_none.has_value() ||
+           font_variant_small_caps.has_value() || border_top.has_value();
   }
 
   // Parse declarations like "text-align: center; font-weight: bold"

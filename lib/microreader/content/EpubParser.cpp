@@ -592,6 +592,23 @@ class BodyParser {
       return;
     }
 
+    // Flush any deferred list prefix (bullet/number) into this first text push.
+    // Only trigger on non-whitespace text so that whitespace-only nodes between
+    // <li> and an inner <p> don't strand the bullet in its own paragraph.
+    if (!pending_list_prefix_.empty()) {
+      bool has_nonws = false;
+      for (size_t i = 0; i < len; ++i) {
+        if (!std::isspace(static_cast<unsigned char>(text[i]))) {
+          has_nonws = true;
+          break;
+        }
+      }
+      if (has_nonws) {
+        std::string prefix = std::move(pending_list_prefix_);
+        push_text(prefix.c_str(), prefix.size());
+      }
+    }
+
     // If previous text event ended with an incomplete multi-byte sequence
     // (UTF-8 lead byte or partial entity like "&amp"), prepend it so the
     // full sequence is processed as a whole.
@@ -930,7 +947,10 @@ class BodyParser {
       if (pending_margin_top_.has_value() || pending_margin_bottom_.has_value()) {
         uint16_t top = pending_margin_top_.value_or(0);
         uint16_t bot = pending_margin_bottom_.value_or(0);
-        para.spacing_before = std::max(top, bot);
+        // Cap spacing to ~1.5 line heights to avoid huge CSS margins (e.g. 5em) creating
+        // excessive whitespace on a small e-reader screen.
+        static constexpr uint16_t kMaxSpacing = 20;  // ~1 × 22px line height
+        para.spacing_before = std::min(std::max(top, bot), kMaxSpacing);
         pending_margin_top_.reset();
         pending_margin_bottom_.reset();
       }
@@ -956,9 +976,11 @@ class BodyParser {
     pending_inline_image_ = ImageRef(key, w, h);
   }
 
-  void push_hr() {
+  void push_hr(std::optional<uint16_t> spacing_before = std::nullopt) {
     flush_run();
-    emit(Paragraph::make_hr());
+    auto p = Paragraph::make_hr();
+    p.spacing_before = spacing_before;
+    emit(std::move(p));
   }
 
   void push_page_break() {
@@ -1025,8 +1047,13 @@ class BodyParser {
     bool ordered;      // true = <ol>, false = <ul>
     uint16_t counter;  // next item number (for <ol>)
     uint8_t depth;
+    bool no_prefix;  // true if list-style-type: none on <ul>/<ol>
   };
   std::vector<ListContext> list_stack_;
+
+  // Deferred list prefix: set on <li>, flushed into the first push_text of that item.
+  // This prevents the bullet from landing in its own paragraph when <li> contains <p>.
+  std::string pending_list_prefix_;
 
   // page-break-after tracking: emit a page break when these depths close
   std::vector<uint8_t> page_break_after_depths_;
@@ -1049,6 +1076,13 @@ class BodyParser {
   };
   std::vector<TransformEntry> transform_stack_;
   TextTransform text_transform_ = TextTransform::None;
+  bool small_caps_ = false;  // true when font-variant:small-caps is active
+
+  struct SmallCapsEntry {
+    bool prev_value;
+    uint8_t depth;
+  };
+  std::vector<SmallCapsEntry> small_caps_stack_;
 
   // line-height tracking (percentage of default, 100 = normal)
   struct LineHeightEntry {
@@ -1093,8 +1127,11 @@ class BodyParser {
       for (size_t k = from; k < s.size(); ++k)
         s[k] = static_cast<char>(std::toupper(static_cast<unsigned char>(s[k])));
     } else if (text_transform_ == TextTransform::Lowercase) {
-      for (size_t k = from; k < s.size(); ++k)
-        s[k] = static_cast<char>(std::tolower(static_cast<unsigned char>(s[k])));
+      if (!small_caps_) {
+        for (size_t k = from; k < s.size(); ++k)
+          s[k] = static_cast<char>(std::tolower(static_cast<unsigned char>(s[k])));
+      }
+      // If small_caps_ is active, lowercase is a fallback hint we ignore.
     } else if (text_transform_ == TextTransform::Capitalize) {
       bool after_space = (from == 0) || (from > 0 && std::isspace(static_cast<unsigned char>(s[from - 1])));
       for (size_t k = from; k < s.size(); ++k) {
@@ -1115,8 +1152,10 @@ class BodyParser {
       for (auto& c : s)
         c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
     } else if (text_transform_ == TextTransform::Lowercase) {
-      for (auto& c : s)
-        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+      if (!small_caps_) {
+        for (auto& c : s)
+          c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+      }
     } else if (text_transform_ == TextTransform::Capitalize) {
       bool after_space = true;
       for (auto& c : s) {
@@ -1484,6 +1523,13 @@ static EpubError parse_xhtml_events(XmlReader& reader, const CssStylesheet* inli
         parser.id_cb_(parser.id_cb_ctx_, id_sv.data, id_sv.length, parser.emitted_count_);
       }
 
+      // A block element with border-top acts as a decorative rule (like <hr>).
+      if (style.border_top.has_value() && *style.border_top && is_block_element(ev.name) &&
+          !parser.cell_depth.has_value()) {
+        parser.push_hr(style.margin_top);
+        style.margin_top.reset();  // consumed by Hr spacing_before; don't re-apply to pending_margin_top_
+      }
+
       parser.depth++;
 
       // page-break-after: track depth to emit on close
@@ -1493,7 +1539,8 @@ static EpubError parse_xhtml_events(XmlReader& reader, const CssStylesheet* inli
 
       // Track list context for bullet/number prefixes
       if (sv_eq(ev.name, "ul")) {
-        parser.list_stack_.push_back({false, 0, parser.depth});
+        bool no_pfx = style.list_style_none.has_value() && *style.list_style_none;
+        parser.list_stack_.push_back({false, 0, parser.depth, no_pfx});
       } else if (sv_eq(ev.name, "ol")) {
         uint16_t start_val = 1;
         auto start_sv = ev.attrs.get("start");
@@ -1501,16 +1548,21 @@ static EpubError parse_xhtml_events(XmlReader& reader, const CssStylesheet* inli
           start_val =
               static_cast<uint16_t>(std::max(1, std::atoi(std::string(start_sv.data, start_sv.length).c_str())));
         }
-        parser.list_stack_.push_back({true, start_val, parser.depth});
+        bool no_pfx = style.list_style_none.has_value() && *style.list_style_none;
+        parser.list_stack_.push_back({true, start_val, parser.depth, no_pfx});
       } else if (sv_eq(ev.name, "li") && !parser.list_stack_.empty()) {
         auto& ctx = parser.list_stack_.back();
-        if (ctx.ordered) {
-          std::string prefix = std::to_string(ctx.counter) + ". ";
-          parser.push_text(prefix.c_str(), prefix.size());
-          ctx.counter++;
-        } else {
-          parser.push_text("\xe2\x80\xa2 ", 4);  // "• " (U+2022 bullet + space)
+        // Per-<li> CSS can also suppress via list-style-type: none
+        bool no_pfx = ctx.no_prefix || (style.list_style_none.has_value() && *style.list_style_none);
+        if (!no_pfx) {
+          if (ctx.ordered) {
+            parser.pending_list_prefix_ = std::to_string(ctx.counter) + ". ";
+          } else {
+            parser.pending_list_prefix_ = "\xe2\x80\xa2 ";  // "• " (U+2022 bullet + space)
+          }
         }
+        if (ctx.ordered)
+          ctx.counter++;
       }
 
       if (is_bold(ev.name)) {
@@ -1584,6 +1636,10 @@ static EpubError parse_xhtml_events(XmlReader& reader, const CssStylesheet* inli
       }
       if (style.margin_bottom.has_value() && !parser.cell_depth.has_value()) {
         parser.margin_bottom_stack_.push_back({*style.margin_bottom, parser.depth});
+      }
+      if (style.font_variant_small_caps.has_value()) {
+        parser.small_caps_stack_.push_back({parser.small_caps_, parser.depth});
+        parser.small_caps_ = *style.font_variant_small_caps;
       }
       if (style.text_transform.has_value()) {
         parser.transform_stack_.push_back({parser.text_transform_, parser.depth});
@@ -1665,6 +1721,10 @@ static EpubError parse_xhtml_events(XmlReader& reader, const CssStylesheet* inli
       }
       while (!parser.list_stack_.empty() && parser.depth < parser.list_stack_.back().depth) {
         parser.list_stack_.pop_back();
+      }
+      while (!parser.small_caps_stack_.empty() && parser.depth < parser.small_caps_stack_.back().depth) {
+        parser.small_caps_ = parser.small_caps_stack_.back().prev_value;
+        parser.small_caps_stack_.pop_back();
       }
       while (!parser.transform_stack_.empty() && parser.depth < parser.transform_stack_.back().depth) {
         parser.text_transform_ = parser.transform_stack_.back().prev_value;

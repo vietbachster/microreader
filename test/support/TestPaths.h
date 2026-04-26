@@ -18,3 +18,7 @@ static inline std::string repo_root() {
 static inline std::string small_books_dir() {
   return repo_root() + "/test/books/small";
 }
+
+static inline std::string books_dir() {
+  return repo_root() + "/test/books";
+}

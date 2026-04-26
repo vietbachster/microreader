@@ -100,7 +100,8 @@ class ReaderScreen final : public IScreen {
   std::string path_;
   std::string data_dir_;
   std::string mrb_path_;
-  std::string book_key_;       // sanitized title, used for .mrb/.pos naming
+  std::string pos_path_;       // path to .pos bookmark: <data_dir>/data/<book_key>.pos
+  std::string book_key_;       // sanitized title (content-derived), drives .pos filename
   DrawBuffer* buf_ = nullptr;  // set in start(), cleared in stop()
   Book book_;
   MrbReader mrb_;

@@ -446,45 +446,67 @@ static void handle_serial_cmd() {
         }
       }
       closedir(dir);
-      // Also list converted .mrb files from /sdcard/.microreader/
-      dir = opendir("/sdcard/.microreader");
-      if (dir) {
-        while ((ent = readdir(dir)) != nullptr) {
-          size_t len = strlen(ent->d_name);
-          if (len > 4 && strcmp(ent->d_name + len - 4, ".mrb") == 0) {
-            char line[280];
-            snprintf(line, sizeof(line), "  .microreader/%s\n", ent->d_name);
+      // Also list converted books from /sdcard/.microreader/cache/
+      DIR* cdir = opendir("/sdcard/.microreader/cache");
+      if (cdir) {
+        struct dirent* cent;
+        while ((cent = readdir(cdir)) != nullptr) {
+          if (cent->d_name[0] == '.')
+            continue;
+          // Check if book.mrb exists in this subdir.
+          char mrb_path[300];
+          snprintf(mrb_path, sizeof(mrb_path), "/sdcard/.microreader/cache/%s/book.mrb", cent->d_name);
+          FILE* f = fopen(mrb_path, "r");
+          if (f) {
+            fclose(f);
+            char line[300];
+            snprintf(line, sizeof(line), "  cache/%s/book.mrb\n", cent->d_name);
             serial_write(line);
           }
         }
-        closedir(dir);
+        closedir(cdir);
       }
       serial_write("END\n");
       break;
     }
     case 'C': {
-      // Clear all .mrb files from /sdcard/.microreader/
-      DIR* dir = opendir("/sdcard/.microreader");
+      // Delete all per-book subdirs in /sdcard/.microreader/cache/ and recreate it.
+      const char* cache_dir = "/sdcard/.microreader/cache";
+      DIR* dir = opendir(cache_dir);
       if (!dir) {
+        mkdir(cache_dir, 0775);
         serial_write("CLEARED:0\n");
-        return;
+        break;
       }
       int count = 0;
       struct dirent* ent;
-      char path[300];
+      char subdir[300];
       while ((ent = readdir(dir)) != nullptr) {
-        size_t len = strlen(ent->d_name);
-        if (len > 4 && strcmp(ent->d_name + len - 4, ".mrb") == 0) {
-          snprintf(path, sizeof(path), "/sdcard/.microreader/%s", ent->d_name);
-          if (remove(path) == 0)
-            ++count;
+        if (ent->d_name[0] == '.')
+          continue;
+        snprintf(subdir, sizeof(subdir), "%s/%s", cache_dir, ent->d_name);
+        DIR* sd = opendir(subdir);
+        if (sd) {
+          struct dirent* sf;
+          char fpath[300];
+          while ((sf = readdir(sd)) != nullptr) {
+            if (sf->d_name[0] == '.')
+              continue;
+            snprintf(fpath, sizeof(fpath), "%s/%s", subdir, sf->d_name);
+            if (remove(fpath) == 0)
+              ++count;
+          }
+          closedir(sd);
         }
+        rmdir(subdir);
       }
       closedir(dir);
+      rmdir(cache_dir);
+      mkdir(cache_dir, 0775);
       char buf[64];
       snprintf(buf, sizeof(buf), "CLEARED:%d\n", count);
       serial_write(buf);
-      ESP_LOGI(kCmdTag, "cleared %d .mrb files", count);
+      ESP_LOGI(kCmdTag, "cleared %d cache entries", count);
       break;
     }
     case 'X': {

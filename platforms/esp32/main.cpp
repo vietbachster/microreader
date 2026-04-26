@@ -75,6 +75,8 @@ extern "C" void app_main(void) {
 
     // Data directory for converted books, settings, reading state.
     mkdir("/sdcard/.microreader", 0775);
+    mkdir("/sdcard/.microreader/cache", 0775);
+    mkdir("/sdcard/.microreader/data", 0775);
 
     // Register the books directory for the selection screen.
     app.set_books_dir("/sdcard/books");

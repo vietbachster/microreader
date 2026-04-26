@@ -5,6 +5,8 @@
 
 #ifdef ESP_PLATFORM
 #include <dirent.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "esp_ota_ops.h"
 #include "esp_system.h"
@@ -62,29 +64,43 @@ void SettingsScreen::clear_converted_() {
   if (!data_dir_)
     return;
 #ifdef ESP_PLATFORM
-  DIR* d = opendir(data_dir_);
-  if (!d)
+  char cache_dir[300];
+  std::snprintf(cache_dir, sizeof(cache_dir), "%s/cache", data_dir_);
+  DIR* d = opendir(cache_dir);
+  if (!d) {
+    mkdir(cache_dir, 0775);
     return;
+  }
   struct dirent* ent;
-  char path[300];
+  char subdir_path[300];
   while ((ent = readdir(d)) != nullptr) {
-    size_t len = std::strlen(ent->d_name);
-    if (len > 4 && std::strcmp(ent->d_name + len - 4, ".mrb") == 0) {
-      std::snprintf(path, sizeof(path), "%s/%s", data_dir_, ent->d_name);
-      std::remove(path);
+    if (ent->d_name[0] == '.')
+      continue;
+    std::snprintf(subdir_path, sizeof(subdir_path), "%s/%s", cache_dir, ent->d_name);
+    // Remove all files inside the per-book subdir.
+    DIR* sd = opendir(subdir_path);
+    if (sd) {
+      struct dirent* sf;
+      char file_path[300];
+      while ((sf = readdir(sd)) != nullptr) {
+        if (sf->d_name[0] == '.')
+          continue;
+        std::snprintf(file_path, sizeof(file_path), "%s/%s", subdir_path, sf->d_name);
+        std::remove(file_path);
+      }
+      closedir(sd);
     }
+    rmdir(subdir_path);
   }
   closedir(d);
+  rmdir(cache_dir);
+  mkdir(cache_dir, 0775);
 #else
   namespace fs = std::filesystem;
   try {
-    for (const auto& entry : fs::directory_iterator(data_dir_)) {
-      if (!entry.is_regular_file())
-        continue;
-      auto ext = entry.path().extension();
-      if (ext == ".mrb")
-        fs::remove(entry.path());
-    }
+    std::string cache_path = std::string(data_dir_) + "/cache";
+    fs::remove_all(cache_path);
+    fs::create_directories(cache_path);
   } catch (...) {}
 #endif
 }

@@ -180,9 +180,9 @@ CssRule CssRule::parse(const char* decl, size_t length, const CssConfig& config)
         }
       } else if (key == "padding-left") {
         auto len = parse_css_length(value, config.glyph_width, config.content_width);
-        if (len.has_value() && *len > 0) {
-          uint16_t val = static_cast<uint16_t>(*len);
-          rule.margin_left = rule.margin_left.value_or(0) + val;
+        if (len.has_value()) {
+          uint16_t val = *len > 0 ? static_cast<uint16_t>(*len) : 0;
+          rule.margin_left = rule.margin_left.has_value() ? rule.margin_left.value() + val : val;
         }
       } else if (key == "padding-right") {
         auto len = parse_css_length(value, config.glyph_width, config.content_width);
@@ -205,8 +205,10 @@ CssRule CssRule::parse(const char* decl, size_t length, const CssConfig& config)
       } else if (key == "padding") {
         auto parts = split_css_values(value);
         auto s = parse_shorthand_sides(parts, config.glyph_width, config.content_width);
-        if (s.left > 0)
-          rule.margin_left = rule.margin_left.value_or(0) + static_cast<uint16_t>(s.left);
+        if (!parts.empty()) {
+          uint16_t lv = s.left > 0 ? static_cast<uint16_t>(s.left) : 0;
+          rule.margin_left = rule.margin_left.has_value() ? rule.margin_left.value() + lv : lv;
+        }
         if (s.right > 0)
           rule.margin_right = rule.margin_right.value_or(0) + static_cast<uint16_t>(s.right);
         if (s.top > 0)
@@ -221,6 +223,24 @@ CssRule CssRule::parse(const char* decl, size_t length, const CssConfig& config)
       } else if (key == "display") {
         if (value == "none")
           rule.is_hidden = true;
+      } else if (key == "border-top-style") {
+        if (value != "none" && value != "hidden")
+          rule.border_top = true;
+        else
+          rule.border_top = false;
+      } else if (key == "border-top") {
+        // e.g. "1px solid black" — any non-none value means a visible border
+        if (value == "none" || value == "0" || value == "hidden")
+          rule.border_top = false;
+        else if (value.find("solid") != std::string::npos || value.find("dashed") != std::string::npos ||
+                 value.find("dotted") != std::string::npos || value.find("double") != std::string::npos)
+          rule.border_top = true;
+      } else if (key == "border") {
+        if (value == "none" || value == "0")
+          rule.border_top = false;
+        else if (value.find("solid") != std::string::npos || value.find("dashed") != std::string::npos ||
+                 value.find("dotted") != std::string::npos || value.find("double") != std::string::npos)
+          rule.border_top = true;
       } else if (key == "page-break-before") {
         if (value == "always" || value == "left" || value == "right")
           rule.page_break_before = true;
@@ -241,9 +261,12 @@ CssRule CssRule::parse(const char* decl, size_t length, const CssConfig& config)
         else if (value == "none")
           rule.text_transform = TextTransform::None;
       } else if (key == "font-variant") {
-        // Approximate small-caps as uppercase (can't render true small-caps with fixed fonts)
-        if (value == "small-caps" && !rule.text_transform.has_value())
-          rule.text_transform = TextTransform::Uppercase;
+        if (value == "small-caps") {
+          rule.font_variant_small_caps = true;
+          // Approximate as uppercase when no explicit text-transform is set
+          if (!rule.text_transform.has_value())
+            rule.text_transform = TextTransform::Uppercase;
+        }
       } else if (key == "vertical-align") {
         // CSS super/sub → FontSize::Small + VerticalAlign
         if (value == "super") {
@@ -284,6 +307,9 @@ CssRule CssRule::parse(const char* decl, size_t length, const CssConfig& config)
             rule.line_height_pct = val;
           }
         }
+      } else if (key == "list-style-type" || key == "list-style") {
+        if (value == "none")
+          rule.list_style_none = true;
       } else if (key == "font-size") {
         if (value == "small" || value == "x-small" || value == "xx-small" || value == "smaller")
           rule.font_size = FontSize::Small;
@@ -395,6 +421,10 @@ CssRule CssRule::operator+(const CssRule& rhs) const {
   result.text_transform = rhs.text_transform.has_value() ? rhs.text_transform : text_transform;
   result.vertical_align = rhs.vertical_align.has_value() ? rhs.vertical_align : vertical_align;
   result.line_height_pct = rhs.line_height_pct.has_value() ? rhs.line_height_pct : line_height_pct;
+  result.list_style_none = rhs.list_style_none.has_value() ? rhs.list_style_none : list_style_none;
+  result.font_variant_small_caps =
+      rhs.font_variant_small_caps.has_value() ? rhs.font_variant_small_caps : font_variant_small_caps;
+  result.border_top = rhs.border_top.has_value() ? rhs.border_top : border_top;
   return result;
 }
 

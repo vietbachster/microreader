@@ -382,17 +382,48 @@ def ch_lists():
         "Lists",
         """\
 <h1>10. Lists</h1>
-<p>Unordered list:</p>
+<p>Unordered list (direct text in li):</p>
 <ul>
   <li>First item</li>
   <li>Second item with <b>bold</b> text</li>
   <li>Third item</li>
 </ul>
-<p>Ordered list:</p>
+<p>Ordered list (direct text in li):</p>
 <ol>
   <li>First numbered item</li>
   <li>Second numbered item</li>
   <li>Third numbered item</li>
+</ol>
+<p>Unordered list with inner &lt;p&gt; (bullet must be inline with text, not on separate line):</p>
+<ul>
+  <li>
+    <p>First item wrapped in p.</p>
+  </li>
+  <li>
+    <p>Second item wrapped in p.</p>
+  </li>
+  <li>
+    <p>Third item wrapped in p.</p>
+  </li>
+</ul>
+<p>Ordered list with inner &lt;p&gt;:</p>
+<ol>
+  <li>
+    <p>First numbered item wrapped in p.</p>
+  </li>
+  <li>
+    <p>Second numbered item wrapped in p.</p>
+  </li>
+</ol>
+<p>Unordered list with list-style-type none (no bullets should appear):</p>
+<ul style="list-style-type: none;">
+  <li>No bullet here</li>
+  <li>No bullet here either</li>
+</ul>
+<p>Ordered list with list-style-type none (no numbers should appear):</p>
+<ol style="list-style-type: none;">
+  <li>No number here</li>
+  <li>No number here either</li>
 </ol>
 <p>Text after lists.</p>
 """,
@@ -411,6 +442,11 @@ def ch_hr():
 <p>Text between HRs.</p>
 <hr/>
 <p>Text after second HR.</p>
+<p>Div with border-top acts as HR (as in animal.epub heading decorations):</p>
+<div style="border-top-style: solid; border-top-width: 1px; margin-top: 0.8em; margin-bottom: 0.8em;"> </div>
+<h2>Heading between border-top divs</h2>
+<div style="border-top-style: solid; border-top-width: 1px; margin-top: 0.8em; margin-bottom: 1em;"> </div>
+<p>Text after border-top div HR.</p>
 """,
         css_link="style.css",
     )

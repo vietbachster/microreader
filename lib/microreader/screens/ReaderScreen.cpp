@@ -5,9 +5,14 @@
 #include <string>
 
 #ifdef ESP_PLATFORM
+#include <sys/stat.h>
+#include <unistd.h>
+
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#else
+#include <filesystem>
 #endif
 
 namespace microreader {
@@ -123,8 +128,9 @@ static std::string make_book_key(const EpubMetadata& meta, const char* epub_path
 void ReaderScreen::start(DrawBuffer& buf) {
   buf_ = &buf;
   book_key_.clear();
+  pos_path_.clear();
 
-  // Build .mrb path from epub filename: <data_dir>/<basename>.mrb
+  // Build cache path: <data_dir>/cache/<basename>/book.mrb
   {
     const char* name = path_.c_str();
     const char* sep = std::strrchr(path_.c_str(), '/');
@@ -137,7 +143,13 @@ void ReaderScreen::start(DrawBuffer& buf) {
       name = sep + 1;
     const char* dot = std::strrchr(name, '.');
     size_t name_len = dot ? static_cast<size_t>(dot - name) : std::strlen(name);
-    mrb_path_ = std::string(data_dir_) + "/" + std::string(name, name_len) + ".mrb";
+    std::string book_cache_dir = std::string(data_dir_) + "/cache/" + std::string(name, name_len);
+#ifdef ESP_PLATFORM
+    mkdir(book_cache_dir.c_str(), 0775);
+#else
+    std::filesystem::create_directories(book_cache_dir);
+#endif
+    mrb_path_ = book_cache_dir + "/book.mrb";
   }
 
   bool mrb_ok = mrb_.open(mrb_path_.c_str());
@@ -184,6 +196,7 @@ void ReaderScreen::start(DrawBuffer& buf) {
   // Derive a stable book key from MRB metadata (title + author).
   // This survives epub file renames while staying unique across different books.
   book_key_ = make_book_key(mrb_.metadata(), path_.c_str());
+  pos_path_ = std::string(data_dir_) + "/data/" + book_key_ + ".pos";
 
   open_ok_ = true;
   chapter_idx_ = 0;
@@ -239,6 +252,8 @@ void ReaderScreen::stop() {
   page_ = PageContent{};
   mrb_path_.clear();
   mrb_path_.shrink_to_fit();
+  pos_path_.clear();
+  pos_path_.shrink_to_fit();
   book_key_.clear();
   book_key_.shrink_to_fit();
   open_ok_ = false;
@@ -554,9 +569,9 @@ bool ReaderScreen::prev_page_() {
 // ---------------------------------------------------------------------------
 
 void ReaderScreen::save_position_() {
-  if (data_dir_.empty() || book_key_.empty())
+  if (pos_path_.empty())
     return;
-  std::string path = data_dir_ + "/" + book_key_ + ".pos";
+  const std::string& path = pos_path_;
   FILE* f = std::fopen(path.c_str(), "w");
   if (!f)
     return;
@@ -566,9 +581,9 @@ void ReaderScreen::save_position_() {
 }
 
 void ReaderScreen::load_position_() {
-  if (data_dir_.empty() || book_key_.empty())
+  if (pos_path_.empty())
     return;
-  std::string path = data_dir_ + "/" + book_key_ + ".pos";
+  const std::string& path = pos_path_;
   FILE* f = std::fopen(path.c_str(), "r");
   if (!f)
     return;
