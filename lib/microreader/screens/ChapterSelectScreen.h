@@ -28,6 +28,10 @@ class ChapterSelectScreen final : public ListMenuScreen {
   bool has_pending() const {
     return has_pending_;
   }
+  // Returns true if this screen was populated with a non-empty TOC.
+  bool has_toc() const {
+    return !entries_.empty();
+  }
   // The chapter index to jump to (valid only when has_pending() == true).
   uint16_t pending_chapter() const {
     return pending_chapter_;

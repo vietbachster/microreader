@@ -206,10 +206,10 @@ void ReaderScreen::start(DrawBuffer& buf) {
   image_size_fn_ = make_image_size_query(mrb_, path_, static_cast<uint16_t>(DrawBuffer::kWidth));
   // Restore position: if the user selected a chapter from the TOC, jump there;
   // otherwise load saved bookmark from disk (defaults to 0/{0,0} on first open).
-  if (chapter_select_.has_pending()) {
-    saved_chapter_idx_ = chapter_select_.pending_chapter();
-    saved_page_pos_ = PagePosition{chapter_select_.pending_para_index(), 0};
-    chapter_select_.clear_pending();
+  if (reader_options_.chapter_select().has_pending()) {
+    saved_chapter_idx_ = reader_options_.chapter_select().pending_chapter();
+    saved_page_pos_ = PagePosition{reader_options_.chapter_select().pending_para_index(), 0};
+    reader_options_.chapter_select().clear_pending();
   } else {
     load_position_();
   }
@@ -269,12 +269,13 @@ bool ReaderScreen::update(const ButtonState& buttons, DrawBuffer& buf, IRuntime&
   if (!open_ok_)
     return true;
 
-  // Button1: open chapter list (only if TOC is available).
-  if (buttons.is_pressed(Button::Button1) && !mrb_.toc().entries.empty()) {
+  // Button1: open reader options menu.
+  if (buttons.is_pressed(Button::Button1)) {
     saved_chapter_idx_ = chapter_idx_;
     saved_page_pos_ = page_pos_;
-    chapter_select_.populate(mrb_.toc(), static_cast<uint16_t>(chapter_idx_), page_pos_.paragraph);
-    nav_chosen_ = &chapter_select_;
+    reader_options_.set_settings(&reader_settings_);
+    reader_options_.populate(mrb_.toc(), static_cast<uint16_t>(chapter_idx_), page_pos_.paragraph);
+    nav_chosen_ = &reader_options_;
     return false;
   }
 
@@ -326,10 +327,13 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
   FixedFont fixed_font(kGlyphW * kScale, kGlyphH * kScale + 4);
   const BitmapFontSet* fset = ext_font_set_ ? ext_font_set_ : (font_set_.valid() ? &font_set_ : nullptr);
   IFont& font = fset ? static_cast<IFont&>(const_cast<BitmapFontSet&>(*fset)) : static_cast<IFont&>(fixed_font);
-  PageOptions opts(static_cast<uint16_t>(W), static_cast<uint16_t>(H), kPaddingTop, kParaSpacing, Alignment::Start);
-  opts.padding_right = kPaddingRight;
-  opts.padding_bottom = kPaddingBottom;
-  opts.padding_left = kPaddingLeft;
+  PageOptions opts(static_cast<uint16_t>(W), static_cast<uint16_t>(H), kPaddingTop, 8 /*para_spacing*/,
+                   reader_settings_.justify ? Alignment::Justify : Alignment::Start);
+  opts.padding_right = reader_settings_.h_padding();
+  opts.padding_bottom = static_cast<uint16_t>(kPaddingBottom + reader_settings_.v_padding());
+  opts.padding_left = reader_settings_.h_padding();
+  opts.padding_top = reader_settings_.v_padding();
+  opts.extra_line_spacing = reader_settings_.extra_line_spacing();
   opts.center_text = true;
   layout_engine_.set_font(font);
   layout_engine_.set_options(opts);
@@ -382,7 +386,7 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
   buf.fill(true);
 
   if (fset) {
-    render_text_(buf, *fset, GrayPlane::BW, false);
+    render_text_(buf, *fset, GrayPlane::BW, false, reader_settings_.h_padding());
   } else {
     for (const auto& ci : page_.items) {
       const PageTextItem* item = std::get_if<PageTextItem>(&ci);
@@ -397,7 +401,8 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
           tlen = 63;
         std::memcpy(text, w.text, tlen);
         text[tlen] = '\0';
-        buf.draw_text_no_bg(kPaddingLeft + w.x, static_cast<int>(item->y_offset), text, false /*black*/, kScale);
+        buf.draw_text_no_bg(reader_settings_.h_padding() + w.x, static_cast<int>(item->y_offset), text, false /*black*/,
+                            kScale);
       }
     }
   }
@@ -469,7 +474,8 @@ size_t ReaderScreen::current_chapter_index() const {
   return chapter_idx_;
 }
 
-void ReaderScreen::render_text_(DrawBuffer& buf, const BitmapFontSet& fset, GrayPlane plane, bool white) {
+void ReaderScreen::render_text_(DrawBuffer& buf, const BitmapFontSet& fset, GrayPlane plane, bool white,
+                                int left_padding) {
   uint8_t* render = buf.render_buf();
   for (const auto& ci : page_.items) {
     const PageTextItem* item = std::get_if<PageTextItem>(&ci);
@@ -478,7 +484,7 @@ void ReaderScreen::render_text_(DrawBuffer& buf, const BitmapFontSet& fset, Gray
     for (const auto& w : item->line.words) {
       if (w.len == 0)
         continue;
-      int x = kPaddingLeft + w.x;
+      int x = left_padding + w.x;
       int baseline_y = static_cast<int>(item->y_offset) + item->baseline;
       if (w.vertical_align == VerticalAlign::Super)
         baseline_y -= fset.y_advance(w.size) * 20 / 100;
@@ -502,12 +508,12 @@ void ReaderScreen::apply_grayscale_(DrawBuffer& buf) {
 
   // LSB plane → BW RAM (no refresh)
   buf.fill(false);
-  render_text_(buf, *fset, GrayPlane::LSB, true);
+  render_text_(buf, *fset, GrayPlane::LSB, true, reader_settings_.h_padding());
   buf.write_ram_bw();
 
   // MSB plane → RED RAM (no refresh)
   buf.fill(false);
-  render_text_(buf, *fset, GrayPlane::MSB, true);
+  render_text_(buf, *fset, GrayPlane::MSB, true, reader_settings_.h_padding());
   buf.write_ram_red();
 
   // Trigger grayscale refresh with custom LUT

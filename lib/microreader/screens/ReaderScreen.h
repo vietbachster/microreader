@@ -9,8 +9,8 @@
 #include "../content/mrb/MrbConverter.h"
 #include "../content/mrb/MrbReader.h"
 #include "../display/DrawBuffer.h"
-#include "ChapterSelectScreen.h"
 #include "IScreen.h"
+#include "ReaderOptionsScreen.h"
 
 namespace microreader {
 
@@ -59,7 +59,7 @@ class ReaderScreen final : public IScreen {
     return "Reader";
   }
 
-  // Returns the chapter select screen to push (set when Button1 pressed), or null.
+  // Returns the reader options screen to push (set when Button1 pressed), or null.
   IScreen* chosen() const {
     return nav_chosen_;
   }
@@ -112,8 +112,9 @@ class ReaderScreen final : public IScreen {
   PageContent page_;
   bool open_ok_ = false;
 
-  // Chapter select screen — owned here, pushed when user presses Button1.
-  ChapterSelectScreen chapter_select_;
+  // Reader options menu — owned here, pushed when user presses Button1.
+  ReaderOptionsScreen reader_options_;
+  ReaderSettings reader_settings_;  // user-adjustable settings, mutated by reader_options_
   IScreen* nav_chosen_ = nullptr;
 
   // Saved position (survives stop()) so we can restore after chapter select cancel.
@@ -131,7 +132,7 @@ class ReaderScreen final : public IScreen {
   // Deferred grayscale pass: writes LSB/MSB planes to BW/RED RAM and triggers
   // grayscale LUT refresh. Called from update() after BW refresh is committed.
   void apply_grayscale_(DrawBuffer& buf);
-  void render_text_(DrawBuffer& buf, const BitmapFontSet& fset, GrayPlane plane, bool white);
+  void render_text_(DrawBuffer& buf, const BitmapFontSet& fset, GrayPlane plane, bool white, int left_padding);
   bool next_page_();
   bool prev_page_();
   void load_chapter_(size_t idx);

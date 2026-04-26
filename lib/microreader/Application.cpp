@@ -105,16 +105,16 @@ void Application::update(const ButtonState& buttons, uint32_t dt_ms, DrawBuffer&
           buf.refresh();
         }
       } else {
-        // Check if the exiting screen selected a sub-screen to push.
-        IScreen* next = nullptr;
-        auto* settings = menu_.settings();
-        auto* reader = menu_.reader();
-        if (top == settings)
-          next = settings->chosen();
-        else if (top == reader)
-          next = reader->chosen();
+        // Check if the exiting screen wants to replace itself or push a sub-screen.
+        IScreen* replace = top->replace_with();
+        IScreen* next = top->chosen();
 
-        if (next) {
+        if (replace) {
+          // Pop the current screen then push the replacement.
+          screen_mgr_.pop(buf);
+          screen_mgr_.push(replace, buf);
+          buf.refresh();
+        } else if (next) {
           screen_mgr_.push(next, buf);
           buf.refresh();
         } else {

@@ -403,7 +403,12 @@ const TextLayout::LaidOutParagraph& TextLayout::get_laid_out_(size_t pi) const {
       slot.line_heights.resize(slot.lines.size());
       slot.line_baselines.resize(slot.lines.size());
       for (size_t i = 0; i < slot.lines.size(); ++i) {
-        slot.line_heights[i] = compute_line_height(font, slot.lines[i], para.text.line_height_pct);
+        uint16_t lh = compute_line_height(font, slot.lines[i], para.text.line_height_pct);
+        if (opts.extra_line_spacing != 0) {
+          int32_t adjusted = static_cast<int32_t>(lh) + opts.extra_line_spacing;
+          lh = adjusted < 1 ? 1 : static_cast<uint16_t>(adjusted);
+        }
+        slot.line_heights[i] = lh;
         slot.line_baselines[i] = line_baseline(font, slot.lines[i]);
       }
       if (!img.promoted && img.has_image && img.width > 0 && img.height > 0 && !slot.lines.empty()) {
@@ -500,8 +505,10 @@ static uint16_t build_page_items(PageContent& page, std::vector<TextLayout::Page
   uint16_t y = 0, prev_para = UINT16_MAX;
 
   for (auto& item : raw) {
-    if (prev_para != UINT16_MAX && item.para_idx != prev_para)
-      y += source.paragraph(item.para_idx).spacing_before.value_or(opts.para_spacing);
+    if (prev_para != UINT16_MAX && item.para_idx != prev_para) {
+      uint16_t spc = source.paragraph(item.para_idx).spacing_before.value_or(opts.para_spacing);
+      y += spc;
+    }
 
     switch (item.kind) {
       case TextLayout::PageItem::TextLine: {
@@ -608,7 +615,8 @@ static void spread_text_items(PageContent& page, const PageOptions& opts, const 
     auto& b = page.items[idxs[i + 1]];
     raw_gaps[i] = std::max(INT32_C(0), static_cast<int32_t>(item_y(b)) - static_cast<int32_t>(item_y(a)) -
                                            static_cast<int32_t>(item_height(a)));
-    weights[i] = (item_is_block(a) || item_is_block(b)) ? 8 : (item_para_idx(a) != item_para_idx(b) ? 3 : 1);
+    bool inter_para = !item_is_block(a) && !item_is_block(b) && item_para_idx(a) != item_para_idx(b);
+    weights[i] = (item_is_block(a) || item_is_block(b)) ? 8 : (inter_para ? 4 : 0);
     total_weight += weights[i];
   }
   if (total_weight == 0)
@@ -984,7 +992,8 @@ TextLayout::CollectResult TextLayout::collect_page_items(PagePosition pos) const
 
     const auto& para_spc = source_->paragraph(pi).spacing_before;
     // spc=0 for the starting paragraph (its Spacer, if any, is part of its own collect index space).
-    uint16_t spc = (pi == (size_t)pos.paragraph) ? 0 : para_spc.value_or(opts_.para_spacing);
+    int spc_i = (pi == (size_t)pos.paragraph) ? 0 : static_cast<int>(para_spc.value_or(opts_.para_spacing));
+    uint16_t spc = static_cast<uint16_t>(spc_i < 0 ? 0 : spc_i);
     size_t start_idx = (pi == (size_t)pos.paragraph) ? (size_t)pos.offset : 0;
 
     size_t break_idx =
@@ -1151,7 +1160,10 @@ TextLayout::CollectResult TextLayout::collect_page_items_backward(PagePosition e
     // Inter-paragraph spacing: gap between pi and the next paragraph (pi+1).
     // spacing_before[pi+1] is applied by assemble_page when pi+1's first item follows pi's.
     // Only budget it once items from later paragraphs are already collected.
-    uint16_t spc = (!rev_items.empty()) ? source_->paragraph(pi + 1).spacing_before.value_or(opts_.para_spacing) : 0;
+    int spc_i = (!rev_items.empty())
+                    ? static_cast<int>(source_->paragraph(pi + 1).spacing_before.value_or(opts_.para_spacing))
+                    : 0;
+    uint16_t spc = static_cast<uint16_t>(spc_i < 0 ? 0 : spc_i);
 
     size_t remaining = collect_para_items_bwd(lp, para_end_idx, spc, ph, used, page_full, rev_items);
 

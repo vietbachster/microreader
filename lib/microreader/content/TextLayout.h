@@ -125,7 +125,8 @@ struct PageOptions {
   uint16_t padding_right = 10;
   uint16_t padding_bottom = 10;
   uint16_t padding_left = 10;
-  uint16_t para_spacing = 8;  // extra pixels between paragraphs
+  uint16_t para_spacing = 8;       // pixels between paragraphs (fallback when CSS spacing_before not set)
+  int16_t extra_line_spacing = 0;  // signed additive pixels added to every line's height (user line-spacing setting)
   Alignment alignment = Alignment::Justify;
   bool center_text = false;  // vertically center text content within the padded area
 
