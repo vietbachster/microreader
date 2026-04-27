@@ -12,11 +12,18 @@ namespace microreader {
 // ReaderSettings — user-adjustable reader preferences
 // Stored in ReaderScreen; mutated inline by ReaderOptionsScreen.
 // ---------------------------------------------------------------------------
+enum class ProgressStyle : uint8_t {
+  None = 0,
+  Percentage = 1,
+  Bar = 2,
+};
+
 struct ReaderSettings {
-  bool justify = false;          // false = left-align (default); true = justify
-  uint8_t padding_h_idx = 1;     // horizontal padding preset index (left & right)
-  uint8_t padding_v_idx = 1;     // vertical top padding preset index
-  uint8_t line_spacing_idx = 2;  // paragraph spacing preset index (2 = Normal)
+  bool justify = false;                               // false = left-align (default); true = justify
+  uint8_t padding_h_idx = 1;                          // horizontal padding preset index (left & right)
+  uint8_t padding_v_idx = 1;                          // vertical top padding preset index
+  uint8_t line_spacing_idx = 2;                       // paragraph spacing preset index (2 = Normal)
+  ProgressStyle progress_style = ProgressStyle::Bar;  // reading progress indicator style
 
   static constexpr uint16_t kHPaddingPresets[] = {4, 12, 24, 40};
   static constexpr uint16_t kVPaddingPresets[] = {0, 4, 8, 12};
@@ -37,6 +44,17 @@ struct ReaderSettings {
   }
   int16_t extra_line_spacing() const {
     return kSpacingPresets[line_spacing_idx];
+  }
+  // Bottom padding reserved for the progress indicator.
+  uint16_t progress_bottom() const {
+    switch (progress_style) {
+      case ProgressStyle::Percentage:
+        return 16;
+      case ProgressStyle::Bar:
+        return 8;
+      default:
+        return 6;
+    }
   }
 };
 
@@ -93,6 +111,7 @@ class ReaderOptionsScreen final : public ListMenuScreen {
   int idx_padding_h_ = -1;
   int idx_padding_v_ = -1;
   int idx_line_spacing_ = -1;
+  int idx_progress_ = -1;
   int idx_chapters_ = -1;
 
   // Re-populate item labels after an inline setting change, restoring selection.

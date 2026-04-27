@@ -162,6 +162,7 @@ void microreader::Application::save_settings_() {
   std::fprintf(f, "padding_h=%u\n", static_cast<unsigned>(rs.padding_h_idx));
   std::fprintf(f, "padding_v=%u\n", static_cast<unsigned>(rs.padding_v_idx));
   std::fprintf(f, "line_spacing=%u\n", static_cast<unsigned>(rs.line_spacing_idx));
+  std::fprintf(f, "progress=%u\n", static_cast<unsigned>(rs.progress_style));
 
   std::fclose(f);
 }
@@ -199,10 +200,12 @@ void microreader::Application::load_settings_() {
       rs.padding_v_idx = uval < ReaderSettings::kNumPresets ? static_cast<uint8_t>(uval) : 1;
     else if (std::sscanf(line, "line_spacing=%u", &uval) == 1)
       rs.line_spacing_idx = uval < ReaderSettings::kNumSpacingPresets ? static_cast<uint8_t>(uval) : 2;
+    else if (std::sscanf(line, "progress=%u", &uval) == 1)
+      rs.progress_style = uval <= 2 ? static_cast<ProgressStyle>(uval) : ProgressStyle::Bar;
   }
   std::fclose(f);
-  MR_LOGI("app", "Loaded settings: justify=%d ph=%u pv=%u ls=%u sel=%s", rs.justify, rs.padding_h_idx, rs.padding_v_idx,
-          rs.line_spacing_idx, book_sel.c_str());
+  MR_LOGI("app", "Loaded settings: justify=%d ph=%u pv=%u ls=%u prog=%u sel=%s", rs.justify, rs.padding_h_idx,
+          rs.padding_v_idx, rs.line_spacing_idx, static_cast<unsigned>(rs.progress_style), book_sel.c_str());
 
   // Restore book list selection highlight
   if (!book_sel.empty())

@@ -94,17 +94,17 @@ class MrbWriter {
   std::vector<MrbImageRef> images_;
   bool in_chapter_ = false;
 
-  // Linked-list tracking: file offsets of prev/next paragraph within a chapter.
-  uint32_t prev_para_offset_ = 0;      // offset of the previous paragraph (0 = none)
-  uint32_t chapter_first_offset_ = 0;  // offset of first paragraph in current chapter
-  uint16_t chapter_para_count_ = 0;    // paragraph count in current chapter
+  // Per-chapter state
+  uint16_t chapter_para_count_ = 0;  // paragraph count in current chapter
+  uint32_t chapter_char_count_ = 0;  // total text chars (bytes) in current chapter
 
-  // Deferred paragraph write: we buffer the serialized bytes of the most
-  // recent paragraph so that when the *next* paragraph arrives we can patch
-  // its next_offset (at byte 4) before flushing to disk.  This eliminates
-  // all backward seeks that the old end_chapter() link-patching required.
-  std::vector<uint8_t> pending_para_;
-  uint32_t pending_para_offset_ = 0;  // file offset where pending_para_ will be written
+  // Descriptor table built during a chapter: (file_offset, char_offset) per paragraph.
+  // Written to disk at end_chapter(); allows O(1) paragraph lookup at read time.
+  struct ParaDesc {
+    uint32_t file_offset;
+    uint32_t char_offset;
+  };
+  std::vector<ParaDesc> para_descriptors_;
 
   // Reusable serialization buffer (avoids per-paragraph heap allocation).
   std::vector<uint8_t> serialize_buf_;
@@ -114,14 +114,6 @@ class MrbWriter {
 
   // Write raw bytes.
   bool write_bytes(const void* data, size_t size);
-
-  // Flush the pending paragraph buffer to disk.  If next_offset is non-zero,
-  // it is patched into bytes [4..7] before writing.
-  bool flush_pending(uint32_t next_offset);
-
-  // Serialize a paragraph into pending_para_ (link header + type + data).
-  // Does NOT write to disk — the bytes stay buffered until flush_pending().
-  bool stage_paragraph(const Paragraph& para);
 
   // Write a length-prefixed UTF-8 string (uint16 length + bytes).
   bool write_string(const std::string& s);

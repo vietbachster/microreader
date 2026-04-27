@@ -95,21 +95,17 @@ void MrbWriter::close() {
   paragraph_count_ = 0;
   chapters_.clear();
   images_.clear();
-  pending_para_.clear();
+  para_descriptors_.clear();
   serialize_buf_.clear();
   in_chapter_ = false;
-  prev_para_offset_ = 0;
-  pending_para_offset_ = 0;
-  chapter_first_offset_ = 0;
   chapter_para_count_ = 0;
+  chapter_char_count_ = 0;
 }
 
 void MrbWriter::begin_chapter() {
-  prev_para_offset_ = 0;
-  chapter_first_offset_ = 0;
   chapter_para_count_ = 0;
-  pending_para_.clear();
-  pending_para_offset_ = 0;
+  chapter_char_count_ = 0;
+  para_descriptors_.clear();
   in_chapter_ = true;
 }
 
@@ -117,59 +113,40 @@ void MrbWriter::end_chapter() {
   if (!in_chapter_)
     return;
 
-  // Flush the last buffered paragraph with next_offset = 0 (end of chain).
-  if (!pending_para_.empty())
-    flush_pending(0);
+  // Write the descriptor table: N × { file_offset(u32), char_offset(u32) }.
+  uint32_t table_offset = bw_.tell();
+  for (const auto& d : para_descriptors_) {
+    uint8_t buf[8];
+    mrb_write_u32(buf, d.file_offset);
+    mrb_write_u32(buf + 4, d.char_offset);
+    write_bytes(buf, 8);
+  }
 
   MrbChapterEntry entry{};
-  entry.first_para_offset = chapter_first_offset_;
-  entry.last_para_offset = prev_para_offset_;  // last written paragraph
+  entry.para_table_offset = table_offset;
+  entry.reserved = 0;
   entry.paragraph_count = chapter_para_count_;
+  entry.reserved1 = 0;
+  entry.char_count = chapter_char_count_;
   chapters_.push_back(entry);
+  para_descriptors_.clear();
   in_chapter_ = false;
 }
 
-bool MrbWriter::flush_pending(uint32_t next_offset) {
-  if (pending_para_.empty())
-    return true;
-  // Patch next_offset at bytes [4..7] in the buffered paragraph.
-  mrb_write_u32(pending_para_.data() + 4, next_offset);
-  if (!write_bytes(pending_para_.data(), pending_para_.size()))
-    return false;
-  pending_para_.clear();
-  return true;
-}
-
-bool MrbWriter::stage_paragraph(const Paragraph& para) {
+bool MrbWriter::write_paragraph(const Paragraph& para) {
   if (!bw_.is_open())
     return false;
 
-  // The file offset where this paragraph will land.
-  // bw_.tell() gives the current disk position; add the pending paragraph size
-  // because it hasn't been flushed yet.
-  uint32_t this_offset = bw_.tell() + static_cast<uint32_t>(pending_para_.size());
+  // Record descriptor: (current file position, chars accumulated so far).
+  para_descriptors_.push_back({bw_.tell(), chapter_char_count_});
 
-  // If there is a previously staged paragraph, flush it now that we know
-  // next_offset (= this_offset).
-  if (!pending_para_.empty()) {
-    if (!flush_pending(this_offset))
-      return false;
+  // Count chars for text paragraphs.
+  if (para.type == ParagraphType::Text) {
+    for (const auto& run : para.text.runs)
+      chapter_char_count_ += static_cast<uint32_t>(run.text.size());
   }
 
-  // Track first paragraph in chapter.
-  if (chapter_para_count_ == 0)
-    chapter_first_offset_ = this_offset;
-
-  // Build the complete paragraph bytes into pending_para_.
-  pending_para_.clear();
-
-  // Link header: [prev_offset(4)] [next_offset(4)]  — next patched later.
-  uint8_t link[8];
-  mrb_write_u32(link, prev_para_offset_);
-  mrb_write_u32(link + 4, 0);  // next = 0 placeholder
-  pending_para_.insert(pending_para_.end(), link, link + 8);
-
-  // Paragraph body.
+  // Serialize and write: [type(1)][data_size(4)][data...] — no link header.
   switch (para.type) {
     case ParagraphType::Text: {
       uint16_t spacing = para.spacing_before.value_or(kMrbSpacingDefault);
@@ -177,9 +154,10 @@ bool MrbWriter::stage_paragraph(const Paragraph& para) {
       uint8_t hdr[5];
       hdr[0] = kMrbParaText;
       mrb_write_u32(hdr + 1, static_cast<uint32_t>(serialize_buf_.size()));
-      pending_para_.insert(pending_para_.end(), hdr, hdr + 5);
-      if (!serialize_buf_.empty())
-        pending_para_.insert(pending_para_.end(), serialize_buf_.begin(), serialize_buf_.end());
+      if (!write_bytes(hdr, 5))
+        return false;
+      if (!serialize_buf_.empty() && !write_bytes(serialize_buf_.data(), serialize_buf_.size()))
+        return false;
       break;
     }
     case ParagraphType::Image: {
@@ -188,7 +166,8 @@ bool MrbWriter::stage_paragraph(const Paragraph& para) {
       mrb_write_u32(buf + 1, 4);
       mrb_write_u16(buf + 5, para.image.key);
       mrb_write_u16(buf + 7, para.spacing_before.value_or(kMrbSpacingDefault));
-      pending_para_.insert(pending_para_.end(), buf, buf + 9);
+      if (!write_bytes(buf, 9))
+        return false;
       break;
     }
     case ParagraphType::Hr: {
@@ -196,27 +175,23 @@ bool MrbWriter::stage_paragraph(const Paragraph& para) {
       buf[0] = kMrbParaHr;
       mrb_write_u32(buf + 1, 2);
       mrb_write_u16(buf + 5, para.spacing_before.value_or(kMrbSpacingDefault));
-      pending_para_.insert(pending_para_.end(), buf, buf + 7);
+      if (!write_bytes(buf, 7))
+        return false;
       break;
     }
     case ParagraphType::PageBreak: {
       uint8_t buf[5];
       buf[0] = kMrbParaPageBreak;
       mrb_write_u32(buf + 1, 0);
-      pending_para_.insert(pending_para_.end(), buf, buf + 5);
+      if (!write_bytes(buf, 5))
+        return false;
       break;
     }
   }
 
-  pending_para_offset_ = this_offset;
-  prev_para_offset_ = this_offset;
   ++chapter_para_count_;
   ++paragraph_count_;
   return true;
-}
-
-bool MrbWriter::write_paragraph(const Paragraph& para) {
-  return stage_paragraph(para);
 }
 
 uint16_t MrbWriter::add_image_ref(uint32_t local_header_offset, uint16_t width, uint16_t height) {
@@ -248,11 +223,11 @@ bool MrbWriter::finish(const EpubMetadata& meta, const TableOfContents& toc) {
   uint32_t chapter_offset = bw_.tell();
   for (const auto& ch : chapters_) {
     uint8_t buf[16];
-    mrb_write_u32(buf, ch.first_para_offset);
-    mrb_write_u32(buf + 4, ch.last_para_offset);
+    mrb_write_u32(buf, ch.para_table_offset);
+    mrb_write_u32(buf + 4, ch.reserved);
     mrb_write_u16(buf + 8, ch.paragraph_count);
     mrb_write_u16(buf + 10, 0);
-    mrb_write_u32(buf + 12, 0);
+    mrb_write_u32(buf + 12, ch.char_count);
     if (!write_bytes(buf, 16))
       return false;
   }

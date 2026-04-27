@@ -330,7 +330,7 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
   PageOptions opts(static_cast<uint16_t>(W), static_cast<uint16_t>(H), kPaddingTop, 8 /*para_spacing*/,
                    reader_settings_.justify ? Alignment::Justify : Alignment::Start);
   opts.padding_right = reader_settings_.h_padding();
-  opts.padding_bottom = static_cast<uint16_t>(kPaddingBottom + reader_settings_.v_padding());
+  opts.padding_bottom = static_cast<uint16_t>(reader_settings_.progress_bottom() + reader_settings_.v_padding());
   opts.padding_left = reader_settings_.h_padding();
   opts.padding_top = static_cast<uint16_t>(kPaddingTop + reader_settings_.v_padding());
   opts.extra_line_spacing = reader_settings_.extra_line_spacing();
@@ -422,15 +422,30 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
     }
   }
 
-  if (mrb_.paragraph_count() > 0) {
+  if (mrb_.paragraph_count() > 0 && reader_settings_.progress_style != ProgressStyle::None) {
     const bool is_last_chapter = chapter_idx_ + 1 >= mrb_.chapter_count();
-    uint32_t cur = page_pos_.paragraph;
-    for (size_t i = 0; i < chapter_idx_; ++i)
-      cur += mrb_.chapter_paragraph_count(static_cast<uint16_t>(i));
-    int pct = (page_.at_chapter_end && is_last_chapter) ? 100 : static_cast<int>(cur * 100u / mrb_.paragraph_count());
-    char pct_str[8];
-    snprintf(pct_str, sizeof(pct_str), "%d%%", pct);
-    buf.draw_text_centered(W / 2, H - 14, pct_str, true);
+    int pct = 0;
+    if (page_.at_chapter_end && is_last_chapter) {
+      pct = 100;
+    } else {
+      const uint64_t total_chars = mrb_.total_char_count();
+      uint64_t chars_before = 0;
+      for (size_t i = 0; i < chapter_idx_; ++i)
+        chars_before += mrb_.chapter_char_count(static_cast<uint16_t>(i));
+      const uint64_t cur = chars_before + (chapter_src_ ? chapter_src_->char_before_para(page_pos_.paragraph) : 0);
+      pct = total_chars > 0 ? static_cast<int>(cur * 100u / total_chars) : 0;
+    }
+    if (reader_settings_.progress_style == ProgressStyle::Percentage) {
+      char pct_str[8];
+      snprintf(pct_str, sizeof(pct_str), "%d%%", pct);
+      buf.draw_text_centered(W / 2, H - 14, pct_str, true);
+    } else {
+      // Progress bar: a thin filled line at the very bottom of the screen.
+      constexpr int kBarH = 3;
+      const int bar_w = pct * W / 100;
+      buf.fill_rect(0, H - kBarH, bar_w, kBarH, false);         // filled portion (black)
+      buf.fill_rect(bar_w, H - kBarH, W - bar_w, kBarH, true);  // unfilled portion (white)
+    }
   }
 
   // ── Timing ──────────────────────────────────────────────────────────────
@@ -578,26 +593,39 @@ bool ReaderScreen::prev_page_() {
 void ReaderScreen::save_position_() {
   if (pos_path_.empty())
     return;
-  const std::string& path = pos_path_;
-  FILE* f = std::fopen(path.c_str(), "w");
+  FILE* f = std::fopen(pos_path_.c_str(), "w");
   if (!f)
     return;
   std::fprintf(f, "%u %u %u\n", static_cast<unsigned>(chapter_idx_), static_cast<unsigned>(page_pos_.paragraph),
                static_cast<unsigned>(page_pos_.offset));
+  std::fprintf(f, "%u %u %u %u %u\n",
+               static_cast<unsigned>(reader_settings_.justify ? 1 : 0),
+               static_cast<unsigned>(reader_settings_.padding_h_idx),
+               static_cast<unsigned>(reader_settings_.padding_v_idx),
+               static_cast<unsigned>(reader_settings_.line_spacing_idx),
+               static_cast<unsigned>(reader_settings_.progress_style));
   std::fclose(f);
 }
 
 void ReaderScreen::load_position_() {
   if (pos_path_.empty())
     return;
-  const std::string& path = pos_path_;
-  FILE* f = std::fopen(path.c_str(), "r");
+  FILE* f = std::fopen(pos_path_.c_str(), "r");
   if (!f)
     return;
   unsigned ch = 0, para = 0, line = 0;
   if (std::fscanf(f, "%u %u %u", &ch, &para, &line) == 3) {
     saved_chapter_idx_ = ch;
     saved_page_pos_ = PagePosition{static_cast<uint16_t>(para), static_cast<uint16_t>(line)};
+  }
+  // Load settings if present (second line — optional for backwards compat).
+  unsigned justify = 0, ph = 1, pv = 1, ls = 2, ps = static_cast<unsigned>(ProgressStyle::Bar);
+  if (std::fscanf(f, " %u %u %u %u %u", &justify, &ph, &pv, &ls, &ps) == 5) {
+    reader_settings_.justify = (justify != 0);
+    reader_settings_.padding_h_idx = static_cast<uint8_t>(ph < ReaderSettings::kNumPresets ? ph : 1);
+    reader_settings_.padding_v_idx = static_cast<uint8_t>(pv < ReaderSettings::kNumPresets ? pv : 1);
+    reader_settings_.line_spacing_idx = static_cast<uint8_t>(ls < ReaderSettings::kNumSpacingPresets ? ls : 2);
+    reader_settings_.progress_style = ps <= 2 ? static_cast<ProgressStyle>(ps) : ProgressStyle::Bar;
   }
   std::fclose(f);
 }

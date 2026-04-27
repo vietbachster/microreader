@@ -1,18 +1,25 @@
 #pragma once
 
 // MRB (MicroReader Book) — pre-processed binary format for fast on-device
-// EPUB reading.  Stores paragraphs with styling and text inline.  Paragraphs
-// form a doubly-linked list per chapter (prev/next file offsets), so no
-// separate paragraph index is needed.
+// EPUB reading.  Stores paragraphs with styling and text inline.
 //
 // File layout (all values little-endian):
 //
 //   [Header 32 bytes]
-//   [Paragraph data — variable, written sequentially, each with prev/next links]
+//   [Paragraph data — variable, written sequentially]   ← no prev/next links
+//   [Per-chapter descriptor tables — paragraph_count × 8 bytes each]
 //   [Chapter table  — chapter_count  × 16 bytes]
 //   [Image ref table— image_count    × 8 bytes]
 //   [Metadata blob  — variable]
 //   [TOC blob       — variable]
+//
+// Per-chapter descriptor table (written immediately after the chapter's
+// last paragraph):
+//   N × { file_offset(u32), char_offset(u32) }
+// file_offset: absolute position of the paragraph record in the file.
+// char_offset: cumulative UTF-8 bytes of text before this paragraph.
+// This allows O(1) random access to any paragraph and accurate char-based
+// progress without reading any paragraph data.
 
 #include <cstdint>
 #include <cstring>
@@ -24,7 +31,7 @@ namespace microreader {
 // ---------------------------------------------------------------------------
 
 static constexpr uint8_t kMrbMagic[4] = {'M', 'R', 'B', '1'};
-static constexpr uint16_t kMrbVersion = 6;
+static constexpr uint16_t kMrbVersion = 8;  // v8: flat descriptor table replaces linked list
 
 // ---------------------------------------------------------------------------
 // Header (32 bytes, fixed)
@@ -49,11 +56,11 @@ static_assert(sizeof(MrbHeader) == 32, "MrbHeader must be 32 bytes");
 // ---------------------------------------------------------------------------
 
 struct MrbChapterEntry {
-  uint32_t first_para_offset;  // file offset of first paragraph in chapter
-  uint32_t last_para_offset;   // file offset of last paragraph in chapter
+  uint32_t para_table_offset;  // file offset of the paragraph descriptor table for this chapter
+  uint32_t reserved;           // unused
   uint16_t paragraph_count;
   uint16_t reserved1;
-  uint32_t reserved2;
+  uint32_t char_count;  // total UTF-8 bytes of text in this chapter
 };
 static_assert(sizeof(MrbChapterEntry) == 16, "MrbChapterEntry must be 16 bytes");
 

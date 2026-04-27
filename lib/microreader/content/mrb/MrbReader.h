@@ -46,17 +46,17 @@ class MrbReader {
   }
 
   // Chapter navigation
-  uint32_t chapter_first_offset(uint16_t chapter_idx) const;
-  uint32_t chapter_last_offset(uint16_t chapter_idx) const;
+  uint32_t chapter_para_table_offset(uint16_t chapter_idx) const;
   uint16_t chapter_paragraph_count(uint16_t chapter_idx) const;
+  uint32_t chapter_char_count(uint16_t chapter_idx) const;
+
+  // Sum of char_count across all chapters (0 if not stored, i.e. old MRB file).
+  uint64_t total_char_count() const;
 
   // Load a single paragraph at a given file offset.
-  // On success, fills `out` and returns the prev/next file offsets
-  // (0 means no prev/next — start/end of chapter).
+  // On success, fills `out` and sets ok = true.
   struct LoadResult {
     bool ok = false;
-    uint32_t prev_offset = 0;
-    uint32_t next_offset = 0;
   };
   LoadResult load_paragraph(uint32_t file_offset, Paragraph& out);
 
@@ -85,6 +85,8 @@ class MrbReader {
   bool read_at(uint32_t offset, void* buf, size_t size);
   std::string read_string();
   bool deserialize_text(const uint8_t* data, size_t size, Paragraph& out);
+
+  friend class MrbChapterSource;
 };
 
 // ---------------------------------------------------------------------------
@@ -109,25 +111,47 @@ class MrbChapterSource : public IParagraphSource {
     if (count == 0)
       return;
 
-    // Scan the linked list forward to build the offset vector
-    offsets_.reserve(count);
-    uint32_t cur = reader.chapter_first_offset(chapter_idx);
-    Paragraph tmp;
-    while (cur != 0 && offsets_.size() < count) {
-      offsets_.push_back(cur);
-      auto lr = reader.load_paragraph(cur, tmp);
-      if (!lr.ok)
-        break;
-      cur = lr.next_offset;
-    }
+    // Bulk-read the descriptor table: one seek + one fread of N×8 bytes.
+    uint32_t table_off = reader.chapter_para_table_offset(chapter_idx);
+    if (table_off == 0)
+      return;
 
-    size_t actual = offsets_.size() < kWindowSize ? offsets_.size() : kWindowSize;
+    offsets_.resize(count);
+    para_char_offsets_.resize(count);
+
+    fseek(reader.f_, static_cast<long>(table_off), SEEK_SET);
+    for (uint16_t i = 0; i < count; ++i) {
+      uint8_t buf[8];
+      if (fread(buf, 1, 8, reader.f_) != 8) {
+        offsets_.clear();
+        para_char_offsets_.clear();
+        return;
+      }
+      offsets_[i] = mrb_read_u32(buf);
+      para_char_offsets_[i] = mrb_read_u32(buf + 4);
+    }
+    total_chars_ = reader.chapter_char_count(chapter_idx);
+
+    size_t actual = count < kWindowSize ? count : kWindowSize;
     slots_.resize(actual);
     slot_index_.resize(actual, UINT32_MAX);
   }
 
   size_t paragraph_count() const override {
     return offsets_.size();
+  }
+
+  // Cumulative char offset just before paragraph `index` (0-based).
+  // Returns total_chars() when index >= paragraph_count (= chars in whole chapter).
+  uint32_t char_before_para(size_t index) const {
+    if (index >= para_char_offsets_.size())
+      return total_chars_;
+    return para_char_offsets_[index];
+  }
+
+  // Total chars in this chapter (sum of all run text lengths).
+  uint32_t total_chars() const {
+    return total_chars_;
   }
 
   const Paragraph& paragraph(size_t index) const override {
@@ -146,7 +170,9 @@ class MrbChapterSource : public IParagraphSource {
 
  private:
   MrbReader& reader_;
-  std::vector<uint32_t> offsets_;  // file offsets of each paragraph
+  std::vector<uint32_t> offsets_;            // file offsets of each paragraph
+  std::vector<uint32_t> para_char_offsets_;  // cumulative chars before each paragraph
+  uint32_t total_chars_ = 0;                 // total chars in this chapter
   mutable std::vector<Paragraph> slots_;
   mutable std::vector<uint32_t> slot_index_;  // UINT32_MAX = empty
 

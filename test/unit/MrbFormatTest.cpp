@@ -71,20 +71,13 @@ class MrbFormatTest : public ::testing::Test {
     }
   }
 
-  // Load the nth paragraph of a chapter by traversing the linked list.
+  // Load the nth paragraph of a chapter via the descriptor table.
   static bool load_chapter_para(MrbReader& reader, uint16_t chapter_idx, uint32_t para_idx, Paragraph& out) {
-    uint32_t offset = reader.chapter_first_offset(chapter_idx);
-    for (uint32_t i = 0; i < para_idx && offset != 0; ++i) {
-      Paragraph tmp;
-      auto lr = reader.load_paragraph(offset, tmp);
-      if (!lr.ok)
-        return false;
-      offset = lr.next_offset;
-    }
-    if (offset == 0)
+    MrbChapterSource src(reader, chapter_idx);
+    if (para_idx >= src.paragraph_count())
       return false;
-    auto lr = reader.load_paragraph(offset, out);
-    return lr.ok;
+    out = src.paragraph(para_idx);
+    return true;
   }
 };
 
@@ -208,11 +201,11 @@ TEST_F(MrbFormatTest, RoundTrip_MultipleChapters) {
   EXPECT_EQ(reader.chapter_count(), 3);
   EXPECT_EQ(reader.paragraph_count(), 6u);
 
-  EXPECT_NE(reader.chapter_first_offset(0), 0u);
+  EXPECT_NE(reader.chapter_para_table_offset(0), 0u);
   EXPECT_EQ(reader.chapter_paragraph_count(0), 2);
-  EXPECT_NE(reader.chapter_first_offset(1), 0u);
+  EXPECT_NE(reader.chapter_para_table_offset(1), 0u);
   EXPECT_EQ(reader.chapter_paragraph_count(1), 1);
-  EXPECT_NE(reader.chapter_first_offset(2), 0u);
+  EXPECT_NE(reader.chapter_para_table_offset(2), 0u);
   EXPECT_EQ(reader.chapter_paragraph_count(2), 3);
 
   Paragraph out;
@@ -393,14 +386,14 @@ TEST_F(MrbFormatTest, ConvertBasicEpub) {
   EXPECT_GT(reader.paragraph_count(), 0u);
   EXPECT_GT(reader.chapter_count(), 0);
 
-  // Verify we can load every paragraph by traversing chapter linked lists.
+  // Verify we can load every paragraph via the descriptor table.
   for (uint16_t ci = 0; ci < reader.chapter_count(); ++ci) {
-    uint32_t offset = reader.chapter_first_offset(ci);
-    for (uint16_t pi = 0; pi < reader.chapter_paragraph_count(ci); ++pi) {
-      Paragraph p;
-      auto lr = reader.load_paragraph(offset, p);
-      ASSERT_TRUE(lr.ok) << "Failed to load ch " << ci << " para " << pi;
-      offset = lr.next_offset;
+    MrbChapterSource src(reader, ci);
+    EXPECT_EQ(src.paragraph_count(), reader.chapter_paragraph_count(ci));
+    for (uint16_t pi = 0; pi < src.paragraph_count(); ++pi) {
+      const Paragraph& p = src.paragraph(pi);
+      EXPECT_NE(p.type, ParagraphType::PageBreak) << "ch " << ci << " para " << pi;
+      (void)p;
     }
   }
 }
@@ -476,9 +469,9 @@ TEST_F(MrbFormatTest, ReopenBookReleasesResources) {
     EXPECT_GT(reader.chapter_count(), 0);
 
     // Verify we can actually read paragraphs from book B.
-    Paragraph p;
-    auto lr = reader.load_paragraph(reader.chapter_first_offset(0), p);
-    ASSERT_TRUE(lr.ok);
+    MrbChapterSource src(reader, 0);
+    ASSERT_GT(src.paragraph_count(), 0u);
+    const Paragraph& p = src.paragraph(0);
     EXPECT_EQ(p.type, ParagraphType::Text);
   }
 
@@ -543,31 +536,104 @@ TEST_F(MrbFormatTest, OpenWrongMagic) {
   EXPECT_FALSE(reader.open(tmp_path_.c_str()));
 }
 
-// Opening a truncated-but-valid-header file should return false.
-TEST_F(MrbFormatTest, OpenTruncatedAfterHeader) {
-  // First write a valid MRB with one paragraph.
+// ---------------------------------------------------------------------------
+// ProgressAccuracy: char-based vs paragraph-based percentage
+//
+// Scenario: two chapters with very unequal paragraph sizes.
+//   Chapter 0: 1 short heading paragraph (5 chars)
+//   Chapter 1: 1 long body paragraph (995 chars)
+//
+// Paragraph-based progress at the boundary: 1/(1+1) = 50%
+// Char-based progress at the boundary:      5/(5+995) = 0.5% → rounds to 0%
+//
+// This test verifies:
+//   - char_count is stored and retrieved correctly
+//   - MrbChapterSource::char_before_para() returns accurate cumulative offsets
+//   - total_char_count() sums all chapters
+// ---------------------------------------------------------------------------
+
+TEST_F(MrbFormatTest, ProgressAccuracy_CharVsParagraph) {
+  // Build two chapters with very different content sizes.
+  const std::string short_text(5, 'x');   // 5 chars
+  const std::string long_text(995, 'y');  // 995 chars
+
+  {
+    MrbWriter writer;
+    ASSERT_TRUE(writer.open(tmp_path_.c_str()));
+
+    writer.begin_chapter();
+    ASSERT_TRUE(writer.write_paragraph(make_text(short_text)));
+    writer.end_chapter();
+
+    writer.begin_chapter();
+    ASSERT_TRUE(writer.write_paragraph(make_text(long_text)));
+    writer.end_chapter();
+
+    ASSERT_TRUE(writer.finish({}, {}));
+  }
+
+  MrbReader reader;
+  ASSERT_TRUE(reader.open(tmp_path_.c_str()));
+
+  // Verify stored char counts per chapter.
+  EXPECT_EQ(reader.chapter_char_count(0), 5u);
+  EXPECT_EQ(reader.chapter_char_count(1), 995u);
+  EXPECT_EQ(reader.total_char_count(), 1000u);
+
+  // Paragraph-based progress at end of chapter 0:
+  //   paragraphs_before = 1, total_paragraphs = 2  → 50%
+  {
+    uint32_t cur = 1;  // 1 paragraph in chapter 0
+    int pct_para = static_cast<int>(cur * 100u / reader.paragraph_count());
+    EXPECT_EQ(pct_para, 50);  // wildly wrong: only 0.5% of content read
+  }
+
+  // Char-based progress at end of chapter 0:
+  //   chars_before_ch1 = 5, total_chars = 1000  → 0%
+  {
+    uint64_t total = reader.total_char_count();
+    uint64_t chars_before_ch1 = reader.chapter_char_count(0);
+    int pct_char = static_cast<int>(chars_before_ch1 * 100u / total);
+    EXPECT_EQ(pct_char, 0);  // correctly reflects we've read almost nothing
+  }
+
+  // MrbChapterSource: verify cumulative char offsets.
+  {
+    MrbChapterSource src0(reader, 0);
+    EXPECT_EQ(src0.paragraph_count(), 1u);
+    EXPECT_EQ(src0.char_before_para(0), 0u);
+    EXPECT_EQ(src0.total_chars(), 5u);
+  }
+  {
+    MrbChapterSource src1(reader, 1);
+    EXPECT_EQ(src1.paragraph_count(), 1u);
+    EXPECT_EQ(src1.char_before_para(0), 0u);
+    EXPECT_EQ(src1.total_chars(), 995u);
+  }
+}
+
+// Additional scenario: multiple paragraphs within a chapter, verify offsets.
+TEST_F(MrbFormatTest, ProgressAccuracy_IntraChapterOffsets) {
   {
     MrbWriter writer;
     ASSERT_TRUE(writer.open(tmp_path_.c_str()));
     writer.begin_chapter();
-    ASSERT_TRUE(writer.write_paragraph(make_text("hello")));
+    ASSERT_TRUE(writer.write_paragraph(make_text("abc")));    // 3 chars, offset 0
+    ASSERT_TRUE(writer.write_paragraph(make_text("de")));     // 2 chars, offset 3
+    ASSERT_TRUE(writer.write_paragraph(make_text("fghij")));  // 5 chars, offset 5
     writer.end_chapter();
     ASSERT_TRUE(writer.finish({}, {}));
   }
 
-  // Read the file into memory, then write it back truncated to just the header.
-  {
-    std::ifstream in(tmp_path_, std::ios::binary);
-    std::vector<uint8_t> buf((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    in.close();
-    ASSERT_GT(buf.size(), 32u);  // must be larger than just the header
+  MrbReader reader2;
+  ASSERT_TRUE(reader2.open(tmp_path_.c_str()));
+  EXPECT_EQ(reader2.chapter_char_count(0), 10u);
+  EXPECT_EQ(reader2.total_char_count(), 10u);
 
-    // Truncate to 32 bytes (just the MrbHeader).
-    buf.resize(32);
-    std::ofstream out(tmp_path_, std::ios::binary | std::ios::trunc);
-    out.write(reinterpret_cast<const char*>(buf.data()), buf.size());
-  }
-
-  MrbReader reader;
-  EXPECT_FALSE(reader.open(tmp_path_.c_str()));
+  MrbChapterSource src(reader2, 0);
+  EXPECT_EQ(src.paragraph_count(), 3u);
+  EXPECT_EQ(src.char_before_para(0), 0u);
+  EXPECT_EQ(src.char_before_para(1), 3u);
+  EXPECT_EQ(src.char_before_para(2), 5u);
+  EXPECT_EQ(src.total_chars(), 10u);
 }

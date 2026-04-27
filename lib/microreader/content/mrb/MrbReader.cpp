@@ -30,11 +30,11 @@ bool MrbReader::open(const char* path) {
         close();
         return false;
       }
-      chapters_[i].first_para_offset = mrb_read_u32(buf);
-      chapters_[i].last_para_offset = mrb_read_u32(buf + 4);
+      chapters_[i].para_table_offset = mrb_read_u32(buf);
+      chapters_[i].reserved = mrb_read_u32(buf + 4);
       chapters_[i].paragraph_count = mrb_read_u16(buf + 8);
       chapters_[i].reserved1 = mrb_read_u16(buf + 10);
-      chapters_[i].reserved2 = mrb_read_u32(buf + 12);
+      chapters_[i].char_count = mrb_read_u32(buf + 12);
     }
   }
 
@@ -97,22 +97,29 @@ void MrbReader::close() {
   toc_ = {};
 }
 
-uint32_t MrbReader::chapter_first_offset(uint16_t chapter_idx) const {
+uint32_t MrbReader::chapter_para_table_offset(uint16_t chapter_idx) const {
   if (chapter_idx >= chapters_.size())
     return 0;
-  return chapters_[chapter_idx].first_para_offset;
-}
-
-uint32_t MrbReader::chapter_last_offset(uint16_t chapter_idx) const {
-  if (chapter_idx >= chapters_.size())
-    return 0;
-  return chapters_[chapter_idx].last_para_offset;
+  return chapters_[chapter_idx].para_table_offset;
 }
 
 uint16_t MrbReader::chapter_paragraph_count(uint16_t chapter_idx) const {
   if (chapter_idx >= chapters_.size())
     return 0;
   return chapters_[chapter_idx].paragraph_count;
+}
+
+uint32_t MrbReader::chapter_char_count(uint16_t chapter_idx) const {
+  if (chapter_idx >= chapters_.size())
+    return 0;
+  return chapters_[chapter_idx].char_count;
+}
+
+uint64_t MrbReader::total_char_count() const {
+  uint64_t total = 0;
+  for (const auto& ch : chapters_)
+    total += ch.char_count;
+  return total;
 }
 
 MrbReader::LoadResult MrbReader::load_paragraph(uint32_t file_offset, Paragraph& out) {
@@ -122,14 +129,7 @@ MrbReader::LoadResult MrbReader::load_paragraph(uint32_t file_offset, Paragraph&
 
   fseek(f_, static_cast<long>(file_offset), SEEK_SET);
 
-  // Read 8-byte link header: prev_offset(4) + next_offset(4)
-  uint8_t link[8];
-  if (!read_bytes(link, 8))
-    return result;
-  result.prev_offset = mrb_read_u32(link);
-  result.next_offset = mrb_read_u32(link + 4);
-
-  // Read type + data_size (uint32)
+  // Read type + data_size (5 bytes). No link header in v8+.
   uint8_t hdr[5];
   if (!read_bytes(hdr, 5))
     return result;

@@ -33,7 +33,7 @@ void ReaderOptionsScreen::on_start() {
   title_ = "Options";
   clear_items();
   replace_ = nullptr;
-  idx_justify_ = idx_padding_h_ = idx_padding_v_ = idx_line_spacing_ = idx_chapters_ = -1;
+  idx_justify_ = idx_padding_h_ = idx_padding_v_ = idx_line_spacing_ = idx_progress_ = idx_chapters_ = -1;
 
   char tmp[40];
 
@@ -59,6 +59,12 @@ void ReaderOptionsScreen::on_start() {
 
     idx_line_spacing_ = count();
     add_item(fmt_setting(tmp, sizeof(tmp), "Line spacing", ReaderSettings::kSpacingNames[settings_->line_spacing_idx]));
+
+    idx_progress_ = count();
+    const char* prog_name = settings_->progress_style == ProgressStyle::None         ? "None"
+                            : settings_->progress_style == ProgressStyle::Percentage ? "Percent"
+                                                                                     : "Bar";
+    add_item(fmt_setting(tmp, sizeof(tmp), "Progress", prog_name));
   }
 }
 
@@ -94,6 +100,11 @@ bool ReaderOptionsScreen::on_select(int index) {
   if (index == idx_line_spacing_) {
     settings_->line_spacing_idx =
         static_cast<uint8_t>((settings_->line_spacing_idx + 1) % ReaderSettings::kNumSpacingPresets);
+    refresh_items_(index);
+    return true;
+  }
+  if (index == idx_progress_) {
+    settings_->progress_style = static_cast<ProgressStyle>((static_cast<uint8_t>(settings_->progress_style) + 1) % 3);
     refresh_items_(index);
     return true;
   }
