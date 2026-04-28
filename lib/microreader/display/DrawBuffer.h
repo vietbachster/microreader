@@ -52,7 +52,7 @@ class IDisplay {
 
   // Trigger a grayscale display refresh using a custom LUT.
   // Assumes BW RAM and RED RAM have already been written via write_ram_bw/write_ram_red.
-  virtual void grayscale_refresh() {}
+  virtual void grayscale_refresh(bool turnOffScreen = false) {}
 
   // Revert grayscale overlay and restore prev_pixels into RED RAM.
   // Must be called while the buffer holding the pre-grayscale BW frame is still valid.
@@ -362,8 +362,8 @@ class DrawBuffer {
   }
 
   // Trigger grayscale refresh (assumes BW/RED RAM already written).
-  void grayscale_refresh() {
-    display_.grayscale_refresh();
+  void grayscale_refresh(bool turnOffScreen = false) {
+    display_.grayscale_refresh(turnOffScreen);
   }
 
   // Revert grayscale using the active (displayed) buffer as prev_pixels.
@@ -409,6 +409,20 @@ class DrawBuffer {
   }
 
   void deep_sleep() {
+    display_.deep_sleep();
+  }
+
+  // Write pre-built LSB/MSB plane arrays to display RAM, trigger a grayscale
+  // refresh with screen power-off, then deep sleep. Intended for the power-off splash screen.
+  // Uses draw_image() so that images wider than kPhysicalWidth (e.g. 800px) are clipped correctly.
+  void show_grayscale_image(const uint8_t* lsb, const uint8_t* msb, uint16_t w, uint16_t h) {
+    fill(true);
+    draw_image(lsb, 0, 0, w, h);
+    display_.write_ram_bw(inactive_());
+    fill(true);
+    draw_image(msb, 0, 0, w, h);
+    display_.write_ram_red(inactive_());
+    display_.grayscale_refresh(/*turnOffScreen=*/true);
     display_.deep_sleep();
   }
 

@@ -63,28 +63,53 @@ class Esp32InputSource final : public microreader::IInputSource {
 #endif  // !QEMU_BUILD
   }
 
-  // Returns accumulated button state since last poll, then clears the latch.
+  // Returns accumulated button press history since last poll (in arrival order),
+  // then clears the queue. pressed_latch is also derived for backward compat.
   microreader::ButtonState poll_buttons() override {
     microreader::ButtonState result;
     portENTER_CRITICAL(&lock_);
     result.current = debounced_;
-    result.pressed_latch = pressed_latch_;
+    // Drain the ring buffer into the press history.
+    while (pq_head_ != pq_tail_) {
+      const uint8_t btn_idx = press_queue_[pq_head_];
+      pq_head_ = static_cast<uint8_t>((pq_head_ + 1) % kQueueSize);
+      result.pressed_latch |= static_cast<uint8_t>(1u << btn_idx);
+      if (result.press_history_count < microreader::ButtonState::kMaxPressHistory)
+        result.press_history[result.press_history_count++] = btn_idx;
+    }
     // Merge any button presses injected via serial commands.
     uint8_t serial = g_serial_buttons;
     if (serial) {
-      result.pressed_latch |= serial;
+      for (uint8_t i = 0; i < kNumButtons; ++i) {
+        if (serial & static_cast<uint8_t>(1u << i)) {
+          result.pressed_latch |= static_cast<uint8_t>(1u << i);
+          if (result.press_history_count < microreader::ButtonState::kMaxPressHistory)
+            result.press_history[result.press_history_count++] = i;
+        }
+      }
       g_serial_buttons = 0;
     }
-    pressed_latch_ = 0;
     portEXIT_CRITICAL(&lock_);
     return result;
   }
 
-  // Clear the latch for a single button without affecting others.
+  // Remove all queued events for a single button without affecting others.
   void clear_button(microreader::Button button) {
-    const uint8_t mask = static_cast<uint8_t>(1u << static_cast<uint8_t>(button));
+    const uint8_t btn_idx = static_cast<uint8_t>(button);
     portENTER_CRITICAL(&lock_);
-    pressed_latch_ &= static_cast<uint8_t>(~mask);
+    // Compact the ring buffer, dropping entries for this button.
+    uint8_t new_head = pq_head_;
+    uint8_t new_tail = pq_head_;
+    uint8_t r = pq_head_;
+    while (r != pq_tail_) {
+      if (press_queue_[r] != btn_idx) {
+        press_queue_[new_tail] = press_queue_[r];
+        new_tail = static_cast<uint8_t>((new_tail + 1) % kQueueSize);
+      }
+      r = static_cast<uint8_t>((r + 1) % kQueueSize);
+    }
+    pq_head_ = new_head;
+    pq_tail_ = new_tail;
     portEXIT_CRITICAL(&lock_);
   }
 
@@ -109,12 +134,14 @@ class Esp32InputSource final : public microreader::IInputSource {
   bool last_raw_[kNumButtons] = {};
   uint32_t debounce_time_[kNumButtons] = {};
 
-  // Auto-repeat state — only modified by the timer callback
-  uint32_t repeat_hold_[kNumButtons] = {};
-  uint32_t repeat_next_[kNumButtons] = {};
+  // (auto-repeat removed — screens handle hold-down acceleration themselves)
 
-  // Latch — shared between timer callback (write) and poll_buttons (read+clear)
-  uint8_t pressed_latch_ = 0;
+  // Ordered press queue — shared between timer callback (write) and poll_buttons (read+clear).
+  // Ring buffer; entries are button indices (0–6). Full entries are silently dropped.
+  static constexpr uint8_t kQueueSize = 32;
+  uint8_t press_queue_[kQueueSize] = {};
+  uint8_t pq_head_ = 0;  // next read position
+  uint8_t pq_tail_ = 0;  // next write position
 
   static void sample_timer_cb(void* arg) {
     static_cast<Esp32InputSource*>(arg)->sample();
@@ -146,31 +173,19 @@ class Esp32InputSource final : public microreader::IInputSource {
     // Detect rising edges.
     const uint8_t rising = debounced_ & ~prev_debounced_;
 
-    // Latch rising edges (critical section shared with poll_buttons).
-    portENTER_CRITICAL(&lock_);
-    pressed_latch_ |= rising;
-    portEXIT_CRITICAL(&lock_);
-
-    // Auto-repeat: generate synthetic latch bits for held buttons.
-    static constexpr uint32_t kSampleMs = kSampleIntervalUs / 1000;
-    for (uint8_t i = 0; i < kNumButtons; ++i) {
-      const uint8_t mask = static_cast<uint8_t>(1u << i);
-      if (rising & mask) {
-        // Fresh press — begin tracking hold duration.
-        repeat_hold_[i] = 0;
-        repeat_next_[i] = microreader::ButtonState::kRepeatDelayMs;
-      } else if (debounced_ & mask) {
-        // Held — accumulate sample interval.
-        repeat_hold_[i] += kSampleMs;
-        if (repeat_hold_[i] >= repeat_next_[i]) {
-          portENTER_CRITICAL(&lock_);
-          pressed_latch_ |= mask;
-          portEXIT_CRITICAL(&lock_);
-          repeat_next_[i] += microreader::ButtonState::kRepeatIntervalMs;
+    // Enqueue rising edges into the press ring buffer.
+    if (rising) {
+      portENTER_CRITICAL(&lock_);
+      for (uint8_t i = 0; i < kNumButtons; ++i) {
+        if (rising & static_cast<uint8_t>(1u << i)) {
+          const uint8_t next_tail = static_cast<uint8_t>((pq_tail_ + 1) % kQueueSize);
+          if (next_tail != pq_head_) {  // drop if full
+            press_queue_[pq_tail_] = i;
+            pq_tail_ = next_tail;
+          }
         }
-      } else {
-        repeat_hold_[i] = 0;
       }
+      portEXIT_CRITICAL(&lock_);
     }
 
     prev_debounced_ = debounced_;

@@ -146,48 +146,115 @@ void ListMenuScreen::draw_all_(DrawBuffer& buf) const {
 }
 
 bool ListMenuScreen::update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& /*runtime*/) {
-  if (buttons.is_pressed(Button::Button0)) {
-    if (!on_back())
-      return false;
-  }
-
   const int n = count();
-  if (n == 0)
-    return true;
 
-  bool moved = false;
-  if (buttons.is_pressed(Button::Button3)) {
+  // Helper lambdas for selection movement (skip separators).
+  auto move_up = [&]() {
     int next = selected_ > 0 ? selected_ - 1 : n - 1;
-    // skip separators
     while (next != selected_ && next < (int)separators_.size() && separators_[next])
       next = next > 0 ? next - 1 : n - 1;
     selected_ = next;
     ensure_visible_();
-    moved = true;
-  }
-  if (buttons.is_pressed(Button::Button2)) {
+  };
+  auto move_down = [&]() {
     int next = selected_ < n - 1 ? selected_ + 1 : 0;
-    // skip separators
     while (next != selected_ && next < (int)separators_.size() && separators_[next])
       next = next < n - 1 ? next + 1 : 0;
     selected_ = next;
     ensure_visible_();
-    moved = true;
+  };
+
+  bool moved = false;       // selection changed — needs a redraw
+  bool needs_draw = false;  // on_select returned true — needs a redraw
+
+  // Track whether a fresh press event arrived this frame for each nav direction.
+  bool had_up_press = false;
+  bool had_down_press = false;
+
+  Button btn;
+  while (buttons.next_press(btn)) {
+    switch (btn) {
+      case Button::Button0:
+        // Flush any pending move before back so the screen redraws correctly
+        // if on_back() decides to stay (returns true).
+        if (moved) {
+          draw_all_(buf);
+          buf.refresh();
+          moved = false;
+        }
+        if (!on_back())
+          return false;
+        break;
+
+      case Button::Button3:  // up
+        if (n > 0) {
+          move_up();
+          moved = true;
+          had_up_press = true;
+        }
+        break;
+
+      case Button::Button2:  // down
+        if (n > 0) {
+          move_down();
+          moved = true;
+          had_down_press = true;
+        }
+        break;
+
+      case Button::Button1:  // select
+        if (n > 0 && selected_ < n) {
+          // Draw pending move first so the selection highlight is up to date.
+          if (moved) {
+            draw_all_(buf);
+            buf.refresh();
+            moved = false;
+          }
+          if (on_select(selected_)) {
+            needs_draw = true;
+          } else {
+            return false;
+          }
+        }
+        break;
+
+      default:
+        break;
+    }
   }
 
-  if (moved) {
+  // Hold-down acceleration: when a nav button is held (no fresh press this frame),
+  // step size grows by 1 each frame: frame 0 = 1, frame 1 = 2, frame 2 = 3, …
+  auto hold_step = [](int frames) -> int { return frames + 1; };
+
+  const bool up_held = !had_up_press && (buttons.is_down(Button::Button3));
+  const bool down_held = !had_down_press && (buttons.is_down(Button::Button2));
+
+  if (up_held && n > 0) {
+    const int step = hold_step(hold_frames_up_);
+    for (int i = 0; i < step; ++i)
+      move_up();
+    ++hold_frames_up_;
+    moved = true;
+  } else if (!had_up_press) {
+    hold_frames_up_ = 0;
+  }
+
+  if (down_held && n > 0) {
+    const int step = hold_step(hold_frames_down_);
+    for (int i = 0; i < step; ++i)
+      move_down();
+    ++hold_frames_down_;
+    moved = true;
+  } else if (!had_down_press) {
+    hold_frames_down_ = 0;
+  }
+
+  if (moved || needs_draw) {
     draw_all_(buf);
     buf.refresh();
   }
 
-  if (buttons.is_pressed(Button::Button1) && selected_ < n) {
-    if (on_select(selected_)) {
-      draw_all_(buf);
-      buf.refresh();
-    } else {
-      return false;
-    }
-  }
   return true;
 }
 

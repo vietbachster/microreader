@@ -1,6 +1,7 @@
 #include "Application.h"
 
 #include <cstdlib>
+#include <cstring>
 #include <ctime>
 
 #include "HeapLog.h"
@@ -86,8 +87,12 @@ void Application::update(const ButtonState& buttons, uint32_t dt_ms, DrawBuffer&
     const char* sleep_text = "sleeping...";
     buf.draw_text_centered(DrawBuffer::kWidth / 2, DrawBuffer::kHeight - 24, sleep_text, true);
 
-    buf.full_refresh(RefreshMode::Full, true);  // turnOffScreen=true to power down immediately after refresh
-    buf.deep_sleep();
+    buf.full_refresh(RefreshMode::Full, false);
+
+    // Grayscale pass using the pre-built LSB/MSB planes of the bebop image,
+    // then power off the display.
+    buf.show_grayscale_image(bebop_image_lsb, bebop_image_msb, BEBOP_IMAGE_WIDTH, BEBOP_IMAGE_HEIGHT);
+
     running_ = false;
     return;
   }

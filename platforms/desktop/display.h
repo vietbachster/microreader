@@ -72,7 +72,7 @@ class DesktopEmulatorDisplay final : public microreader::IDisplay {
   }
 
   // Apply grayscale: overlay LSB+MSB gray pixels on top of existing BW image.
-  void grayscale_refresh() override {
+  void grayscale_refresh(bool /*turnOffScreen*/ = false) override {
     if (gray_bw_.empty() || gray_red_.empty())
       return;
     // Save pre-grayscale sim state so we can revert later.

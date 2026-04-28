@@ -32,7 +32,7 @@ class DesktopInputSource final : public microreader::IInputSource {
 
     microreader::ButtonState state;
     state.current = mask;
-    state.pressed_latch = runtime_.consume_pressed_latch();
+    runtime_.consume_press_events(state.press_history, state.press_history_count, state.pressed_latch);
     return state;
   }
 

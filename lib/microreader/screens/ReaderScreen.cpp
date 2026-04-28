@@ -263,27 +263,63 @@ void ReaderScreen::stop() {
 }
 
 bool ReaderScreen::update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& /*runtime*/) {
-  if (buttons.is_pressed(Button::Button0))
-    return false;
-
-  if (!open_ok_)
+  if (!open_ok_) {
+    // Still drain the history so stale events don't bleed into the next frame.
+    Button btn;
+    while (buttons.next_press(btn)) {
+      if (btn == Button::Button0)
+        return false;
+    }
     return true;
-
-  // Button1: open reader options menu.
-  if (buttons.is_pressed(Button::Button1)) {
-    saved_chapter_idx_ = chapter_idx_;
-    saved_page_pos_ = page_pos_;
-    reader_options_.set_settings(&reader_settings_);
-    reader_options_.populate(mrb_.toc(), static_cast<uint16_t>(chapter_idx_), page_pos_.paragraph);
-    nav_chosen_ = &reader_options_;
-    return false;
   }
 
+  // Process press events in the order they arrived.
+  int page_delta = 0;
+  bool had_next_press = false;
+  bool had_prev_press = false;
+  Button btn;
+  while (buttons.next_press(btn)) {
+    switch (btn) {
+      case Button::Button0:
+        return false;
+      case Button::Button1:
+        saved_chapter_idx_ = chapter_idx_;
+        saved_page_pos_ = page_pos_;
+        reader_options_.set_settings(&reader_settings_);
+        reader_options_.populate(mrb_.toc(), static_cast<uint16_t>(chapter_idx_), page_pos_.paragraph);
+        nav_chosen_ = &reader_options_;
+        return false;
+      case Button::Button2:
+      case Button::Up:
+        ++page_delta;
+        had_next_press = true;
+        break;
+      case Button::Button3:
+      case Button::Down:
+        --page_delta;
+        had_prev_press = true;
+        break;
+      default:
+        break;
+    }
+  }
+
+  // Hold-down: advance one page per frame while a nav button is held,
+  // but only if no fresh press event arrived this frame (avoids double-counting
+  // the initial press).
+  if (!had_next_press && (buttons.is_down(Button::Button2) || buttons.is_down(Button::Up)))
+    ++page_delta;
+  if (!had_prev_press && (buttons.is_down(Button::Button3) || buttons.is_down(Button::Down)))
+    --page_delta;
+
   bool changed = false;
-  if (buttons.is_pressed(Button::Button2) || buttons.is_pressed(Button::Up))
-    changed = next_page_();
-  if (buttons.is_pressed(Button::Button3) || buttons.is_pressed(Button::Down))
-    changed = prev_page_();
+  if (page_delta > 0) {
+    for (int i = 0; i < page_delta; ++i)
+      changed = next_page_() || changed;
+  } else if (page_delta < 0) {
+    for (int i = 0; i > page_delta; --i)
+      changed = prev_page_() || changed;
+  }
 
   if (changed) {
     if (grayscale_active_) {
@@ -593,39 +629,26 @@ bool ReaderScreen::prev_page_() {
 void ReaderScreen::save_position_() {
   if (pos_path_.empty())
     return;
-  FILE* f = std::fopen(pos_path_.c_str(), "w");
+  const std::string& path = pos_path_;
+  FILE* f = std::fopen(path.c_str(), "w");
   if (!f)
     return;
   std::fprintf(f, "%u %u %u\n", static_cast<unsigned>(chapter_idx_), static_cast<unsigned>(page_pos_.paragraph),
                static_cast<unsigned>(page_pos_.offset));
-  std::fprintf(f, "%u %u %u %u %u\n",
-               static_cast<unsigned>(reader_settings_.justify ? 1 : 0),
-               static_cast<unsigned>(reader_settings_.padding_h_idx),
-               static_cast<unsigned>(reader_settings_.padding_v_idx),
-               static_cast<unsigned>(reader_settings_.line_spacing_idx),
-               static_cast<unsigned>(reader_settings_.progress_style));
   std::fclose(f);
 }
 
 void ReaderScreen::load_position_() {
   if (pos_path_.empty())
     return;
-  FILE* f = std::fopen(pos_path_.c_str(), "r");
+  const std::string& path = pos_path_;
+  FILE* f = std::fopen(path.c_str(), "r");
   if (!f)
     return;
   unsigned ch = 0, para = 0, line = 0;
   if (std::fscanf(f, "%u %u %u", &ch, &para, &line) == 3) {
     saved_chapter_idx_ = ch;
     saved_page_pos_ = PagePosition{static_cast<uint16_t>(para), static_cast<uint16_t>(line)};
-  }
-  // Load settings if present (second line — optional for backwards compat).
-  unsigned justify = 0, ph = 1, pv = 1, ls = 2, ps = static_cast<unsigned>(ProgressStyle::Bar);
-  if (std::fscanf(f, " %u %u %u %u %u", &justify, &ph, &pv, &ls, &ps) == 5) {
-    reader_settings_.justify = (justify != 0);
-    reader_settings_.padding_h_idx = static_cast<uint8_t>(ph < ReaderSettings::kNumPresets ? ph : 1);
-    reader_settings_.padding_v_idx = static_cast<uint8_t>(pv < ReaderSettings::kNumPresets ? pv : 1);
-    reader_settings_.line_spacing_idx = static_cast<uint8_t>(ls < ReaderSettings::kNumSpacingPresets ? ls : 2);
-    reader_settings_.progress_style = ps <= 2 ? static_cast<ProgressStyle>(ps) : ProgressStyle::Bar;
   }
   std::fclose(f);
 }

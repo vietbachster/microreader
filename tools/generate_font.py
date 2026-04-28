@@ -53,7 +53,9 @@ RANGE_PRESETS = {
     "spacing-mod": [(0x02B0, 0x02FF)],  # Spacing Modifier Letters
     "latin-ext-add": [(0x1E00, 0x1EFF)],  # Latin Extended Additional (Vietnamese etc.)
     "super-sub": [(0x2070, 0x209F)],  # Superscripts and Subscripts
-    "specials": [(0xFFF0, 0xFFFF)],  # Specials (includes U+FFFD replacement character �)
+    "specials": [
+        (0xFFF0, 0xFFFF)
+    ],  # Specials (includes U+FFFD replacement character �)
 }
 
 DEFAULT_RANGES = [
@@ -94,7 +96,9 @@ def render_glyph(face, codepoint, size):
     y_offset = (
         -face.glyph.bitmap_top
     )  # bitmap_top = pixels above baseline (positive), negate for MBF convention
-    x_advance = face.glyph.advance.x >> 6  # 26.6 fixed-point → integer pixels
+    x_advance = (
+        face.glyph.advance.x + 32
+    ) >> 6  # 26.6 fixed-point → rounded integer pixels
 
     if width == 0 or height == 0:
         # Space-like glyph: no bitmap

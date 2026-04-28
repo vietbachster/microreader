@@ -255,14 +255,14 @@ class EInkDisplay : public microreader::IDisplay {
     has_custom_grayscale_lut_ = false;
   }
 
-  void grayscale_refresh() override {
+  void grayscale_refresh(bool turnOffScreen = false) override {
     in_grayscale_mode_ = true;
     if (has_custom_grayscale_lut_) {
       setCustomLUT_(custom_grayscale_lut_);
     } else {
       setCustomLUT_(kLutGrayscale);
     }
-    refreshDisplay(EPD_FAST_REFRESH);
+    refreshDisplay(EPD_FAST_REFRESH, turnOffScreen);
     setCustomLUT_(nullptr);  // clear flag; OTP LUT restored on next normal refresh
   }
 

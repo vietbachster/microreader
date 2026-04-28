@@ -77,6 +77,9 @@ class ListMenuScreen : public IScreen {
   int selected_ = 0;
   int scroll_offset_ = 0;
   bool on_start_set_selection_ = false;
+  // Hold-down acceleration counters (frames button has been held without a fresh press).
+  int hold_frames_up_ = 0;
+  int hold_frames_down_ = 0;
 
   BitmapFont ui_font_;
   BitmapFont header_font_;
