@@ -40,10 +40,17 @@ static constexpr uint32_t kPowerWakeupMs = 250;
 
 static void verify_wakeup_press() {
 #ifndef QEMU_BUILD
-  // A software reset means we just got flashed or restarted by a tool —
-  // boot immediately without requiring a button hold.
-  if (esp_reset_reason() == ESP_RST_SW)
+  // If USB is connected (GPIO20/U0RXD reads HIGH), boot immediately.
+  gpio_set_direction(GPIO_NUM_20, GPIO_MODE_INPUT);
+  if (gpio_get_level(GPIO_NUM_20) == 1)
     return;
+
+  // Only require a hold check on a clean power-on (battery, no USB).
+  // Crashes, panics, watchdog resets, SW resets — all boot immediately.
+  if (esp_reset_reason() != ESP_RST_POWERON) {
+    ESP_LOGI("pwr", "Non-poweron reset (%d) — booting immediately", (int)esp_reset_reason());
+    return;
+  }
 
   gpio_config_t cfg{};
   cfg.pin_bit_mask = (1ULL << kPowerPin);
@@ -67,7 +74,7 @@ static void verify_wakeup_press() {
     }
   }
 
-  // Short press — go back to sleep without waking up.
+  // Short press — go back to sleep; wake again on power button press.
   ESP_LOGI("pwr", "Short press on wakeup (held %lu ms) — returning to sleep", (unsigned long)held_ms);
   esp_deep_sleep_enable_gpio_wakeup(1ULL << kPowerPin, ESP_GPIO_WAKEUP_GPIO_LOW);
   esp_deep_sleep_start();
@@ -286,9 +293,6 @@ extern "C" void app_main(void) {
 
 #ifndef QEMU_BUILD
   // Enter deep sleep; wake on power button press (active LOW, GPIO 3).
-  constexpr gpio_num_t kPowerPin = GPIO_NUM_3;
-  gpio_set_direction(kPowerPin, GPIO_MODE_INPUT);
-  gpio_pullup_en(kPowerPin);
   esp_deep_sleep_enable_gpio_wakeup(1ULL << kPowerPin, ESP_GPIO_WAKEUP_GPIO_LOW);
   esp_deep_sleep_start();
 #endif  // QEMU_BUILD
