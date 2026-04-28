@@ -477,7 +477,7 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
       buf.draw_text_centered(W / 2, H - 14, pct_str, true);
     } else {
       // Progress bar: a thin filled line at the very bottom of the screen.
-      constexpr int kBarH = 3;
+      constexpr int kBarH = 2;
       const int bar_w = pct * W / 100;
       buf.fill_rect(0, H - kBarH, bar_w, kBarH, false);         // filled portion (black)
       buf.fill_rect(bar_w, H - kBarH, W - bar_w, kBarH, true);  // unfilled portion (white)
