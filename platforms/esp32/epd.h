@@ -139,6 +139,10 @@ class EInkDisplay : public microreader::IDisplay {
     return in_grayscale_mode_;
   }
 
+  bool is_busy() const override {
+    return gpio_get_level(EPD_BUSY) == 1;
+  }
+
   // Custom grayscale LUT buffer (112 bytes, matches kLutSize in serial_communication.h)
   uint8_t custom_grayscale_lut_[112] = {};
   bool has_custom_grayscale_lut_ = false;
@@ -283,6 +287,27 @@ class EInkDisplay : public microreader::IDisplay {
     sendData(0x03);
     isScreenOn = false;
     inDeepSleep_ = true;
+  }
+
+  // Partially refresh a physical sub-rectangle.
+  // phys_x/phys_w are in pixels (same coordinate system as setRamArea's x/w).
+  // The +12 panel offset matches the full_refresh/partial_refresh convention.
+  void partial_refresh_region(int phys_x, int phys_y, int phys_w, int phys_h, const uint8_t* new_buf,
+                              int stride_bytes) override {
+    const uint16_t x_start = static_cast<uint16_t>(phys_x + 12);
+    const uint32_t total_bytes = static_cast<uint32_t>(stride_bytes * phys_h);
+    wakeIfNeeded();
+    waitWhileBusy();  // wait for any previous refresh to finish before writing RAM
+    setRamArea(x_start, static_cast<uint16_t>(phys_y), static_cast<uint16_t>(phys_w), static_cast<uint16_t>(phys_h));
+    writeRamBuffer(CMD_WRITE_RAM_BW, new_buf, total_bytes);
+    // Fire the refresh and return immediately — don't block waiting for the panel.
+    // The next waitWhileBusy() call (at the start of this function) will catch up.
+    sendCommand(CMD_DISPLAY_UPDATE_CTRL1);
+    sendData(CTRL1_NORMAL);
+    sendCommand(CMD_DISPLAY_UPDATE_CTRL2);
+    sendData(custom_lut_active_ ? 0x0C : 0x1C);  // EPD_FAST_REFRESH bits, no screen power change
+    sendCommand(CMD_MASTER_ACTIVATION);
+    // No waitWhileBusy() here — conversion continues while panel refreshes.
   }
 
  private:

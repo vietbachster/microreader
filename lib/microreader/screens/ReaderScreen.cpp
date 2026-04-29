@@ -155,6 +155,13 @@ void ReaderScreen::start(DrawBuffer& buf) {
   bool mrb_ok = mrb_.open(mrb_path_.c_str());
 
   if (!mrb_ok) {
+    // Show a loading indicator before the heavy conversion work begins.
+    // Upload the current frame to the controller's BW+RED RAM first so that
+    // subsequent partial region refreshes (EPD_FAST_REFRESH) have a correct
+    // reference frame.  Both draw buffers are used as scratch after this.
+    buf.upload_current_frame();
+    buf.show_loading("Converting...", 0);
+
 #ifdef ESP_PLATFORM
     int64_t open_start = esp_timer_get_time();
 #endif
@@ -171,7 +178,11 @@ void ReaderScreen::start(DrawBuffer& buf) {
 #ifdef ESP_PLATFORM
     int64_t conv_start = esp_timer_get_time();
 #endif
-    if (!convert_epub_to_mrb_streaming(book_, mrb_path_.c_str(), buf.scratch_buf1(), buf.scratch_buf2())) {
+    if (!convert_epub_to_mrb_streaming(book_, mrb_path_.c_str(), buf.scratch_buf1(), buf.scratch_buf2(),
+                                       [&buf](int done, int total) {
+                                         int pct = total > 0 ? (done * 100 / total) : 0;
+                                         buf.show_loading("Converting...", pct);
+                                       })) {
       open_ok_ = false;
       goto show_error;
     }

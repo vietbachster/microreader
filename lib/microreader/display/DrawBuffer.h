@@ -60,6 +60,21 @@ class IDisplay {
     (void)prev_pixels;
   }
 
+  // Partially refresh a physical sub-rectangle of the display.
+  // new_buf/old_buf: 1-bit packed, row-major, stride_bytes per row.
+  // (phys_x, phys_y): physical top-left; (phys_w, phys_h): pixel dimensions.
+  // phys_x must be byte-aligned (multiple of 8).
+  // Default: no-op — platforms may override for efficient region updates.
+  virtual void partial_refresh_region(int phys_x, int phys_y, int phys_w, int phys_h, const uint8_t* new_buf,
+                                      int stride_bytes) {
+    (void)phys_x;
+    (void)phys_y;
+    (void)phys_w;
+    (void)phys_h;
+    (void)new_buf;
+    (void)stride_bytes;
+  }
+
   // Put the display controller into deep sleep (low-power mode).
   virtual void deep_sleep() {}
 
@@ -71,6 +86,12 @@ class IDisplay {
 
   // Query if display is currently in grayscale mode.
   virtual bool in_grayscale_mode() const {
+    return false;
+  }
+
+  // Returns true if the display hardware is currently busy refreshing.
+  // Default: always ready. Platforms may override for non-blocking region updates.
+  virtual bool is_busy() const {
     return false;
   }
 };
@@ -113,7 +134,7 @@ class DrawBuffer {
   // Fill a logical rectangle.
   void fill_rect(int lx, int ly, int lw, int lh, bool white) {
     // Deg90: logical (lx,ly,lw,lh) → physical (px=ly, py=PhysH-lx-lw, pw=lh, ph=lw)
-    fill_rect_physical_(inactive_(), ly, DisplayFrame::kPhysicalHeight - lx - lw, lh, lw, white);
+    fill_rect_physical_(full_target_(), ly, DisplayFrame::kPhysicalHeight - lx - lw, lh, lw, white);
   }
 
   // Fill a logical horizontal span [x1, x2) on logical row ly.
@@ -124,7 +145,8 @@ class DrawBuffer {
     if (x1 >= x2 || ly < 0 || ly >= kHeight)
       return;
     // Deg90: logical row ly → physical col ly; logical cols [x1,x2) → physical rows [PhysH-x2, PhysH-x1)
-    fill_col_physical_(inactive_(), ly, DisplayFrame::kPhysicalHeight - x2, DisplayFrame::kPhysicalHeight - x1, white);
+    fill_col_physical_(full_target_(), ly, DisplayFrame::kPhysicalHeight - x2, DisplayFrame::kPhysicalHeight - x1,
+                       white);
   }
 
   void draw_image(const uint8_t* imageData, uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
@@ -258,7 +280,7 @@ class DrawBuffer {
   // Only white pixels (bit=1) are drawn when invert=true.
   void draw_glyph(int x, int y, const uint8_t* bits, int bitmap_width, int bitmap_height, int x_offset, int y_offset,
                   bool white) {
-    draw_glyph_impl_(inactive_(), x, y, bits, bitmap_width, bitmap_height, x_offset, y_offset, white);
+    draw_glyph_impl_(full_target_(), x, y, bits, bitmap_width, bitmap_height, x_offset, y_offset, white);
   }
 
   // Draw a glyph from a specific grayscale plane into an explicit buffer.
@@ -278,13 +300,25 @@ class DrawBuffer {
     if (bits) {
       // Gray planes use inverted bit polarity: bit=1 means gray pixel present.
       const bool invert = (plane != GrayPlane::BW);
-      draw_glyph_impl_(buf, x, y, bits, g.bitmap_width, g.bitmap_height, g.x_offset, g.y_offset, white, invert);
+      RenderTarget t{buf, DisplayFrame::kStride, 0, 0, DisplayFrame::kPhysicalWidth, DisplayFrame::kPhysicalHeight};
+      draw_glyph_impl_(t, x, y, bits, g.bitmap_width, g.bitmap_height, g.x_offset, g.y_offset, white, invert);
     }
   }
 
  private:
-  static void draw_glyph_impl_(uint8_t* buf, int x, int y, const uint8_t* bits, int bitmap_width, int bitmap_height,
-                               int x_offset, int y_offset, bool white, bool invert_select = false) {
+  // Describes a render target: a pixel buffer with its own stride and physical offset/bounds.
+  // phys_x0 must be byte-aligned (multiple of 8).
+  struct RenderTarget {
+    uint8_t* buf;
+    int stride;   // bytes per physical row
+    int phys_x0;  // absolute physical X of the left edge (byte-aligned)
+    int phys_y0;  // absolute physical Y of the top edge
+    int phys_w;   // width in pixels
+    int phys_h;   // height in rows
+  };
+
+  static void draw_glyph_impl_(const RenderTarget& t, int x, int y, const uint8_t* bits, int bitmap_width,
+                               int bitmap_height, int x_offset, int y_offset, bool white, bool invert_select = false) {
     if (!bits || bitmap_width <= 0 || bitmap_height <= 0)
       return;
     const int gx = x + x_offset;
@@ -293,24 +327,26 @@ class DrawBuffer {
 
     for (int row = 0; row < bitmap_height; ++row) {
       const int ly = gy + row;
-      if (ly < 0 || ly >= kHeight)
-        continue;
       const uint8_t* row_data = bits + row * row_stride;
       for (int col = 0; col < bitmap_width; ++col) {
         const int lx = gx + col;
-        if (lx < 0 || lx >= kWidth)
-          continue;
         const bool bit_set = (row_data[col >> 3] >> (7 - (col & 7))) & 1;
         if (invert_select ? bit_set : !bit_set) {
-          // Ink pixel — set in buf via physical rotation.
-          const int px = ly;  // Deg90: logical Y → physical X
+          // Ink pixel — compute absolute physical coords (Deg90: logical Y → physical X).
+          const int px = ly;
           const int py = DisplayFrame::kPhysicalHeight - 1 - lx;
-          const size_t bidx = static_cast<size_t>(py * DisplayFrame::kStride + px / 8);
-          const uint8_t bit = static_cast<uint8_t>(0x80u >> (px & 7));
+          if (px < t.phys_x0 || px >= t.phys_x0 + t.phys_w)
+            continue;
+          if (py < t.phys_y0 || py >= t.phys_y0 + t.phys_h)
+            continue;
+          const int lpx = px - t.phys_x0;  // local pixel X within target
+          const int lpy = py - t.phys_y0;  // local pixel Y within target
+          const size_t bidx = static_cast<size_t>(lpy * t.stride + lpx / 8);
+          const uint8_t bit = static_cast<uint8_t>(0x80u >> (lpx & 7));
           if (white)
-            buf[bidx] |= bit;
+            t.buf[bidx] |= bit;
           else
-            buf[bidx] &= static_cast<uint8_t>(~bit);
+            t.buf[bidx] &= static_cast<uint8_t>(~bit);
         }
       }
     }
@@ -412,6 +448,11 @@ class DrawBuffer {
     display_.deep_sleep();
   }
 
+  void upload_current_frame() {
+    display_.write_ram_bw(active_());
+    // display_.write_ram_red(active_());
+  }
+
   // Write pre-built LSB/MSB plane arrays to display RAM, trigger a grayscale
   // refresh with screen power-off, then deep sleep. Intended for the power-off splash screen.
   // Uses draw_image() so that images wider than kPhysicalWidth (e.g. 800px) are clipped correctly.
@@ -444,6 +485,57 @@ class DrawBuffer {
     active_idx_ = 0;
   }
 
+  // ── Loading box region update ────────────────────────────────────────────
+  //
+  // A small fixed region at the bottom-centre of the logical screen, used to
+  // show a "Converting…" indicator while both display buffers are in use as
+  // scratch.  The region is byte-aligned in physical space so the extraction
+  // can be done with plain memcpy (no bit-shifting).
+  //
+  // Logical box: 256 × 40 px, centred horizontally, 4 px from the bottom.
+  //   lx = (480 - 256) / 2 = 112,  ly = 788 - 40 - 4 = 744
+  // Physical (Deg90 rotation):
+  //   px = ly = 744  (byte-aligned: 744 / 8 = 93)
+  //   py = PhysH - lx - lw = 480 - 112 - 256 = 112
+  //   pw = lh = 40   →  stride = 5 bytes
+  //   ph = lw = 256
+  // Mini-buffer size: 5 × 256 = 1280 bytes each (stack-allocated).
+
+  static constexpr int kLoadLogW = 256;
+  static constexpr int kLoadLogH = 40;
+  static constexpr int kLoadLogX = (kWidth - kLoadLogW) / 2;  // 112
+  static constexpr int kLoadLogY = kHeight - kLoadLogH;       // - 4;   // 744
+
+  static constexpr int kLoadPhysX = kLoadLogY;                                              // 744
+  static constexpr int kLoadPhysY = DisplayFrame::kPhysicalHeight - kLoadLogX - kLoadLogW;  // 112
+  static constexpr int kLoadPhysW = kLoadLogH;                                              // 40
+  static constexpr int kLoadPhysH = kLoadLogW;                                              // 256
+  static constexpr int kLoadStride = (kLoadPhysW + 7) / 8;                                  // 5
+  static constexpr int kLoadBufBytes = kLoadStride * kLoadPhysH;                            // 1280
+
+  // Bar geometry (derived from loading box constants).
+  static constexpr int kBarPad = 6;
+  static constexpr int kBarH = 6;
+  static constexpr int kBarX = kLoadLogX + kBarPad;                // 118
+  static constexpr int kBarW = kLoadLogW - kBarPad * 2;            // 244
+  static constexpr int kBarY = kLoadLogY + kLoadLogH - kBarH - 4;  // 774
+
+  // Draw a loading box (label + progress bar) and push it to the display
+  // via a region-only hardware update.  The main draw buffers are NEVER
+  // touched — all rendering goes directly into the 1280-byte mini-buffer.
+  // Both display buffers may be used as scratch before or after this call.
+  //
+  //   text         — label shown inside the box (e.g. "Converting…")
+  //   progress_pct — 0-100; controls how much of the bar is filled
+  void show_loading(const char* text, int progress_pct) {
+    static_assert((kLoadPhysX + 12) % 8 == 0, "kLoadPhysX + panel offset must be byte-aligned");
+    if (display_.is_busy())
+      return;  // skip if panel is still refreshing
+    uint8_t new_buf[kLoadBufBytes];
+    render_loading_box_(new_buf, text, progress_pct);
+    display_.partial_refresh_region(kLoadPhysX, kLoadPhysY, kLoadPhysW, kLoadPhysH, new_buf, kLoadStride);
+  }
+
  private:
   IDisplay& display_;
   alignas(4) uint8_t bufs_[2][kBufSize];
@@ -462,17 +554,31 @@ class DrawBuffer {
     return font;
   }
 
-  // Fill a physical horizontal span [x1, x2) on physical row `row`.
-  static void fill_row_physical_(uint8_t* buf, int row, int x1, int x2, bool white) {
-    x1 = std::max(x1, 0);
-    x2 = std::min(x2, DisplayFrame::kPhysicalWidth);
-    if (x1 >= x2 || row < 0 || row >= DisplayFrame::kPhysicalHeight)
+  // Render target for the full inactive buffer.
+  RenderTarget full_target_() {
+    return {inactive_(), DisplayFrame::kStride, 0, 0, DisplayFrame::kPhysicalWidth, DisplayFrame::kPhysicalHeight};
+  }
+
+  // Render target for the mini loading-box buffer (absolute physical coords of the box).
+  static RenderTarget mini_target_(uint8_t* buf) {
+    return {buf, kLoadStride, kLoadPhysX, kLoadPhysY, kLoadPhysW, kLoadPhysH};
+  }
+
+  // Fill a physical horizontal span [x1, x2) on physical row `row` (absolute physical coords).
+  // phys_x0 must be byte-aligned so that local_x has the same bit position as absolute x.
+  static void fill_row_physical_(const RenderTarget& t, int row, int x1, int x2, bool white) {
+    x1 = std::max(x1, t.phys_x0);
+    x2 = std::min(x2, t.phys_x0 + t.phys_w);
+    if (x1 >= x2 || row < t.phys_y0 || row >= t.phys_y0 + t.phys_h)
       return;
-    const int bx1 = x1 / 8;
-    const int bx2 = (x2 - 1) / 8;
-    const auto lmask = static_cast<uint8_t>(0xFF >> (x1 & 7));
-    const auto rmask = static_cast<uint8_t>(0xFF << (7 - ((x2 - 1) & 7)));
-    uint8_t* rp = buf + row * DisplayFrame::kStride;
+    const int lrow = row - t.phys_y0;
+    const int lx1 = x1 - t.phys_x0;
+    const int lx2 = x2 - t.phys_x0;
+    const int bx1 = lx1 / 8;
+    const int bx2 = (lx2 - 1) / 8;
+    const auto lmask = static_cast<uint8_t>(0xFF >> (lx1 & 7));
+    const auto rmask = static_cast<uint8_t>(0xFF << (7 - ((lx2 - 1) & 7)));
+    uint8_t* rp = t.buf + lrow * t.stride;
     if (bx1 == bx2) {
       const auto m = static_cast<uint8_t>(lmask & rmask);
       if (white)
@@ -493,33 +599,78 @@ class DrawBuffer {
     }
   }
 
-  // Fill a physical rectangle (rx, ry, rw, rh).
-  static void fill_rect_physical_(uint8_t* buf, int rx, int ry, int rw, int rh, bool white) {
-    const int x1 = std::max(rx, 0);
-    const int y1 = std::max(ry, 0);
-    const int x2 = std::min(rx + rw, DisplayFrame::kPhysicalWidth);
-    const int y2 = std::min(ry + rh, DisplayFrame::kPhysicalHeight);
+  // Fill a physical rectangle (absolute physical coords).
+  static void fill_rect_physical_(const RenderTarget& t, int rx, int ry, int rw, int rh, bool white) {
+    const int x1 = std::max(rx, t.phys_x0);
+    const int y1 = std::max(ry, t.phys_y0);
+    const int x2 = std::min(rx + rw, t.phys_x0 + t.phys_w);
+    const int y2 = std::min(ry + rh, t.phys_y0 + t.phys_h);
     if (x1 >= x2 || y1 >= y2)
       return;
     for (int row = y1; row < y2; ++row)
-      fill_row_physical_(buf, row, x1, x2, white);
+      fill_row_physical_(t, row, x1, x2, white);
   }
 
-  // Fill physical column `pcol` for rows [py1, py2).
-  static void fill_col_physical_(uint8_t* buf, int pcol, int py1, int py2, bool white) {
-    py1 = std::max(py1, 0);
-    py2 = std::min(py2, DisplayFrame::kPhysicalHeight);
-    if (pcol < 0 || pcol >= DisplayFrame::kPhysicalWidth || py1 >= py2)
+  // Fill physical column `pcol` for rows [py1, py2) (absolute physical coords).
+  static void fill_col_physical_(const RenderTarget& t, int pcol, int py1, int py2, bool white) {
+    py1 = std::max(py1, t.phys_y0);
+    py2 = std::min(py2, t.phys_y0 + t.phys_h);
+    if (pcol < t.phys_x0 || pcol >= t.phys_x0 + t.phys_w || py1 >= py2)
       return;
-    const int bidx = pcol / 8;
-    const uint8_t bit = static_cast<uint8_t>(0x80u >> (pcol & 7));
-    for (int row = py1; row < py2; ++row) {
-      uint8_t* p = buf + row * DisplayFrame::kStride + bidx;
+    const int lrow0 = py1 - t.phys_y0;
+    const int lrow1 = py2 - t.phys_y0;
+    const int lpcol = pcol - t.phys_x0;
+    const int bidx = lpcol / 8;
+    const uint8_t bit = static_cast<uint8_t>(0x80u >> (lpcol & 7));
+    for (int r = lrow0; r < lrow1; ++r) {
+      uint8_t* p = t.buf + r * t.stride + bidx;
       if (white)
         *p |= bit;
       else
         *p &= static_cast<uint8_t>(~bit);
     }
+  }
+
+  // Draw text into any RenderTarget using a BitmapFont.
+  static void draw_text_to_(const RenderTarget& t, int x, int baseline_y, const char* text, const BitmapFont& font,
+                            bool white) {
+    if (!text || !*text || !font.valid())
+      return;
+    for (const char* p = text; *p; ++p) {
+      GlyphData g = font.glyph_data(static_cast<uint8_t>(*p), FontStyle::Regular);
+      if (g.bits)
+        draw_glyph_impl_(t, x, baseline_y, g.bits, g.bitmap_width, g.bitmap_height, g.x_offset, g.y_offset, white);
+      x += g.advance_width;
+    }
+  }
+
+  // Render the loading box into a mini-buffer via the unified helpers.
+  // Never reads or writes bufs_.
+  static void render_loading_box_(uint8_t* mini, const char* text, int progress_pct) {
+    const RenderTarget t = mini_target_(mini);
+    // White fill.
+    memset(mini, 0xFF, kLoadBufBytes);
+    // Text centred horizontally inside the box.
+    const BitmapFont& font = ui_font_();
+    if (text && *text) {
+      const int tw = static_cast<int>(font.word_width(text, strlen(text), FontStyle::Regular));
+      const int text_lx = kWidth / 2 - tw / 2;
+      const int baseline_ly = kLoadLogY + 8 + static_cast<int>(font.baseline());
+      draw_text_to_(t, text_lx, baseline_ly, text, font, /*white=*/false);
+    }
+    // Progress bar border (logical coords → physical via helpers).
+    // Deg90: fill_rect_physical_(t, phys_x=ly, phys_y=PhysH-lx-lw, phys_w=lh, phys_h=lw)
+    auto bar_rect = [&](int lx, int ly, int lw, int lh) {
+      fill_rect_physical_(t, ly, DisplayFrame::kPhysicalHeight - lx - lw, lh, lw, /*white=*/false);
+    };
+    bar_rect(kBarX, kBarY, kBarW, 1);              // top
+    bar_rect(kBarX, kBarY + kBarH - 1, kBarW, 1);  // bottom
+    bar_rect(kBarX, kBarY, 1, kBarH);              // left
+    bar_rect(kBarX + kBarW - 1, kBarY, 1, kBarH);  // right
+    // Progress fill.
+    const int filled = (progress_pct * (kBarW - 2)) / 100;
+    if (filled > 0)
+      bar_rect(kBarX + 1, kBarY + 1, filled, kBarH - 2);
   }
 };
 

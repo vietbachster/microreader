@@ -19,7 +19,7 @@ void MainMenu::on_start() {
   HEAP_LOG("MainMenu: start enter");
   scan_directory_();
   HEAP_LOG("MainMenu: after scan");
-  // Restore previously selected book position.
+  // Restore previously selected book position — only on first visit.
   if (!initial_selection_.empty()) {
     for (int i = 0; i < static_cast<int>(entries_.size()); ++i) {
       if (entries_[i].path == initial_selection_) {
@@ -27,6 +27,7 @@ void MainMenu::on_start() {
         break;
       }
     }
+    initial_selection_.clear();
   }
 }
 

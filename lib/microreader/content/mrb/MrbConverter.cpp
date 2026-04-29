@@ -50,7 +50,8 @@ void remap_paragraph_images(Paragraph& para, MrbWriter& writer, std::vector<Imag
 
 }  // namespace
 
-bool convert_epub_to_mrb_streaming(Book& book, const char* output_path, uint8_t* work_buf, uint8_t* xml_buf) {
+bool convert_epub_to_mrb_streaming(Book& book, const char* output_path, uint8_t* work_buf, uint8_t* xml_buf,
+                                   std::function<void(int, int)> progress_cb) {
   MrbWriter writer;
   if (!writer.open(output_path))
     return false;
@@ -173,6 +174,9 @@ bool convert_epub_to_mrb_streaming(Book& book, const char* output_path, uint8_t*
       return false;
 
     writer.end_chapter();
+
+    if (progress_cb)
+      progress_cb(static_cast<int>(ci + 1), static_cast<int>(book.chapter_count()));
 
 #ifdef ESP_PLATFORM
     long ch_ms = (long)((esp_timer_get_time() - ch_start) / 1000);
