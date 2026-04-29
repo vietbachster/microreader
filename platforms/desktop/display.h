@@ -15,6 +15,8 @@ class DesktopEmulatorDisplay final : public microreader::IDisplay {
  public:
   static constexpr int kPixels = microreader::DisplayFrame::kPhysicalWidth * microreader::DisplayFrame::kPhysicalHeight;
 
+  static constexpr uint32_t kRefreshDelayMs = 400;
+
   explicit DesktopEmulatorDisplay(DesktopRuntime& rt) : rt_(rt), sim_(kPixels, 1.0f) {}
 
   void set_rotation(microreader::Rotation r) override {
@@ -33,6 +35,7 @@ class DesktopEmulatorDisplay final : public microreader::IDisplay {
       sim_[i] = (pixels[byte_idx] & bit) ? 1.0f : 0.0f;
     }
     render_();
+    SDL_Delay(kRefreshDelayMs);
   }
 
   void partial_refresh(const uint8_t* new_pixels, const uint8_t* /*prev_pixels*/) override {
@@ -50,6 +53,7 @@ class DesktopEmulatorDisplay final : public microreader::IDisplay {
       }
     }
     render_();
+    SDL_Delay(kRefreshDelayMs);
   }
 
   // Store BW RAM data for subsequent grayscale_refresh.
