@@ -147,6 +147,10 @@ struct PageOptions {
 // Called when attr_width or attr_height is 0. Returns true if size was resolved.
 using ImageSizeQuery = std::function<bool(uint16_t key, uint16_t& w, uint16_t& h)>;
 
+// Minimum image slice height when splitting an image across pages.
+// The actual threshold is min(kMinImageSliceH, img_h/4) so small images stay proportional.
+static constexpr uint16_t kMinImageSliceH = 64;
+
 // ---------------------------------------------------------------------------
 // TextLayout — stateful layout engine
 //

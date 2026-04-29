@@ -378,8 +378,8 @@ TEST(PageLayout, ImageScaledToFitWidth) {
 TEST(PageLayout, ImageDoesntFitAfterText) {
   // Image is clamped to page height, then min_slice_h threshold applied.
   // 60x80 image on 200x32 page → clamped to 24x32 (block_height=32).
-  // Text uses 16px, leaving 16px. font8 y_advance=16 →
-  // min_slice_h = max(32/4=8, 16*3/2=24) = 24. 16 < 24 → image deferred to page 2.
+  // Text uses 16px, leaving 16px. min_slice_h = min(64, 32/4=8) = 8.
+  // 16 >= 8 → image starts on page 1 with a 16px slice.
   Chapter ch;
   TextParagraph tp;
   tp.runs.push_back(microreader::Run("Hello", FontStyle::Regular, false));
@@ -391,19 +391,21 @@ TEST(PageLayout, ImageDoesntFitAfterText) {
   TextLayout tl(font8, opts, src);
   auto page1 = tl.layout();
 
-  // Page 1: text only — image deferred because available slice < min_slice_h
+  // Page 1: text + first 16px image slice (fits min_slice_h=8)
   EXPECT_EQ(page1.text_items().size(), 1u);
-  EXPECT_EQ(page1.image_items().size(), 0u);
+  ASSERT_EQ(page1.image_items().size(), 1u);
+  EXPECT_EQ(page1.image_items()[0].height, 16u);
+  EXPECT_EQ(page1.image_items()[0].y_crop, 0u);
   EXPECT_FALSE(page1.at_chapter_end);
   EXPECT_EQ(page1.end.paragraph, 1);
-  EXPECT_EQ(page1.end.offset, 0);
+  EXPECT_EQ(page1.end.offset, 16);
 
-  // Page 2: full image
+  // Page 2: remaining 16px slice
   tl.set_position(page1.end);
   auto page2 = tl.layout();
   ASSERT_EQ(page2.image_items().size(), 1u);
-  EXPECT_EQ(page2.image_items()[0].y_crop, 0);
-  EXPECT_EQ(page2.image_items()[0].height, 32);
+  EXPECT_EQ(page2.image_items()[0].y_crop, 16u);
+  EXPECT_EQ(page2.image_items()[0].height, 16u);
   EXPECT_TRUE(page2.at_chapter_end);
 }
 
@@ -429,8 +431,8 @@ TEST(PageLayout, ImageCappedToFitPage) {
 TEST(PageLayout, ImageSplitWithTextBefore) {
   // Text fills part of the page; the clamped image is sliced to fill the rest.
   // 200x200 image on 200x100 page → clamped to 100x100 (block_height=100).
-  // Text uses 16px, leaving 84px available. font8 y_advance=16, min_cut_h=24.
-  // Cut-off would be 16px < 24 → slice reduced to 100-24=76px so cut is obvious.
+  // Text uses 16px, leaving 84px available. min_cut_h = min(64, 100/4=25) = 25.
+  // Cut-off would be 16px < 25 → slice reduced to 100-25=75px so cut is obvious.
   Chapter ch;
   TextParagraph tp;
   tp.runs.push_back(microreader::Run("Line", FontStyle::Regular, false));
@@ -446,18 +448,18 @@ TEST(PageLayout, ImageSplitWithTextBefore) {
   ASSERT_EQ(page1.text_items().size(), 1u);
   ASSERT_EQ(page1.image_items().size(), 1u);
   EXPECT_EQ(page1.image_items()[0].y_crop, 0);
-  EXPECT_EQ(page1.image_items()[0].height, 76);
+  EXPECT_EQ(page1.image_items()[0].height, 75);
   EXPECT_FALSE(page1.at_chapter_end);
   EXPECT_EQ(page1.end.paragraph, 1);
-  EXPECT_EQ(page1.end.offset, 76);
+  EXPECT_EQ(page1.end.offset, 75);
 
-  // Page 2: remaining 24px slice
+  // Page 2: remaining 25px slice
   tl.set_position(page1.end);
   auto page2 = tl.layout();
   EXPECT_EQ(page2.text_items().size(), 0u);
   ASSERT_EQ(page2.image_items().size(), 1u);
-  EXPECT_EQ(page2.image_items()[0].y_crop, 76);
-  EXPECT_EQ(page2.image_items()[0].height, 24);
+  EXPECT_EQ(page2.image_items()[0].y_crop, 75);
+  EXPECT_EQ(page2.image_items()[0].height, 25);
   EXPECT_TRUE(page2.at_chapter_end);
 }
 
@@ -1839,8 +1841,7 @@ TEST(PageLayout, BaselineFit_LastLineAccepted) {
   auto page = TextLayout(font8, opts, src, PagePosition(0, 0)).layout();
 
   // Three lines must be on this page (the 4th is on the next page).
-  ASSERT_EQ(page.text_items().size(), 3u)
-      << "Baseline-fit: 3rd line (baseline=12 <= avail=12) must be collected";
+  ASSERT_EQ(page.text_items().size(), 3u) << "Baseline-fit: 3rd line (baseline=12 <= avail=12) must be collected";
 
   // Page is full — boundary is para 3 (the 4th paragraph), offset 0.
   EXPECT_EQ(page.end.paragraph, 3);
@@ -1875,18 +1876,14 @@ TEST(PageLayout, BaselineFit_ForwardBackwardRoundTrip) {
   tl.set_position(boundary);
   auto bwd = tl.layout_backward();
 
-  EXPECT_EQ(bwd.start, fwd.start)
-      << "Backward start must equal forward start";
-  EXPECT_EQ(bwd.end, boundary)
-      << "Backward end must equal the forward boundary";
-  ASSERT_EQ(bwd.text_items().size(), fwd.text_items().size())
-      << "Backward page must contain the same number of items";
+  EXPECT_EQ(bwd.start, fwd.start) << "Backward start must equal forward start";
+  EXPECT_EQ(bwd.end, boundary) << "Backward end must equal the forward boundary";
+  ASSERT_EQ(bwd.text_items().size(), fwd.text_items().size()) << "Backward page must contain the same number of items";
 
   for (size_t i = 0; i < fwd.text_items().size(); ++i) {
     EXPECT_EQ(bwd.text_items()[i].paragraph_index, fwd.text_items()[i].paragraph_index)
         << "Item " << i << ": paragraph_index mismatch";
-    EXPECT_EQ(bwd.text_items()[i].y_offset, fwd.text_items()[i].y_offset)
-        << "Item " << i << ": y_offset mismatch";
+    EXPECT_EQ(bwd.text_items()[i].y_offset, fwd.text_items()[i].y_offset) << "Item " << i << ": y_offset mismatch";
   }
 }
 
@@ -1926,4 +1923,51 @@ TEST(PageLayout, BaselineFit_SpreadPinsLastBaseline) {
   uint16_t last_baseline = page.text_items().back().y_offset + page.text_items().back().baseline;
   EXPECT_EQ(last_baseline, opts.height - opts.padding_bottom)
       << "Last baseline must sit at height - padding_bottom after spreading";
+}
+
+// ===================================================================
+// is_mid_promoted_image — boundary behaviour
+// ===================================================================
+
+// Reproduce the <= vs < bug: when page_.end.offset == promoted_h (the image
+// filled the page exactly and the text caption lands on the next page),
+// is_mid_promoted_image must return FALSE — we are past the image, not inside it.
+//
+// With the current implementation the check is (offset <= promoted_h) which
+// incorrectly returns true at the boundary, causing next_page_() in ReaderScreen
+// to snap back to offset=0 and re-show the promoted image instead of advancing
+// to the caption text lines.
+TEST(PageLayout, IsMidPromotedImage_FalseAtExactBoundary) {
+  // Para 0: text paragraph with a 200×100 inline image (width=200 > 200/3 → promoted)
+  //         followed by one caption line ("Caption").
+  // Page height = 100px: image fills page exactly, caption line is on the next page.
+  Chapter ch;
+  TextParagraph tp;
+  tp.runs.push_back(microreader::Run("Caption", FontStyle::Regular, false));
+  tp.inline_image = ImageRef(1, 200, 100);  // attr_width=200 (> cw/3) → promoted; height=100
+  ch.paragraphs.push_back(Paragraph::make_text(std::move(tp)));
+
+  TestChapterSource src(ch);
+  // Page height exactly equals promoted_h (100px): image fills page, caption overflows.
+  PageOptions opts(200, 100, 0, 0);
+  TextLayout tl(font8, opts, src);
+  auto page1 = tl.layout();
+
+  // Page 1 must contain the image slice (entire promoted image).
+  ASSERT_EQ(page1.image_items().size(), 1u) << "promoted image must be on page 1";
+  EXPECT_EQ(page1.image_items()[0].height, 100u) << "full image height";
+  EXPECT_FALSE(page1.at_chapter_end) << "caption line is still to come";
+
+  // page1.end should be at offset == promoted_h (100) within para 0.
+  EXPECT_EQ(page1.end.paragraph, 0u);
+  EXPECT_EQ(page1.end.offset, 100u) << "end offset should equal promoted_h";
+
+  // BUG (to be confirmed): is_mid_promoted_image returns true at the boundary
+  // because it uses <= instead of <.  It should return false here.
+  EXPECT_FALSE(tl.is_mid_promoted_image(page1.end))
+      << "is_mid_promoted_image must be FALSE when offset == promoted_h (past image, at text)";
+
+  // Sanity: mid-image offset must still return true.
+  EXPECT_TRUE(tl.is_mid_promoted_image(PagePosition{0, 50}))
+      << "is_mid_promoted_image must be TRUE when offset < promoted_h (inside image)";
 }

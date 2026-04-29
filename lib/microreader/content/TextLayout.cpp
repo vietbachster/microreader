@@ -93,9 +93,11 @@ static void justify_words(uint16_t room, uint16_t line_width, std::vector<Layout
       ++gaps;
   if (gaps == 0)
     return;
-  // Don't justify if the extra space per gap would be too large (> space_width).
-  // space_width is approximated as line_width / 10 (roughly one character cell).
-  uint16_t max_gap = line_width > 0 ? line_width / 10 : 8;
+  // Don't justify if the extra space per gap is too large — that produces ugly
+  // stretched lines with very few words. Allow up to line_width/4 extra per gap
+  // (25% of line width), which is generous enough for normal text but prevents
+  // a single giant gap on a 2-word line.
+  uint16_t max_gap = line_width > 0 ? line_width / 4 : 32;
   if (room / static_cast<uint16_t>(gaps) > max_gap)
     return;
   uint16_t spc = room / static_cast<uint16_t>(gaps);
@@ -438,9 +440,10 @@ const TextLayout::LaidOutParagraph& TextLayout::get_laid_out_(size_t pi) const {
           slot.promoted_x = slot.promoted_w < opts.width ? (opts.width - slot.promoted_w) / 2 : 0;
         }
         // Minimum slice/cut thresholds for the promoted image region.
-        // Use a flat threshold (1.5x line height) — percentage-based thresholds
-        // are too aggressive for large images and create large empty gaps.
-        slot.min_slice_h = static_cast<uint16_t>(font.y_advance() * 3 / 2);
+        // At least kMinImageSliceH, or 25% of the image height if that is smaller.
+        slot.min_slice_h = std::min(kMinImageSliceH, static_cast<uint16_t>(slot.promoted_h / 4));
+        if (slot.min_slice_h == 0)
+          slot.min_slice_h = 1;
         slot.min_cut_h = slot.min_slice_h;
       }
       break;
@@ -469,9 +472,10 @@ const TextLayout::LaidOutParagraph& TextLayout::get_laid_out_(size_t pi) const {
         slot.img_x = x;
         slot.block_height = h;
 
-        // Minimum slice height: flat 1.5 line heights — percentage-based thresholds
-        // are too aggressive for large images and create large empty gaps.
-        slot.min_slice_h = static_cast<uint16_t>(font.y_advance() * 3 / 2);
+        // Minimum slice height: at least kMinImageSliceH, or 25% of image height if smaller.
+        slot.min_slice_h = std::min(kMinImageSliceH, static_cast<uint16_t>(h / 4));
+        if (slot.min_slice_h == 0)
+          slot.min_slice_h = 1;
         slot.min_cut_h = slot.min_slice_h;
       }
       break;
@@ -1238,7 +1242,7 @@ bool TextLayout::is_mid_promoted_image(PagePosition pos) const {
   if (para.type != ParagraphType::Text)
     return false;
   const LaidOutParagraph& lp = get_laid_out_(pos.paragraph);
-  return lp.inline_img.promoted && lp.promoted_h > 0 && (size_t)pos.offset <= (size_t)lp.promoted_h;
+  return lp.inline_img.promoted && lp.promoted_h > 0 && (size_t)pos.offset < (size_t)lp.promoted_h;
 }
 
 }  // namespace microreader
