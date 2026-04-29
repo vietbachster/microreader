@@ -84,7 +84,7 @@ static std::vector<WordSpan> split_words(const char* text, size_t text_len) {
 // Alignment helpers
 // ---------------------------------------------------------------------------
 
-static void justify_words(uint16_t room, uint16_t line_width, std::vector<LayoutWord>& words) {
+static void justify_words(uint16_t room, uint16_t line_width, uint16_t space_width, std::vector<LayoutWord>& words) {
   if (words.size() <= 1)
     return;
   size_t gaps = 0;
@@ -93,12 +93,17 @@ static void justify_words(uint16_t room, uint16_t line_width, std::vector<Layout
       ++gaps;
   if (gaps == 0)
     return;
-  // Don't justify if the extra space per gap is too large — that produces ugly
-  // stretched lines with very few words. Allow up to line_width/4 extra per gap
-  // (25% of line width), which is generous enough for normal text but prevents
-  // a single giant gap on a 2-word line.
-  uint16_t max_gap = line_width > 0 ? line_width / 4 : 32;
-  if (room / static_cast<uint16_t>(gaps) > max_gap)
+  // If the per-gap spread would exceed line_width/8, fall back to a fixed
+  // 2× space-width gap so lines look consistent rather than over-stretched.
+  const uint16_t natural_gap = room / static_cast<uint16_t>(gaps);
+  const uint16_t max_gap = line_width > 0 ? line_width / 8 : (space_width * 2);
+  if (natural_gap > max_gap) {
+    // Fixed spacing: each gap gets exactly space_width*2 (or less if room is tight).
+    const uint16_t fixed = space_width * 2;
+    room = static_cast<uint16_t>(
+        std::min(static_cast<uint32_t>(fixed) * static_cast<uint32_t>(gaps), static_cast<uint32_t>(room)));
+  }
+  if (room == 0)
     return;
   uint16_t spc = room / static_cast<uint16_t>(gaps);
   uint16_t rem = room % static_cast<uint16_t>(gaps);
@@ -113,8 +118,8 @@ static void justify_words(uint16_t room, uint16_t line_width, std::vector<Layout
   }
 }
 
-static void align_line(Alignment alignment, uint16_t room, uint16_t line_width, std::vector<LayoutWord>& words,
-                       bool is_last) {
+static void align_line(Alignment alignment, uint16_t room, uint16_t line_width, uint16_t space_width,
+                       std::vector<LayoutWord>& words, bool is_last) {
   if (words.empty())
     return;
   switch (alignment) {
@@ -128,7 +133,7 @@ static void align_line(Alignment alignment, uint16_t room, uint16_t line_width, 
       break;
     case Alignment::Justify:
       if (!is_last)
-        justify_words(room, line_width, words);
+        justify_words(room, line_width, space_width, words);
       break;
     default:
       break;
@@ -163,10 +168,10 @@ static std::vector<LayoutLine> layout_para_lines(const IFont& font, const Layout
       for (auto& w : words)
         w.x -= x_first;
       uint16_t room = lw > text_w ? lw - text_w : 0;
-      align_line(align, room, lw, words, is_last);
+      align_line(align, room, lw, space_width, words, is_last);
     } else {
       uint16_t room = lw > x ? lw - x : 0;
-      align_line(align, room, lw, words, is_last);
+      align_line(align, room, lw, space_width, words, is_last);
     }
   };
 

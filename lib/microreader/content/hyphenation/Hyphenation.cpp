@@ -136,14 +136,33 @@ size_t find_hyphen_break(const IFont& font, const char* word_ptr, size_t len, Fo
 
   // Strip trailing punctuation before hyphenating so Liang doesn't produce
   // ugly splits like "befördert-|." where the suffix is just punctuation.
+  // Add new entries to either table to extend the set of stripped characters.
+  static const char kStripAscii[] = ".,!?:;)]\"'";  // single ASCII bytes to strip
+  struct MultiByteSeq {
+    unsigned char b0, b1;
+  };
+  static const MultiByteSeq kStripMulti[] = {
+      {0xC2, 0xBB}, // » U+00BB RIGHT-POINTING DOUBLE ANGLE QUOTATION MARK
+      {0xC2, 0xAB}, // « U+00AB LEFT-POINTING DOUBLE ANGLE QUOTATION MARK
+  };
   size_t hyph_len = copy_len;
   while (hyph_len > 0) {
-    unsigned char c = (unsigned char)buf[hyph_len - 1];
-    if (c < 0x80 && (c == '.' || c == ',' || c == '!' || c == '?' || c == ':' || c == ';' || c == ')' || c == ']' ||
-                     c == '"' || c == '\'' || c == '\xbb' /* » */))
-      --hyph_len;
-    else
-      break;
+    bool stripped = false;
+    for (const auto& seq : kStripMulti) {
+      if (hyph_len >= 2 && (unsigned char)buf[hyph_len - 2] == seq.b0 && (unsigned char)buf[hyph_len - 1] == seq.b1) {
+        hyph_len -= 2;
+        stripped = true;
+        break;
+      }
+    }
+    if (!stripped) {
+      unsigned char c = (unsigned char)buf[hyph_len - 1];
+      if (c < 0x80 && std::strchr(kStripAscii, c)) {
+        --hyph_len;
+      } else {
+        break;
+      }
+    }
   }
   buf[hyph_len] = '\0';
 

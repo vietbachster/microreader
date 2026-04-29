@@ -213,19 +213,40 @@ TEST(TextLayout, JustifyMultipleLines) {
   TextParagraph para;
   para.runs.push_back(microreader::Run("aa bb cc dd", FontStyle::Regular, false));
 
-  // Width 50: "aa"=16, space=8, "bb"=16 → 40 < 50
-  //           "aa" + " " + "bb" + " " + "cc" = 16+8+16+8+16 = 64 > 50
-  // Line 1: "aa bb" (40px), room = 10 → justified (one gap gets +10)
-  // Line 2: "cc dd" (40px) — last line, no justification
+  // Width 50: "aa bb" = 40px text, room=10, gaps=1.
+  // max_gap=50/8=6. natural_gap=10 > 6 → fixed=space*2=16; min(16,10)=10.
+  // bb moves the full 10px to x=34.
   LayoutOptions opts{50, Alignment::Justify};
   auto lines = TextLayout(font8).layout_paragraph(opts, para);
 
   ASSERT_EQ(lines.size(), 2);
-  // First line: justified. "aa" at 0, "bb" at 0+16+8+10 = 34 (gap stretch)
+  // First line: fully justified (room fits within 2×space cap).
   EXPECT_EQ(lines[0].words[0].x, 0);
-  EXPECT_GT(lines[0].words[1].x, 24);  // More than non-justified position
-  // Second line: last line, starts at 0
-  EXPECT_EQ(lines[1].words[0].x, 0);
+  EXPECT_EQ(lines[0].words[1].x, 34);  // 24 natural + 10 room
+}
+
+TEST(TextLayout, JustifyWideLineGetsStretched) {
+  // Width 400: "aa"=16, "bb"=16 → 40px text, room=360.
+  // But room/gaps = 360 > 400/8=50 → suppressed (only 2 very short words).
+  // Use a line where room is modest: 8 words of 16px each = 128px text.
+  // "aa bb cc dd ee ff gg hh" on width=200:
+  //   one line attempt: 8*16 + 7*8 = 128+56 = 184 < 200 → fits on one line (last line, no justify).
+  // Use width=160: 8*16+7*8=184 > 160 → splits.
+  // Line 1 tries to fit: "aa bb cc dd ee" = 5*16+4*8 = 112. Add "ff"=16+8=24 → 136 < 160.
+  //   Add "gg"=16+8=24 → 160 = 160. Fits exactly → room=0 → no justify.
+  // width=150: "aa bb cc dd ee ff" = 6*16+5*8 = 96+40=136 < 150. Add "gg"=24 → 160 > 150.
+  // Line 1: "aa bb cc dd ee ff" text=136, room=14, gaps=5. room/gaps=2 < 150/8=18 → JUSTIFIED.
+  TextParagraph para;
+  para.runs.push_back(microreader::Run("aa bb cc dd ee ff gg hh", FontStyle::Regular, false));
+  LayoutOptions opts{150, Alignment::Justify};
+  auto lines = TextLayout(font8).layout_paragraph(opts, para);
+
+  ASSERT_GE(lines.size(), 2u);
+  // First line must be justified: second word must be further right than its natural position.
+  EXPECT_EQ(lines[0].words[0].x, 0);
+  EXPECT_GT(lines[0].words[1].x, 24u) << "First line should be justified (word 2 must move right)";
+  // Last line must not be justified.
+  EXPECT_EQ(lines.back().words[0].x, 0);
 }
 
 // ===== Indent test =====

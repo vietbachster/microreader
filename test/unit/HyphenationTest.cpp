@@ -213,3 +213,21 @@ TEST(FindHyphenBreak, TrailingPunctuationNotSuffix) {
                                        << "\" which is only punctuation";
   }
 }
+
+// "hat.»" (German: trailing period + closing angle-quote) must not split as "ha-|t.»".
+// The » is 2-byte UTF-8 (0xC2 0xBB) and was previously not stripped, causing Liang
+// to find a spurious break inside the real word.
+TEST(FindHyphenBreak, TrailingAngleQuoteNotSuffix) {
+  // "hat.\xc2\xbb" — 6 bytes total
+  const char* word = "hat.\xc2\xbb";
+  size_t len = std::strlen(word);  // 6
+  bool has_hyphen = false;
+  // avail=32: "hat" is 3*8=24px, "hat-" = 32px which just fits.
+  // Without the fix Liang would return a break at pos=2 ("ha-|t.»").
+  size_t r = find_hyphen_break(font8, word, len, FontStyle::Regular, FontSize::Normal, HyphenationLang::German, 32,
+                               has_hyphen);
+  // A break at pos=2 ("ha") would leave "t.»" as suffix — wrong.
+  // After the fix: no valid break point should be returned (word is too short
+  // once punctuation is stripped: "hat" = 3 chars < 6 minimum for Liang).
+  EXPECT_EQ(r, 0u) << "Should not split 'hat' — it's only 3 chars after stripping trailing punctuation";
+}
