@@ -87,6 +87,11 @@ def send_imgdecode(ser: serial.Serial, path: str) -> str:
     return read_response(ser, timeout=10.0)
 
 
+def send_flashbench(ser: serial.Serial) -> str:
+    ser.write(MAGIC + b"G")
+    return read_response(ser, timeout=5.0)
+
+
 def read_response(ser: serial.Serial, timeout: float = 3.0) -> str:
     """Read lines until we get OK, ERR:, or STATUS: response."""
     deadline = time.time() + timeout
@@ -310,6 +315,20 @@ def send_clear_mrb(ser: serial.Serial) -> str:
     return "TIMEOUT"
 
 
+def send_invalidate_font(ser: serial.Serial) -> str:
+    """Send 'F' command to zero the font partition CRC, forcing re-provisioning."""
+    drain(ser)
+    ser.write(MAGIC + b"F")
+    deadline = time.time() + 5.0
+    while time.time() < deadline:
+        line = ser.readline().decode("utf-8", errors="replace").strip()
+        if not line:
+            continue
+        if line.startswith("FONT_INVALIDATED") or line.startswith("ERR:"):
+            return line
+    return "TIMEOUT"
+
+
 def wait_for_book_result(
     ser: serial.Serial, timeout: float, verbose: bool = False
 ) -> "Optional[str]":
@@ -488,6 +507,12 @@ def main():
         help="Non-interactive: fully decode every image in BOOK (streaming decoder test)",
     )
     parser.add_argument(
+        "--invalidate-font",
+        action="store_true",
+        default=False,
+        help="Non-interactive: zero the font partition CRC so it re-provisions on next book open, then exit",
+    )
+    parser.add_argument(
         "--imgbench-all",
         action="store_true",
         default=False,
@@ -530,6 +555,12 @@ def main():
         ok = upload_font(ser, fp)
         ser.close()
         sys.exit(0 if ok else 1)
+
+    if args.invalidate_font:
+        result = send_invalidate_font(ser)
+        print(result)
+        ser.close()
+        sys.exit(0 if result.startswith("FONT_INVALIDATED") else 1)
 
     if args.bench:
         # --- Benchmark mode ---
@@ -921,6 +952,13 @@ def main():
                         "Image decode test running — watch serial output for per-image results."
                     )
                     print("Done when: '=== IMAGE DECODE TEST DONE' appears in the log.")
+            elif verb == "flashbench":
+                print("Sending flash erase+write benchmark ...")
+                resp = send_flashbench(ser)
+                print(resp)
+                if resp.startswith("OK"):
+                    print("Flash benchmark running — watch serial output for FLASH_BENCH lines.")
+                    print("Done when: '=== FLASH BENCH DONE' appears in the log.")
             else:
                 print(f"Unknown command: {verb!r}. Type 'help' for commands.")
     except KeyboardInterrupt:

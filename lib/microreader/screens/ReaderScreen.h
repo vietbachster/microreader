@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <memory>
 
 #include "../Input.h"
@@ -47,6 +48,12 @@ class ReaderScreen final : public IScreen {
   // Set the full font set (Small/Normal/Large). Font data must outlive this screen.
   void set_fonts(const BitmapFontSet* fonts) {
     ext_font_set_ = fonts;
+  }
+
+  // Optional hook called at the very start of start() before any file I/O.
+  // Used on ESP32 to provision the font partition from firmware-embedded data.
+  void set_pre_open_hook(std::function<void()> hook) {
+    pre_open_hook_ = std::move(hook);
   }
 
   // Export helpers.
@@ -117,6 +124,7 @@ class ReaderScreen final : public IScreen {
   ReaderOptionsScreen reader_options_;
   ReaderSettings reader_settings_;  // user-adjustable settings, mutated by reader_options_
   IScreen* nav_chosen_ = nullptr;
+  std::function<void()> pre_open_hook_;
 
   // Saved position (survives stop()) so we can restore after chapter select cancel.
   size_t saved_chapter_idx_ = 0;

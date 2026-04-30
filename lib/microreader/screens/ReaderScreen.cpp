@@ -126,6 +126,10 @@ static std::string make_book_key(const EpubMetadata& meta, const char* epub_path
 }
 
 void ReaderScreen::start(DrawBuffer& buf) {
+  // Platform-provided hook (e.g. font provisioning on ESP32).
+  if (pre_open_hook_)
+    pre_open_hook_();
+
   buf_ = &buf;
   book_key_.clear();
   pos_path_.clear();

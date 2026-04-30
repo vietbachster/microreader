@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 
 #include "Input.h"
 #include "Runtime.h"
@@ -35,8 +36,22 @@ class Application {
   void load_settings_();
 
   // Set the proportional font set for the reader screen. Must outlive the app.
+  // Also propagates immediately to the ReaderScreen so it takes effect even if
+  // called after start() (e.g. from within the font-provisioning hook).
   void set_reader_font(const BitmapFontSet* fonts) {
     reader_font_ = fonts;
+    menu_.set_reader_font(fonts);
+  }
+  // Set an optional hook fired at the start of every book open (before file I/O).
+  // Used on ESP32 to lazily provision the font partition from firmware-embedded
+  // compressed data.  Has no effect on desktop (hook is never set).
+  void set_pre_book_open_hook(std::function<void()> hook) {
+    menu_.reader()->set_pre_open_hook(std::move(hook));
+  }
+  // Set an optional callback for "Invalidate Font" in the Settings menu.
+  // When set, the item is shown (ESP32 only). Should zero the partition CRC.
+  void set_invalidate_font_fn(std::function<void()> fn) {
+    menu_.settings()->set_invalidate_font_fn(std::move(fn));
   }
   void start(DrawBuffer& buf);
   // Auto-open a book by path (skips menu, for debugging).

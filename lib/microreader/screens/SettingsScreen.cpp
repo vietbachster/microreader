@@ -33,6 +33,11 @@ void SettingsScreen::on_start() {
 #ifdef ESP_PLATFORM
   idx_switch_ota_ = count();
   add_item("Switch OTA");
+
+  if (invalidate_font_fn_) {
+    idx_invalidate_font_ = count();
+    add_item("Invalidate Font");
+  }
 #endif
 }
 
@@ -55,6 +60,11 @@ bool SettingsScreen::on_select(int index) {
     auto next = esp_ota_get_next_update_partition(running);
     esp_ota_set_boot_partition(next);
     esp_restart();
+  }
+  if (index == idx_invalidate_font_) {
+    if (invalidate_font_fn_)
+      invalidate_font_fn_();
+    return true;  // stay on settings screen
   }
 #endif
   return true;

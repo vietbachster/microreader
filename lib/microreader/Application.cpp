@@ -43,9 +43,16 @@ void Application::start(DrawBuffer& buf) {
 
   screen_mgr_.push(&menu_, buf);
 
-  // Auto-open last book if one was active at shutdown.
+  // Auto-open last book if one was active at shutdown — but only if the
+  // reader font is valid.  Without a font the reader cannot render text, so
+  // fall back to the main menu and let the normal pre-book-open hook install
+  // the font on the first book open.
   if (!pending_book_path_.empty()) {
-    auto_open_book(pending_book_path_.c_str(), buf);
+    if (reader_font_ && reader_font_->valid()) {
+      auto_open_book(pending_book_path_.c_str(), buf);
+    } else {
+      MR_LOGI("app", "skipping auto-open (no valid font) — starting from main menu");
+    }
     pending_book_path_.clear();
   }
 

@@ -191,6 +191,11 @@ extern "C" void app_main(void) {
       font_set.set(kAllSizes[i], &prop_fonts[i]);
   };
 
+  extern const uint8_t _binary_font_bundle_bin_start[];
+  extern const uint8_t _binary_font_bundle_bin_end[];
+  const uint8_t* font_bundle_data = _binary_font_bundle_bin_start;
+  size_t font_bundle_size = static_cast<size_t>(_binary_font_bundle_bin_end - _binary_font_bundle_bin_start);
+
   if (font_part.mmap()) {
     load_fonts();
     if (font_set.valid()) {
@@ -200,11 +205,48 @@ extern "C" void app_main(void) {
           ESP_LOGI("font", "%s: %u glyphs, height=%u baseline=%u", names[i], (unsigned)prop_fonts[i].num_glyphs(),
                    (unsigned)prop_fonts[i].glyph_height(), (unsigned)prop_fonts[i].baseline());
       }
-      app.set_reader_font(&font_set);
+      // Only advertise the font to the app if provisioning is not needed.
+      // If provisioning is needed (invalidated or new firmware), leave
+      // reader_font_ null so Application skips auto-open and boots to the
+      // main menu.  The pre_book_open_hook will install fonts on first open.
+      if (!FontPartition::needs_provisioning(font_bundle_data, font_bundle_size)) {
+        app.set_reader_font(&font_set);
+      } else {
+        ESP_LOGI("font", "font needs provisioning — skipping auto-open, will install on first book open");
+      }
     } else {
       ESP_LOGW("font", "no valid Normal font found");
     }
   }
+
+  // Register a hook that fires lazily on the first (and subsequent) book
+  // opens.  It checks whether the firmware-embedded compressed font already
+  // matches what's in the spiffs partition via a CRC32 comparison.  If not
+  // (first flash, new firmware, or manually-uploaded font), it stream-
+  // decompresses and writes the embedded font to the partition, then re-mmaps
+  // it.  Subsequent calls are essentially free (12-byte partition read + CRC).
+
+  app.set_pre_book_open_hook([&]() {
+    if (!FontPartition::needs_provisioning(font_bundle_data, font_bundle_size))
+      return;
+    ESP_LOGI("font", "Provisioning font from firmware (first launch or firmware update)...");
+    buf.upload_current_frame();
+    buf.show_loading("Installing fonts...", 0);
+    if (FontPartition::provision_embedded(font_bundle_data, font_bundle_size, buf.scratch_buf1(),
+                                          microreader::DrawBuffer::kBufSize, buf.scratch_buf2(),
+                                          microreader::DrawBuffer::kBufSize,
+                                          [&](int pct) { buf.show_loading("Installing fonts...", pct); })) {
+      if (font_part.mmap()) {
+        load_fonts();
+        if (font_set.valid())
+          app.set_reader_font(&font_set);
+      }
+    }
+  });
+
+  // "Invalidate Font" in the Settings menu — zeros the partition CRC so the
+  // next book open re-provisions from firmware with the progress bar.
+  app.set_invalidate_font_fn([]() { FontPartition::invalidate(); });
 
   ESP_LOGI("mem", "after font mmap: free=%lu largest=%lu", (unsigned long)esp_get_free_heap_size(),
            (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
@@ -278,6 +320,12 @@ extern "C" void app_main(void) {
           microreader::Book book;
           book.open(cmd_path);
           microreader::benchmark_image_decode(book, buf.scratch_buf1());
+          buf.reset_after_scratch();
+          break;
+        }
+        case SerialCmdType::FlashBench: {
+          // Use scratch_buf1 (48 KB) as the write pattern buffer.
+          FontPartition::bench_flash(buf.scratch_buf1(), microreader::DrawBuffer::kBufSize);
           buf.reset_after_scratch();
           break;
         }

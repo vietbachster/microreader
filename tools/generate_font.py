@@ -967,10 +967,22 @@ def _generate_bundle(faces, args, codepoint_ranges, multi_style):
     with open(bundle_path, "wb") as f:
         f.write(bundle)
 
+    # Also write the zlib-compressed version for firmware embedding.
+    # Format: [uncompressed_size:4 LE] [zlib_compressed_data...]
+    # The leading uint32 lets provision_embedded() erase exactly the right
+    # number of flash blocks without over-estimating.
+    import zlib as _zlib
+    compressed = _zlib.compress(bytes(bundle), level=9)
+    bin_path = os.path.join(out_dir, "font_bundle.bin")
+    with open(bin_path, "wb") as f:
+        f.write(struct.pack("<I", len(bundle)))  # uncompressed size prefix
+        f.write(compressed)
+
     print(f"\n{'='*40}")
     print(f"  FNTS Bundle")
     print(f"{'='*40}")
     print(f"  File:   {bundle_path} ({len(bundle)/1024:.1f} KB)")
+    print(f"  Compressed: {bin_path} ({len(compressed)/1024:.1f} KB)")
     for label, px_size, data, stats in mbf_files:
         print(
             f"  {label:7s} ({px_size:2d}px): {len(data)/1024:6.1f} KB, "
