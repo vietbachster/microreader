@@ -29,6 +29,11 @@ class SettingsScreen final : public ListMenuScreen {
     return "Settings";
   }
 
+  bool update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& runtime) override {
+    buf_ = &buf;
+    return ListMenuScreen::update(buttons, buf, runtime);
+  }
+
  protected:
   void on_start() override;
   bool on_select(int index) override;
@@ -45,6 +50,8 @@ class SettingsScreen final : public ListMenuScreen {
   int idx_clear_converted_ = -1;
   int idx_switch_ota_ = -1;
   int idx_invalidate_font_ = -1;
+  int idx_erase_spiffs_ = -1;
+  DrawBuffer* buf_ = nullptr;
 
   void clear_converted_();
 };

@@ -9,10 +9,14 @@
 #include <unistd.h>
 
 #include "esp_ota_ops.h"
+#include "esp_partition.h"
 #include "esp_system.h"
+#include "miniz.h"
 #else
 #include <filesystem>
 #endif
+
+#include "spiffs_image_data.h"
 
 namespace microreader {
 
@@ -38,6 +42,9 @@ void SettingsScreen::on_start() {
     idx_invalidate_font_ = count();
     add_item("Invalidate Font");
   }
+
+  idx_erase_spiffs_ = count();
+  add_item("Erase SPIFFS");
 #endif
 }
 
@@ -65,6 +72,65 @@ bool SettingsScreen::on_select(int index) {
     if (invalidate_font_fn_)
       invalidate_font_fn_();
     return true;  // stay on settings screen
+  }
+  if (index == idx_erase_spiffs_) {
+    const esp_partition_t* part =
+        esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_SPIFFS, "spiffs");
+
+    if (part) {
+      if (buf_)
+        buf_->show_loading("Erasing...", 0);
+
+      static constexpr size_t kDictSize = TINFL_LZ_DICT_SIZE;
+      static constexpr size_t kDecompSize = 11264;
+      static constexpr size_t kWriteSize = 4096;
+      uint8_t* work = static_cast<uint8_t*>(malloc(kDecompSize + kDictSize + kWriteSize));
+      if (work) {
+        esp_partition_erase_range(part, 0, part->size);
+
+        if (buf_)
+          buf_->show_loading("Writing...", 50);
+
+        auto* decomp = reinterpret_cast<tinfl_decompressor*>(work);
+        uint8_t* dict = work + kDecompSize;
+        uint8_t* wbuf = work + kDecompSize + kDictSize;
+        tinfl_init(decomp);
+        const uint8_t* in_ptr = kSpiffsImage;
+        size_t in_left = kSpiffsImageSize;
+        size_t flash_offset = 0;
+        size_t dict_ofs = 0;
+        tinfl_status status = TINFL_STATUS_HAS_MORE_OUTPUT;
+        while (status == TINFL_STATUS_HAS_MORE_OUTPUT || status == TINFL_STATUS_NEEDS_MORE_INPUT) {
+          size_t in_sz = in_left;
+          size_t out_sz = kDictSize - dict_ofs;
+          mz_uint32 flags = TINFL_FLAG_PARSE_ZLIB_HEADER;
+          if (in_left > in_sz)
+            flags |= TINFL_FLAG_HAS_MORE_INPUT;
+          status = tinfl_decompress(decomp, in_ptr, &in_sz, dict, dict + dict_ofs, &out_sz, flags);
+          in_ptr += in_sz;
+          in_left -= in_sz;
+          size_t produced = out_sz;
+          size_t write_ofs = 0;
+          while (write_ofs < produced) {
+            size_t chunk = produced - write_ofs;
+            if (chunk > kWriteSize)
+              chunk = kWriteSize;
+            memcpy(wbuf, dict + dict_ofs + write_ofs, chunk);
+            esp_partition_write(part, flash_offset, wbuf, chunk);
+            flash_offset += chunk;
+            write_ofs += chunk;
+          }
+          dict_ofs = (dict_ofs + produced) & (kDictSize - 1);
+          if (status <= TINFL_STATUS_DONE)
+            break;
+        }
+        free(work);
+
+        if (buf_)
+          buf_->show_loading("Done!", 100);
+      }
+    }
+    esp_restart();
   }
 #endif
   return true;
