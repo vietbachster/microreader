@@ -18,7 +18,7 @@
 #include <filesystem>
 #endif
 
-#include "spiffs_image_data.h"
+#include "../resources/spiffs_image_data.h"
 
 namespace microreader {
 

@@ -120,8 +120,12 @@ void ListMenuScreen::draw_all_(DrawBuffer& buf) const {
     const int ix = (W - iw) / 2;
     const int iy = y;
     if (i == selected_) {
-      const int bar_h = ui_font_.y_advance();
-      buf.fill_rect(ix - 4, iy - 1, iw + 8, bar_h, false);
+      const int bar_w = 3;  // horizontal padding on each side (rounded cap adds 1 more)
+      const int bar_h = ui_font_.y_advance() + 1;
+      buf.fill_rect(ix - bar_w - 1, iy, 1, bar_h - 2, false);
+      buf.fill_rect(ix - bar_w, iy - 1, iw + bar_w * 2, bar_h, false);
+      buf.fill_rect(ix + iw + bar_w, iy, 1, bar_h - 2, false);
+
       buf.draw_text_proportional(ix, iy + baseline, label, len, ui_font_, true);
     } else {
       buf.draw_text_proportional(ix, iy + baseline, label, len, ui_font_, false);
