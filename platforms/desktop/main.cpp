@@ -6,6 +6,7 @@
 #include "display.h"
 #include "input.h"
 #include "microreader/Application.h"
+#include "microreader/FontManager.h"
 #include "microreader/Loop.h"
 #include "microreader/content/BitmapFont.h"
 #include "microreader/display/DrawBuffer.h"
@@ -50,21 +51,21 @@ int main() {
     app.set_data_dir(data_path.c_str());
 
     // Load proportional fonts (5 sizes) if available.
-    microreader::BitmapFont prop_fonts[microreader::kFontSizeCount];
-    microreader::BitmapFontSet font_set;
+    microreader::FontManager font_mgr;
     std::vector<uint8_t> font_data[microreader::kFontSizeCount];
 
     struct SizeInfo {
-      int idx;             // index into prop_fonts/font_data
-      const char* label;   // for logging
-      const char* suffix;  // filename suffix
+      microreader::FontSize size;
+      int idx;
+      const char* label;
+      const char* suffix;
     };
     static constexpr SizeInfo kSizes[] = {
-        {0, "Small",   "small"  },
-        {1, "Normal",  "normal" },
-        {2, "Large",   "large"  },
-        {3, "XLarge",  "xlarge" },
-        {4, "XXLarge", "xxlarge"},
+        {microreader::FontSize::Small,   0, "Small",   "small"  },
+        {microreader::FontSize::Normal,  1, "Normal",  "normal" },
+        {microreader::FontSize::Large,   2, "Large",   "large"  },
+        {microreader::FontSize::XLarge,  3, "XLarge",  "xlarge" },
+        {microreader::FontSize::XXLarge, 4, "XXLarge", "xxlarge"},
     };
 
     static std::string fonts_dir = std::filesystem::absolute("resources/fonts").string();
@@ -72,27 +73,18 @@ int main() {
       std::string path = fonts_dir + "/font-" + si.suffix + ".mbf";
       font_data[si.idx] = load_file(path.c_str());
       if (!font_data[si.idx].empty()) {
-        prop_fonts[si.idx].init(font_data[si.idx].data(), font_data[si.idx].size());
-        if (prop_fonts[si.idx].valid()) {
-          printf("[font] %s: %s (%zu bytes, %u glyphs)\n", si.label, path.c_str(), font_data[si.idx].size(),
-                 prop_fonts[si.idx].num_glyphs());
-        } else {
+        font_mgr.load_font(si.size, font_data[si.idx].data(), font_data[si.idx].size());
+        if (font_mgr.valid())
+          printf("[font] %s: %s (%zu bytes)\n", si.label, path.c_str(), font_data[si.idx].size());
+        else
           printf("[font] Invalid font file: %s\n", path.c_str());
-        }
       }
     }
 
-    static constexpr microreader::FontSize kFontSizes[] = {microreader::FontSize::Small, microreader::FontSize::Normal,
-                                                           microreader::FontSize::Large, microreader::FontSize::XLarge,
-                                                           microreader::FontSize::XXLarge};
-    for (int i = 0; i < microreader::kFontSizeCount; i++)
-      font_set.set(kFontSizes[i], &prop_fonts[i]);
-
-    if (font_set.valid()) {
-      app.set_reader_font(&font_set);
-    } else {
+    app.set_reader_font(font_mgr.font_set());
+    app.set_font_manager(&font_mgr);
+    if (!font_mgr.valid())
       printf("[font] No valid Normal font — using builtin 8x8\n");
-    }
 
     app.start(buf);
     microreader::run_loop(app, buf, input, runtime);

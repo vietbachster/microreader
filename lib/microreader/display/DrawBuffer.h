@@ -435,6 +435,7 @@ class DrawBuffer {
   void refresh() {
     display_.partial_refresh(inactive_(), active_());
     active_idx_ = 1 - active_idx_;
+    active_valid_ = true;
   }
 
   // Call full hardware refresh using the current inactive buffer, then sync both.
@@ -442,15 +443,17 @@ class DrawBuffer {
     display_.full_refresh(inactive_(), mode, turnOffScreen);
     memcpy(bufs_[active_idx_], bufs_[1 - active_idx_], kBufSize);
     active_idx_ = 1 - active_idx_;
+    active_valid_ = true;
   }
 
   void deep_sleep() {
     display_.deep_sleep();
   }
 
-  void upload_current_frame() {
-    display_.write_ram_bw(active_());
-    // display_.write_ram_red(active_());
+  // Writes the active (currently-displayed) frame to BW RAM so BW and RED RAM
+  void sync_bw_ram() {
+    if (active_valid_)
+      display_.write_ram_bw(active_());
   }
 
   // Write pre-built LSB/MSB plane arrays to display RAM, trigger a grayscale
@@ -479,10 +482,13 @@ class DrawBuffer {
   }
 
   // Reset both buffers after scratch use, before drawing new content.
+  // Marks the active buffer as no longer reflecting the display, so sync_bw_ram()
+  // becomes a no-op until the next refresh().
   void reset_after_scratch(bool white = true) {
     memset(bufs_[0], white ? 0xFF : 0x00, kBufSize);
     memset(bufs_[1], white ? 0xFF : 0x00, kBufSize);
     active_idx_ = 0;
+    active_valid_ = false;
   }
 
   // ── Loading box region update ────────────────────────────────────────────
@@ -540,6 +546,7 @@ class DrawBuffer {
   IDisplay& display_;
   alignas(4) uint8_t bufs_[2][kBufSize];
   int active_idx_ = 0;
+  bool active_valid_ = true;  // false after reset_after_scratch(); restored by refresh()/full_refresh()
 
   uint8_t* inactive_() {
     return bufs_[1 - active_idx_];

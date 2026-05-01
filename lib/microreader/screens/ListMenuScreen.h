@@ -20,17 +20,12 @@ namespace microreader {
 //   on_back()       — handle back button; return true to stay, false to exit (default)
 class ListMenuScreen : public IScreen {
  public:
-  IScreen* chosen() const {
-    return chosen_;
-  }
-
   void start(DrawBuffer& buf) override;
   void stop() override {}
   bool update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& runtime) override;
 
  protected:
   const char* title_ = nullptr;
-  IScreen* chosen_ = nullptr;
 
   void add_item(const std::string& label) {
     labels_.push_back(label);

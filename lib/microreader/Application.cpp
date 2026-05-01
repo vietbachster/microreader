@@ -31,7 +31,15 @@ void Application::start(DrawBuffer& buf) {
 #endif
 
   if (reader_font_)
-    menu_.set_reader_font(reader_font_);
+    reader_.set_fonts(reader_font_);
+
+  menu_.set_app(this);
+  reader_.set_app(this);
+  settings_.set_app(this);
+  bouncing_ball_.set_app(this);
+  grayscale_demo_.set_app(this);
+  reader_options_.set_app(this);
+  chapter_select_.set_app(this);
 
   // Set up settings file path if data_dir_ is set
   if (data_dir_)
@@ -60,13 +68,11 @@ void Application::start(DrawBuffer& buf) {
 }
 
 void Application::auto_open_book(const char* epub_path, DrawBuffer& buf) {
-  // Use the MainMenu's ReaderScreen instance for all book opens
-  ReaderScreen* reader = menu_.reader();
-  reader->set_path(epub_path);
+  reader_.set_path(epub_path);
   if (reader_font_)
-    reader->set_fonts(reader_font_);
+    reader_.set_fonts(reader_font_);
 
-  screen_mgr_.push(reader, buf);
+  screen_mgr_.push(&reader_, buf);
 }
 
 void Application::update(const ButtonState& buttons, uint32_t dt_ms, DrawBuffer& buf, IRuntime& runtime) {
@@ -106,43 +112,51 @@ void Application::update(const ButtonState& buttons, uint32_t dt_ms, DrawBuffer&
 
   IScreen* top = screen_mgr_.top();
   if (top) {
-    if (!top->update(buttons_, buf, runtime)) {
-      // Screen signalled exit.
-      if (top == &menu_) {
-        // Menu chose a sub-screen — push it.
-        IScreen* chosen = menu_.chosen();
-        if (chosen) {
-          screen_mgr_.push(chosen, buf);
-          buf.refresh();
-        }
-      } else {
-        // Check if the exiting screen wants to replace itself or push a sub-screen.
-        IScreen* replace = top->replace_with();
-        IScreen* next = top->chosen();
+    bool stayed = top->update(buttons_, buf, runtime);
 
-        if (replace) {
-          // Pop the current screen then push the replacement.
-          screen_mgr_.pop(buf);
-          screen_mgr_.push(replace, buf);
-          buf.refresh();
-        } else if (next) {
-          screen_mgr_.push(next, buf);
-          buf.refresh();
-        } else {
-          // Pop back to the previous screen.
-          screen_mgr_.pop(buf);
-          // If the reader just exited, persist all settings.
-          if (top == menu_.reader())
-            save_settings_();
-          buf.refresh();
-        }
-      }
+    // Process pending navigation (queued by screens via push_screen/replace_screen).
+    if (pending_replace_ != ScreenId::None) {
+      ScreenId id = pending_replace_;
+      pending_replace_ = ScreenId::None;
+      screen_mgr_.pop(buf);
+      screen_mgr_.push(screen_for_(id), buf);
+      buf.refresh();
+    } else if (pending_push_ != ScreenId::None) {
+      ScreenId id = pending_push_;
+      pending_push_ = ScreenId::None;
+      screen_mgr_.push(screen_for_(id), buf);
+      buf.refresh();
+    } else if (!stayed) {
+      // Screen signalled exit with no pending navigation — pop back.
+      if (top == &reader_)
+        save_settings_();
+      screen_mgr_.pop(buf);
+      buf.refresh();
     }
   }
 
 }  // namespace microreader
 
-// --- Place these outside the namespace to avoid qualified name errors ---
+IScreen* microreader::Application::screen_for_(ScreenId id) {
+  switch (id) {
+    case ScreenId::MainMenu:
+      return &menu_;
+    case ScreenId::Reader:
+      return &reader_;
+    case ScreenId::Settings:
+      return &settings_;
+    case ScreenId::BouncingBall:
+      return &bouncing_ball_;
+    case ScreenId::GrayscaleDemo:
+      return &grayscale_demo_;
+    case ScreenId::ReaderOptions:
+      return &reader_options_;
+    case ScreenId::ChapterSelect:
+      return &chapter_select_;
+    default:
+      return nullptr;
+  }
+}
 void microreader::Application::save_settings_() {
   if (settings_path_.empty())
     return;
@@ -155,7 +169,7 @@ void microreader::Application::save_settings_() {
 
   // Last screen / book — treat reader-is-anywhere-in-stack as "reader" so
   // shutting down from ReaderOptionsScreen still boots back into the reader.
-  ReaderScreen* reader = menu_.reader();
+  ReaderScreen* reader = &reader_;
   const bool reader_active = screen_mgr_.contains(reader);
   std::fprintf(f, "screen=%s\n", reader_active ? "reader" : "menu");
   if (reader_active && reader->has_path())
@@ -188,7 +202,7 @@ void microreader::Application::load_settings_() {
 
   char line[512];
   std::string last_screen, last_book_path, book_sel;
-  ReaderSettings& rs = menu_.reader()->reader_settings();
+  ReaderSettings& rs = reader_.reader_settings();
 
   while (std::fgets(line, sizeof(line), f)) {
     // Strip trailing newline

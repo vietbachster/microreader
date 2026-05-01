@@ -7,12 +7,11 @@
 #include "esp_ota_ops.h"
 #include "esp_sleep.h"
 #include "esp_system.h"
-#include "font_partition.h"
+#include "font_manager.h"
 #include "input.h"
 #include "microreader/Application.h"
 #include "microreader/HeapLog.h"
 #include "microreader/Loop.h"
-#include "microreader/content/BitmapFont.h"
 #include "microreader/content/Book.h"
 #include "microreader/content/mrb/MrbConverter.h"
 #include "microreader/display/DrawBuffer.h"
@@ -140,116 +139,14 @@ extern "C" void app_main(void) {
   ESP_LOGI("mem", "after serial_start: free=%lu largest=%lu", (unsigned long)esp_get_free_heap_size(),
            (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
 
-  // Try to mmap fonts from the spiffs partition (zero-RAM, XIP access).
-  // Expects a v1 FNTS bundle containing up to kFontSizeCount sizes
-  // (Small/Normal/Large/XLarge/XXLarge) with an embedded font name.
-  static FontPartition font_part;
-  static microreader::BitmapFont prop_fonts[microreader::kFontSizeCount];
-  static microreader::BitmapFontSet font_set;
+  static FontManager font_mgr(app);
+  font_mgr.init();
+  app.set_font_manager(&font_mgr);
 
-  auto load_fonts = [&]() {
-    for (auto& f : prop_fonts)
-      f = microreader::BitmapFont();
-    font_set = microreader::BitmapFontSet();
-
-    const uint8_t* d = font_part.data;
-    size_t sz = font_part.size;
-
-    if (sz < 40 || memcmp(d, "FNTS", 4) != 0 || d[5] < 1) {
-      ESP_LOGE("font", "Invalid font partition (expected FNTS v1 bundle)");
-      return;
-    }
-
-    // FNTS v1: [FNTS:4][num:1][version:1][res:2][name:32][num×size:4][data...]
-    uint8_t num = d[4];
-    if (num > microreader::kFontSizeCount)
-      num = microreader::kFontSizeCount;
-
-    char font_name[33] = {};
-    memcpy(font_name, d + 8, 32);
-    font_name[32] = '\0';
-    ESP_LOGI("font", "Bundle font: \"%s\" (v%u, %u sizes)", font_name, d[5], num);
-
-    constexpr size_t kSizeTableOff = 8 + 32;
-    uint32_t sizes[microreader::kFontSizeCount] = {};
-    for (int i = 0; i < num; i++) {
-      const uint8_t* p = d + kSizeTableOff + i * 4;
-      sizes[i] = p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24);
-    }
-    size_t off = kSizeTableOff + static_cast<size_t>(num) * 4;
-    for (int i = 0; i < num; i++) {
-      if (off + sizes[i] > sz)
-        break;
-      prop_fonts[i].init(d + off, sizes[i]);
-      off += sizes[i];
-    }
-
-    static constexpr microreader::FontSize kAllSizes[] = {microreader::FontSize::Small, microreader::FontSize::Normal,
-                                                          microreader::FontSize::Large, microreader::FontSize::XLarge,
-                                                          microreader::FontSize::XXLarge};
-    for (int i = 0; i < microreader::kFontSizeCount; i++)
-      font_set.set(kAllSizes[i], &prop_fonts[i]);
-  };
-
-  extern const uint8_t _binary_font_bundle_bin_start[];
-  extern const uint8_t _binary_font_bundle_bin_end[];
-  const uint8_t* font_bundle_data = _binary_font_bundle_bin_start;
-  size_t font_bundle_size = static_cast<size_t>(_binary_font_bundle_bin_end - _binary_font_bundle_bin_start);
-
-  if (font_part.mmap()) {
-    load_fonts();
-    if (font_set.valid()) {
-      static const char* names[] = {"Small", "Normal", "Large", "XLarge", "XXLarge"};
-      for (int i = 0; i < microreader::kFontSizeCount; i++) {
-        if (prop_fonts[i].valid())
-          ESP_LOGI("font", "%s: %u glyphs, height=%u baseline=%u", names[i], (unsigned)prop_fonts[i].num_glyphs(),
-                   (unsigned)prop_fonts[i].glyph_height(), (unsigned)prop_fonts[i].baseline());
-      }
-      // Only advertise the font to the app if provisioning is not needed.
-      // If provisioning is needed (invalidated or new firmware), leave
-      // reader_font_ null so Application skips auto-open and boots to the
-      // main menu.  The pre_book_open_hook will install fonts on first open.
-      if (!FontPartition::needs_provisioning(font_bundle_data, font_bundle_size)) {
-        app.set_reader_font(&font_set);
-      } else {
-        ESP_LOGI("font", "font needs provisioning — skipping auto-open, will install on first book open");
-      }
-    } else {
-      ESP_LOGW("font", "no valid Normal font found");
-    }
-  }
-
-  // Register a hook that fires lazily on the first (and subsequent) book
-  // opens.  It checks whether the firmware-embedded compressed font already
-  // matches what's in the spiffs partition via a CRC32 comparison.  If not
-  // (first flash, new firmware, or manually-uploaded font), it stream-
-  // decompresses and writes the embedded font to the partition, then re-mmaps
-  // it.  Subsequent calls are essentially free (12-byte partition read + CRC).
-
-  app.set_pre_book_open_hook([&]() {
-    if (!FontPartition::needs_provisioning(font_bundle_data, font_bundle_size))
-      return;
-    ESP_LOGI("font", "Provisioning font from firmware (first launch or firmware update)...");
-    buf.upload_current_frame();
-    buf.show_loading("Installing fonts...", 0);
-    if (FontPartition::provision_embedded(font_bundle_data, font_bundle_size, buf.scratch_buf1(),
-                                          microreader::DrawBuffer::kBufSize, buf.scratch_buf2(),
-                                          microreader::DrawBuffer::kBufSize,
-                                          [&](int pct) { buf.show_loading("Installing fonts...", pct); })) {
-      if (font_part.mmap()) {
-        load_fonts();
-        if (font_set.valid())
-          app.set_reader_font(&font_set);
-      }
-    }
-  });
-
-  // "Invalidate Font" in the Settings menu — zeros the partition CRC so the
-  // next book open re-provisions from firmware with the progress bar.
-  app.set_invalidate_font_fn([]() { FontPartition::invalidate(); });
-
-  ESP_LOGI("mem", "after font mmap: free=%lu largest=%lu", (unsigned long)esp_get_free_heap_size(),
+  ESP_LOGI("mem", "after font init: free=%lu largest=%lu", (unsigned long)esp_get_free_heap_size(),
            (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+
+  app.set_invalidate_font_fn([]() { FontPartition::invalidate(); });
 
   app.start(buf);
 
@@ -263,13 +160,7 @@ extern "C" void app_main(void) {
     // Check if a new font was uploaded via serial.
     if (g_font_uploaded) {
       g_font_uploaded = false;
-      if (font_part.mmap()) {
-        load_fonts();
-        if (font_set.valid()) {
-          ESP_LOGI("font", "re-loaded fonts after upload");
-          app.set_reader_font(&font_set);
-        }
-      }
+      font_mgr.on_serial_upload();
     }
 
     // Check if a new grayscale LUT was uploaded via serial.

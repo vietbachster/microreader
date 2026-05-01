@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "../Application.h"
 #include "../HeapLog.h"
 
 #ifdef ESP_PLATFORM
@@ -33,14 +34,14 @@ void MainMenu::on_start() {
 
 bool MainMenu::on_select(int index) {
   last_selected_path_ = entries_[index].path;
-  reader_.set_path(entries_[index].path.c_str());
-  chosen_ = &reader_;
-  return false;
+  app_->reader()->set_path(entries_[index].path.c_str());
+  app_->push_screen(ScreenId::Reader);
+  return true;
 }
 
 bool MainMenu::on_back() {
-  chosen_ = &settings_;
-  return false;
+  app_->push_screen(ScreenId::Settings);
+  return true;
 }
 
 void MainMenu::scan_directory_() {

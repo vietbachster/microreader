@@ -5,8 +5,6 @@
 #include "../Input.h"
 #include "../display/DrawBuffer.h"
 #include "ListMenuScreen.h"
-#include "ReaderScreen.h"
-#include "SettingsScreen.h"
 
 namespace microreader {
 
@@ -18,11 +16,6 @@ class MainMenu final : public ListMenuScreen {
 
   void set_books_dir(const char* dir) {
     books_dir_ = dir;
-  }
-
-  void set_data_dir(const char* dir) {
-    reader_.set_data_dir(dir);
-    settings_.set_data_dir(dir);
   }
 
   // Restore the book list selection to the entry matching this path.
@@ -57,15 +50,8 @@ class MainMenu final : public ListMenuScreen {
     return "Books";
   }
 
-  void set_reader_font(const BitmapFontSet* fonts) {
-    reader_.set_fonts(fonts);
-  }
-
-  ReaderScreen* reader() {
-    return &reader_;
-  }
-  SettingsScreen* settings() {
-    return &settings_;
+  void set_app(Application* app) {
+    app_ = app;
   }
 
  protected:
@@ -83,9 +69,6 @@ class MainMenu final : public ListMenuScreen {
     std::string label;
   };
   std::vector<BookEntry> entries_;
-
-  ReaderScreen reader_;
-  SettingsScreen settings_;
 
   void scan_directory_();
 };

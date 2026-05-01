@@ -3,7 +3,6 @@
 #include <cstdint>
 #include <vector>
 
-#include "ChapterSelectScreen.h"
 #include "ListMenuScreen.h"
 
 namespace microreader {
@@ -67,9 +66,9 @@ struct ReaderSettings {
 //   - "Chapters" (TOC navigation) → replaces this screen with ChapterSelectScreen
 //
 // Usage:
-//   reader_options_.set_settings(&reader_settings_);
-//   reader_options_.populate(mrb_.toc(), chapter_idx, page_pos_.paragraph);
-//   nav_chosen_ = &reader_options_;
+//   app_->reader_options()->set_settings(&reader_settings_);
+//   app_->reader_options()->populate(mrb_.toc(), chapter_idx, page_pos_.paragraph);
+//   app_->push_screen(ScreenId::ReaderOptions);
 class ReaderOptionsScreen final : public ListMenuScreen {
  public:
   ReaderOptionsScreen() = default;
@@ -86,25 +85,12 @@ class ReaderOptionsScreen final : public ListMenuScreen {
   // Populate before pushing. Pass toc (may be empty — "Chapters" hidden when empty).
   void populate(const TableOfContents& toc, uint16_t current_chapter, uint16_t current_para);
 
-  // Access the chapter select screen to read pending state after it returns.
-  ChapterSelectScreen& chapter_select() {
-    return chapter_select_;
-  }
-
-  // Returns the screen to replace this one with (pop Options, push it).
-  // Set when user picks "Chapters".
-  IScreen* replace_with() const override {
-    return replace_;
-  }
-
  protected:
   void on_start() override;
   bool on_select(int index) override;
 
  private:
-  ChapterSelectScreen chapter_select_;
   ReaderSettings* settings_ = nullptr;
-  IScreen* replace_ = nullptr;
 
   // Item indices (-1 = not shown).
   int idx_justify_ = -1;

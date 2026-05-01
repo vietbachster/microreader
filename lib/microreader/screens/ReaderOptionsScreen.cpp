@@ -2,9 +2,9 @@
 
 #include <cstring>
 
-namespace microreader {
+#include "../Application.h"
 
-// constexpr arrays declared in the header need a definition in one TU.
+namespace microreader {
 constexpr uint16_t ReaderSettings::kHPaddingPresets[];
 constexpr uint16_t ReaderSettings::kVPaddingPresets[];
 constexpr int16_t ReaderSettings::kSpacingPresets[];
@@ -16,10 +16,9 @@ constexpr const char* ReaderSettings::kSpacingNames[];
 // ---------------------------------------------------------------------------
 
 void ReaderOptionsScreen::populate(const TableOfContents& toc, uint16_t current_chapter, uint16_t current_para) {
-  replace_ = nullptr;
-  if (!toc.entries.empty()) {
-    chapter_select_.populate(toc, current_chapter, current_para);
-    chapter_select_.clear_pending();
+  if (!toc.entries.empty() && app_) {
+    app_->chapter_select()->populate(toc, current_chapter, current_para);
+    app_->chapter_select()->clear_pending();
   }
 }
 
@@ -32,19 +31,18 @@ static const char* fmt_setting(char* buf, size_t bufsz, const char* label, const
 void ReaderOptionsScreen::on_start() {
   title_ = "Options";
   clear_items();
-  replace_ = nullptr;
   idx_justify_ = idx_padding_h_ = idx_padding_v_ = idx_line_spacing_ = idx_progress_ = idx_chapters_ = -1;
 
   char tmp[40];
 
   // "Chapters" goes at the top so it's easy to reach.
-  if (chapter_select_.has_toc()) {
+  if (app_ && app_->chapter_select()->has_toc()) {
     idx_chapters_ = count();
     add_item("Chapters");
   }
 
   // Separator between chapter navigation and text layout settings.
-  if (settings_ && chapter_select_.has_toc())
+  if (settings_ && app_ && app_->chapter_select()->has_toc())
     add_separator();
 
   if (settings_) {
@@ -76,8 +74,8 @@ void ReaderOptionsScreen::refresh_items_(int restore_selection) {
 bool ReaderOptionsScreen::on_select(int index) {
   if (!settings_) {
     if (index == idx_chapters_) {
-      replace_ = &chapter_select_;
-      return false;
+      app_->replace_screen(ScreenId::ChapterSelect);
+      return true;
     }
     return true;
   }
@@ -109,8 +107,8 @@ bool ReaderOptionsScreen::on_select(int index) {
     return true;
   }
   if (index == idx_chapters_) {
-    replace_ = &chapter_select_;
-    return false;
+    app_->replace_screen(ScreenId::ChapterSelect);
+    return true;
   }
   return true;
 }

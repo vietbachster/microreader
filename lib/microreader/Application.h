@@ -3,14 +3,33 @@
 #include <cstdint>
 #include <functional>
 
+#include "FontManager.h"
 #include "Input.h"
 #include "Runtime.h"
 #include "ScreenManager.h"
 #include "display/DrawBuffer.h"
+#include "screens/BouncingBallDemo.h"
+#include "screens/ChapterSelectScreen.h"
+#include "screens/GrayscaleDemo.h"
 #include "screens/IScreen.h"
 #include "screens/MainMenu.h"
+#include "screens/ReaderOptionsScreen.h"
+#include "screens/ReaderScreen.h"
+#include "screens/SettingsScreen.h"
 
 namespace microreader {
+
+// All navigable screens in the application.
+enum class ScreenId : uint8_t {
+  None = 0,
+  MainMenu,
+  Reader,
+  Settings,
+  BouncingBall,
+  GrayscaleDemo,
+  ReaderOptions,
+  ChapterSelect,
+};
 
 class Application {
  public:
@@ -21,8 +40,9 @@ class Application {
     menu_.set_books_dir(dir);
   }
   void set_data_dir(const char* dir) {
-    menu_.set_data_dir(dir);
     data_dir_ = dir;
+    reader_.set_data_dir(dir ? dir : "");
+    settings_.set_data_dir(dir);
   }
   // Path to data directory for settings/state persistence
   const char* data_dir_ = nullptr;
@@ -35,24 +55,53 @@ class Application {
   // Load all persistent state from the settings file
   void load_settings_();
 
-  // Set the proportional font set for the reader screen. Must outlive the app.
-  // Also propagates immediately to the ReaderScreen so it takes effect even if
-  // called after start() (e.g. from within the font-provisioning hook).
+  // Font management. set_reader_font() also propagates to the reader screen.
   void set_reader_font(const BitmapFontSet* fonts) {
     reader_font_ = fonts;
-    menu_.set_reader_font(fonts);
+    reader_.set_fonts(fonts);
   }
-  // Set an optional hook fired at the start of every book open (before file I/O).
-  // Used on ESP32 to lazily provision the font partition from firmware-embedded
-  // compressed data.  Has no effect on desktop (hook is never set).
-  void set_pre_book_open_hook(std::function<void()> hook) {
-    menu_.reader()->set_pre_open_hook(std::move(hook));
+  void set_font_manager(FontManager* fm) {
+    font_manager_ = fm;
   }
-  // Set an optional callback for "Invalidate Font" in the Settings menu.
-  // When set, the item is shown (ESP32 only). Should zero the partition CRC.
+  FontManager* font_manager() const {
+    return font_manager_;
+  }
+
+  // Optional callback for "Invalidate Font" in the Settings menu (ESP32 only).
   void set_invalidate_font_fn(std::function<void()> fn) {
-    menu_.settings()->set_invalidate_font_fn(std::move(fn));
+    invalidate_font_fn_ = std::move(fn);
   }
+  void invalidate_font() {
+    if (invalidate_font_fn_)
+      invalidate_font_fn_();
+  }
+  bool has_invalidate_font_fn() const {
+    return static_cast<bool>(invalidate_font_fn_);
+  }
+
+  ReaderScreen* reader() {
+    return &reader_;
+  }
+  SettingsScreen* settings() {
+    return &settings_;
+  }
+  ReaderOptionsScreen* reader_options() {
+    return &reader_options_;
+  }
+  ChapterSelectScreen* chapter_select() {
+    return &chapter_select_;
+  }
+
+  // Navigate to a screen: push on top of the current screen (current stays on stack).
+  // Or replace the current screen (pop it first, then push the new one).
+  // Safe to call from within a screen's update(); the transition happens after update() returns.
+  void push_screen(ScreenId id) {
+    pending_push_ = id;
+  }
+  void replace_screen(ScreenId id) {
+    pending_replace_ = id;
+  }
+
   void start(DrawBuffer& buf);
   // Auto-open a book by path (skips menu, for debugging).
   void auto_open_book(const char* epub_path, DrawBuffer& buf);
@@ -70,7 +119,18 @@ class Application {
 
   ScreenManager screen_mgr_;
   MainMenu menu_;
+  ReaderScreen reader_;
+  SettingsScreen settings_;
+  BouncingBallDemo bouncing_ball_;
+  GrayscaleDemo grayscale_demo_;
+  ReaderOptionsScreen reader_options_;
+  ChapterSelectScreen chapter_select_;
+  ScreenId pending_push_ = ScreenId::None;
+  ScreenId pending_replace_ = ScreenId::None;
   const BitmapFontSet* reader_font_ = nullptr;
+  FontManager* font_manager_ = nullptr;
+  std::function<void()> invalidate_font_fn_;
+  IScreen* screen_for_(ScreenId id);
 };
 
 }  // namespace microreader

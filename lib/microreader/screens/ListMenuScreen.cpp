@@ -14,7 +14,6 @@ void ListMenuScreen::start(DrawBuffer& buf) {
     ui_font_.init(kFontData_ui_small_mbf, kFontData_ui_small_mbf_size);
   if (!header_font_.valid())
     header_font_.init(kFontData_ui_header_mbf, kFontData_ui_header_mbf_size);
-  chosen_ = nullptr;
   const int prev_selected = selected_;
   clear_items();
   on_start_set_selection_ = false;

@@ -4,6 +4,8 @@
 #include <cstring>
 #include <string>
 
+#include "../Application.h"
+
 #ifdef ESP_PLATFORM
 #include <sys/stat.h>
 #include <unistd.h>
@@ -126,13 +128,12 @@ static std::string make_book_key(const EpubMetadata& meta, const char* epub_path
 }
 
 void ReaderScreen::start(DrawBuffer& buf) {
-  // Platform-provided hook (e.g. font provisioning on ESP32).
-  if (pre_open_hook_)
-    pre_open_hook_();
-
   buf_ = &buf;
   book_key_.clear();
   pos_path_.clear();
+
+  if (app_ && app_->font_manager())
+    app_->font_manager()->ensure_ready(buf);
 
   // Build cache path: <data_dir>/cache/<basename>/book.mrb
   {
@@ -159,11 +160,9 @@ void ReaderScreen::start(DrawBuffer& buf) {
   bool mrb_ok = mrb_.open(mrb_path_.c_str());
 
   if (!mrb_ok) {
-    // Show a loading indicator before the heavy conversion work begins.
-    // Upload the current frame to the controller's BW+RED RAM first so that
-    // subsequent partial region refreshes (EPD_FAST_REFRESH) have a correct
-    // reference frame.  Both draw buffers are used as scratch after this.
-    buf.upload_current_frame();
+    // Upload the current frame before scratch buffer use so the display
+    // controller has a valid reference frame for partial refreshes.
+    buf.sync_bw_ram();
     buf.show_loading("Converting...", 0);
 
 #ifdef ESP_PLATFORM
@@ -221,10 +220,10 @@ void ReaderScreen::start(DrawBuffer& buf) {
   image_size_fn_ = make_image_size_query(mrb_, path_, static_cast<uint16_t>(DrawBuffer::kWidth));
   // Restore position: if the user selected a chapter from the TOC, jump there;
   // otherwise load saved bookmark from disk (defaults to 0/{0,0} on first open).
-  if (reader_options_.chapter_select().has_pending()) {
-    saved_chapter_idx_ = reader_options_.chapter_select().pending_chapter();
-    saved_page_pos_ = PagePosition{reader_options_.chapter_select().pending_para_index(), 0};
-    reader_options_.chapter_select().clear_pending();
+  if (app_ && app_->chapter_select()->has_pending()) {
+    saved_chapter_idx_ = app_->chapter_select()->pending_chapter();
+    saved_page_pos_ = PagePosition{app_->chapter_select()->pending_para_index(), 0};
+    app_->chapter_select()->clear_pending();
   } else {
     load_position_();
   }
@@ -273,7 +272,6 @@ void ReaderScreen::stop() {
   book_key_.clear();
   book_key_.shrink_to_fit();
   open_ok_ = false;
-  nav_chosen_ = nullptr;
   buf_ = nullptr;
 }
 
@@ -300,10 +298,10 @@ bool ReaderScreen::update(const ButtonState& buttons, DrawBuffer& buf, IRuntime&
       case Button::Button1:
         saved_chapter_idx_ = chapter_idx_;
         saved_page_pos_ = page_pos_;
-        reader_options_.set_settings(&reader_settings_);
-        reader_options_.populate(mrb_.toc(), static_cast<uint16_t>(chapter_idx_), page_pos_.paragraph);
-        nav_chosen_ = &reader_options_;
-        return false;
+        app_->reader_options()->set_settings(&reader_settings_);
+        app_->reader_options()->populate(mrb_.toc(), static_cast<uint16_t>(chapter_idx_), page_pos_.paragraph);
+        app_->push_screen(ScreenId::ReaderOptions);
+        return true;
       case Button::Button2:
       case Button::Up:
         ++page_delta;

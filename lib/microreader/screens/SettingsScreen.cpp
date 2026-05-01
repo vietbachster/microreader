@@ -3,6 +3,8 @@
 #include <cstdio>
 #include <cstring>
 
+#include "../Application.h"
+
 #ifdef ESP_PLATFORM
 #include <dirent.h>
 #include <sys/stat.h>
@@ -24,10 +26,10 @@ void SettingsScreen::on_start() {
   title_ = "Settings";
 
   idx_bouncing_ball_ = count();
-  add_item(bouncing_ball_.name());
+  add_item("Bouncing Ball");
 
   idx_grayscale_demo_ = count();
-  add_item(grayscale_demo_.name());
+  add_item("Grayscale Demo");
 
   if (data_dir_) {
     idx_clear_converted_ = count();
@@ -38,7 +40,7 @@ void SettingsScreen::on_start() {
   idx_switch_ota_ = count();
   add_item("Switch OTA");
 
-  if (invalidate_font_fn_) {
+  if (app_ && app_->has_invalidate_font_fn()) {
     idx_invalidate_font_ = count();
     add_item("Invalidate Font");
   }
@@ -50,12 +52,12 @@ void SettingsScreen::on_start() {
 
 bool SettingsScreen::on_select(int index) {
   if (index == idx_bouncing_ball_) {
-    chosen_ = &bouncing_ball_;
-    return false;
+    app_->push_screen(ScreenId::BouncingBall);
+    return true;
   }
   if (index == idx_grayscale_demo_) {
-    chosen_ = &grayscale_demo_;
-    return false;
+    app_->push_screen(ScreenId::GrayscaleDemo);
+    return true;
   }
   if (index == idx_clear_converted_) {
     clear_converted_();
@@ -69,8 +71,8 @@ bool SettingsScreen::on_select(int index) {
     esp_restart();
   }
   if (index == idx_invalidate_font_) {
-    if (invalidate_font_fn_)
-      invalidate_font_fn_();
+    if (app_)
+      app_->invalidate_font();
     return true;  // stay on settings screen
   }
   if (index == idx_erase_spiffs_) {

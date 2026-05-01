@@ -50,12 +50,6 @@ class ReaderScreen final : public IScreen {
     ext_font_set_ = fonts;
   }
 
-  // Optional hook called at the very start of start() before any file I/O.
-  // Used on ESP32 to provision the font partition from firmware-embedded data.
-  void set_pre_open_hook(std::function<void()> hook) {
-    pre_open_hook_ = std::move(hook);
-  }
-
   // Export helpers.
   bool render_current_page(DrawBuffer& buf);
   bool next_page_and_render(DrawBuffer& buf);
@@ -64,11 +58,6 @@ class ReaderScreen final : public IScreen {
 
   const char* name() const override {
     return "Reader";
-  }
-
-  // Returns the reader options screen to push (set when Button1 pressed), or null.
-  IScreen* chosen() const {
-    return nav_chosen_;
   }
 
   void start(DrawBuffer& buf) override;
@@ -120,11 +109,9 @@ class ReaderScreen final : public IScreen {
   PageContent page_;
   bool open_ok_ = false;
 
-  // Reader options menu — owned here, pushed when user presses Button1.
-  ReaderOptionsScreen reader_options_;
+  // Reader options menu — pushed when user presses Button1.
+  // Prep (set_settings + populate) happens before calling app_->push_screen(ReaderOptions).
   ReaderSettings reader_settings_;  // user-adjustable settings, mutated by reader_options_
-  IScreen* nav_chosen_ = nullptr;
-  std::function<void()> pre_open_hook_;
 
   // Saved position (survives stop()) so we can restore after chapter select cancel.
   size_t saved_chapter_idx_ = 0;
