@@ -508,7 +508,7 @@ class DrawBuffer {
   // Mini-buffer size: 5 × 256 = 1280 bytes each (stack-allocated).
 
   static constexpr int kLoadLogW = 256;
-  static constexpr int kLoadLogH = 40;
+  static constexpr int kLoadLogH = 32;
   static constexpr int kLoadLogX = (kWidth - kLoadLogW) / 2;  // 112
   static constexpr int kLoadLogY = kHeight - kLoadLogH;       // - 4;   // 744
 
@@ -519,12 +519,11 @@ class DrawBuffer {
   static constexpr int kLoadStride = (kLoadPhysW + 7) / 8;                                  // 5
   static constexpr int kLoadBufBytes = kLoadStride * kLoadPhysH;                            // 1280
 
-  // Bar geometry (derived from loading box constants).
-  static constexpr int kBarPad = 6;
-  static constexpr int kBarH = 6;
-  static constexpr int kBarX = kLoadLogX + kBarPad;                // 118
-  static constexpr int kBarW = kLoadLogW - kBarPad * 2;            // 244
-  static constexpr int kBarY = kLoadLogY + kLoadLogH - kBarH - 4;  // 774
+  // Bar geometry.
+  static constexpr int kBarW = 160;
+  static constexpr int kBarH = 7;
+  static constexpr int kBarX = kWidth / 2 - kBarW / 2;
+  static constexpr int kBarY = kLoadLogY + kLoadLogH - kBarH - 4;
 
   // Draw a loading box (label + progress bar) and push it to the display
   // via a region-only hardware update.  The main draw buffers are NEVER
@@ -655,29 +654,39 @@ class DrawBuffer {
   // Never reads or writes bufs_.
   static void render_loading_box_(uint8_t* mini, const char* text, int progress_pct) {
     const RenderTarget t = mini_target_(mini);
-    // White fill.
-    memset(mini, 0xFF, kLoadBufBytes);
-    // Text centred horizontally inside the box.
+    memset(mini, 0xFF, kLoadBufBytes);  // white fill
+
+    // Helper: fill a logical rect in black.
+    // Deg90: fill_rect_physical_(t, phys_x=ly, phys_y=PhysH-lx-lw, phys_w=lh, phys_h=lw)
+    auto fill = [&](int lx, int ly, int lw, int lh) {
+      fill_rect_physical_(t, ly, DisplayFrame::kPhysicalHeight - lx - lw, lh, lw, /*white=*/false);
+    };
+
+    // Text centred horizontally, near top of loading region.
     const BitmapFont& font = ui_font_();
     if (text && *text) {
       const int tw = static_cast<int>(font.word_width(text, strlen(text), FontStyle::Regular));
       const int text_lx = kWidth / 2 - tw / 2;
-      const int baseline_ly = kLoadLogY + 8 + static_cast<int>(font.baseline());
+      const int baseline_ly = kLoadLogY + 3 + static_cast<int>(font.baseline());
       draw_text_to_(t, text_lx, baseline_ly, text, font, /*white=*/false);
     }
-    // Progress bar border (logical coords → physical via helpers).
-    // Deg90: fill_rect_physical_(t, phys_x=ly, phys_y=PhysH-lx-lw, phys_w=lh, phys_h=lw)
-    auto bar_rect = [&](int lx, int ly, int lw, int lh) {
-      fill_rect_physical_(t, ly, DisplayFrame::kPhysicalHeight - lx - lw, lh, lw, /*white=*/false);
-    };
-    bar_rect(kBarX, kBarY, kBarW, 1);              // top
-    bar_rect(kBarX, kBarY + kBarH - 1, kBarW, 1);  // bottom
-    bar_rect(kBarX, kBarY, 1, kBarH);              // left
-    bar_rect(kBarX + kBarW - 1, kBarY, 1, kBarH);  // right
-    // Progress fill.
-    const int filled = (progress_pct * (kBarW - 2)) / 100;
-    if (filled > 0)
-      bar_rect(kBarX + 1, kBarY + 1, filled, kBarH - 2);
+
+    // Outline: 160×7, rounded corners (corner pixels stay white).
+    fill(kBarX + 1, kBarY, kBarW - 2, 1);              // top edge
+    fill(kBarX + 1, kBarY + kBarH - 1, kBarW - 2, 1);  // bottom edge
+    fill(kBarX, kBarY + 1, 1, kBarH - 2);              // left edge
+    fill(kBarX + kBarW - 1, kBarY + 1, 1, kBarH - 2);  // right edge
+
+    // Inner bar: 3 rows (kBarH=7 → border(0), pad(1), bar(2,3,4), pad(5), border(6)).
+    // Sloped right side: bottom row widest, each row above is 1px shorter.
+    const int max_fill = kBarW - 4;  // usable width inside border
+    const int filled = (progress_pct * max_fill) / 100;
+    const int max_w = kBarW - 4;
+    if (filled > 0) {
+      fill(kBarX + 2, kBarY + 4, std::min(filled + 2, max_w), 1);  // bottom row — widest
+      fill(kBarX + 2, kBarY + 3, std::min(filled + 1, max_w), 1);  // middle row
+      fill(kBarX + 2, kBarY + 2, std::min(filled, max_w), 1);      // top row — narrowest
+    }
   }
 };
 

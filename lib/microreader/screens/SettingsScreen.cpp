@@ -80,8 +80,8 @@ bool SettingsScreen::on_select(int index) {
         esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_SPIFFS, "spiffs");
 
     if (part) {
-      if (buf_)
-        buf_->show_loading("Erasing...", 0);
+      buf_->sync_bw_ram();
+      buf_->show_loading("Erasing...", 0);
 
       static constexpr size_t kDictSize = TINFL_LZ_DICT_SIZE;
       static constexpr size_t kDecompSize = 11264;
@@ -128,8 +128,7 @@ bool SettingsScreen::on_select(int index) {
         }
         free(work);
 
-        if (buf_)
-          buf_->show_loading("Done!", 100);
+        buf_->show_loading("Done!", 100);
       }
     }
     esp_restart();
