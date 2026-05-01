@@ -36,7 +36,7 @@ class SettingsScreen final : public ListMenuScreen {
   int idx_clear_converted_ = -1;
   int idx_switch_ota_ = -1;
   int idx_invalidate_font_ = -1;
-  int idx_erase_spiffs_ = -1;
+  int idx_spiffs_ = -1;
   DrawBuffer* buf_ = nullptr;
 
   void clear_converted_();

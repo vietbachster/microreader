@@ -45,8 +45,8 @@ void SettingsScreen::on_start() {
     add_item("Invalidate Font");
   }
 
-  idx_erase_spiffs_ = count();
-  add_item("Erase SPIFFS");
+  idx_spiffs_ = count();
+  add_item("Rebuild SPIFFS");
 #endif
 }
 
@@ -75,7 +75,7 @@ bool SettingsScreen::on_select(int index) {
       app_->invalidate_font();
     return true;  // stay on settings screen
   }
-  if (index == idx_erase_spiffs_) {
+  if (index == idx_spiffs_) {
     const esp_partition_t* part =
         esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_SPIFFS, "spiffs");
 

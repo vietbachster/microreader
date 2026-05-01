@@ -81,6 +81,7 @@ class ListMenuScreen : public IScreen {
 
   void draw_all_(DrawBuffer& buf) const;
   void ensure_visible_();
+  void draw_button_hints_(DrawBuffer& buf) const;
 };
 
 }  // namespace microreader

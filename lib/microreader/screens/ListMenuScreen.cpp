@@ -7,7 +7,8 @@
 
 namespace microreader {
 
-static constexpr int kHeaderY = 15;  // top padding before the title text
+static constexpr int kHeaderY = 15;       // top padding before the title text
+static constexpr int kButtonHintsH = 26;  // reserved pixels at bottom for button icons
 
 void ListMenuScreen::start(DrawBuffer& buf) {
   if (!ui_font_.valid())
@@ -31,7 +32,7 @@ void ListMenuScreen::ensure_visible_() {
     return;
   const int line_h = ui_font_.y_advance() + 8;
   const int header_h = kHeaderY + (header_font_.valid() ? header_font_.y_advance() : 0) + 8;
-  const int visible = (DrawBuffer::kHeight - header_h) / line_h;
+  const int visible = (DrawBuffer::kHeight - header_h - kButtonHintsH) / line_h;
   if (visible <= 0)
     return;
   if (selected_ < scroll_offset_)
@@ -66,7 +67,7 @@ void ListMenuScreen::draw_all_(DrawBuffer& buf) const {
   const int line_h = ui_font_.y_advance() + 8;
   const int baseline = ui_font_.baseline();
   const int header_h = kHeaderY + (header_font_.valid() ? header_font_.y_advance() : 0) + 8;
-  const int visible = (H - header_h) / line_h;
+  const int visible = (H - header_h - kButtonHintsH) / line_h;
 
   const int end = scroll_offset_ + visible < n ? scroll_offset_ + visible : n;
 
@@ -145,6 +146,31 @@ void ListMenuScreen::draw_all_(DrawBuffer& buf) const {
     const int max_scroll = n - visible;
     const int thumb_y = sb_top + (max_scroll > 0 ? track * scroll_offset_ / max_scroll : 0);
     buf.fill_rect(sb_x, thumb_y, sb_w, thumb_h, false);
+  }
+
+  draw_button_hints_(buf);
+}
+
+void ListMenuScreen::draw_button_hints_(DrawBuffer& buf) const {
+  if (!ui_font_.valid())
+    return;
+  const int W = DrawBuffer::kWidth;
+  const int H = DrawBuffer::kHeight;
+  const int baseline = ui_font_.baseline();
+  const int text_y = H - kButtonHintsH / 2 - ui_font_.y_advance() / 2 + baseline + 2;
+
+  // Four labels: back=o, select=x, down=▼, up=▲
+  // ▼ = U+25BC (3 UTF-8 bytes: E2 96 BC), ▲ = U+25B2 (E2 96 B2)
+  static const char* kLabels[4] = {"o", "x", "\xe2\x96\xbc", "\xe2\x96\xb2"};
+  static const size_t kLens[4] = {1, 1, 3, 3};
+  // Physical layout: screen is 5.5cm wide, button pairs are centred 1.7cm from each edge.
+  const int pair0 = W * 17 / 55;
+  const int pair1 = W - pair0;
+  const int gap = 52;  // half-gap within a pair
+  const int btns[4] = {pair0 - gap, pair0 + gap, pair1 - gap, pair1 + gap};
+  for (int i = 0; i < 4; ++i) {
+    const int lw = ui_font_.word_width(kLabels[i], kLens[i], FontStyle::Regular);
+    buf.draw_text_proportional(btns[i] - lw / 2, text_y, kLabels[i], kLens[i], ui_font_, false);
   }
 }
 
