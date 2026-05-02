@@ -7,10 +7,11 @@
 
 namespace microreader {
 
-static constexpr int kHeaderY = 15;       // top padding before the title text
-static constexpr int kButtonHintsH = 26;  // reserved pixels at bottom for button icons
+static constexpr int kHeaderY = 15;        // top padding before the title text
+static constexpr int kBottomPadding = 16;  // list padding from bottom
+static constexpr int kButtonHintsH = 26;   // height of the button hint area
 
-void ListMenuScreen::start(DrawBuffer& buf) {
+void ListMenuScreen::start(DrawBuffer& buf, IRuntime& runtime) {
   if (!ui_font_.valid())
     ui_font_.init(kFontData_ui_small_mbf, kFontData_ui_small_mbf_size);
   if (!header_font_.valid())
@@ -27,7 +28,7 @@ void ListMenuScreen::start(DrawBuffer& buf) {
     center_on_selected_();
   else
     ensure_visible_();
-  draw_all_(buf);
+  draw_all_(buf, runtime.battery_percentage());
 }
 
 void ListMenuScreen::ensure_visible_() {
@@ -35,7 +36,7 @@ void ListMenuScreen::ensure_visible_() {
     return;
   const int line_h = ui_font_.y_advance() + 8;
   const int header_h = kHeaderY + (header_font_.valid() ? header_font_.y_advance() : 0) + 8;
-  const int visible = (DrawBuffer::kHeight - header_h - kButtonHintsH) / line_h;
+  const int visible = (DrawBuffer::kHeight - header_h - kBottomPadding) / line_h;
   if (visible <= 0)
     return;
   if (selected_ < scroll_offset_)
@@ -58,7 +59,7 @@ void ListMenuScreen::center_on_selected_() {
     return;
   const int line_h = ui_font_.y_advance() + 8;
   const int header_h = kHeaderY + (header_font_.valid() ? header_font_.y_advance() : 0) + 8;
-  const int visible = (DrawBuffer::kHeight - header_h - kButtonHintsH) / line_h;
+  const int visible = (DrawBuffer::kHeight - header_h - kBottomPadding) / line_h;
   if (visible <= 0)
     return;
   // Center the selection: put it in the middle of the visible window.
@@ -71,7 +72,7 @@ void ListMenuScreen::center_on_selected_() {
   scroll_offset_ = offset;
 }
 
-void ListMenuScreen::draw_all_(DrawBuffer& buf) const {
+void ListMenuScreen::draw_all_(DrawBuffer& buf, std::optional<uint8_t> battery_pct) const {
   const int W = DrawBuffer::kWidth;
   const int H = DrawBuffer::kHeight;
   const int n = count();
@@ -83,6 +84,31 @@ void ListMenuScreen::draw_all_(DrawBuffer& buf) const {
     const size_t title_len = std::strlen(title_);
     const int tw = header_font_.word_width(title_, title_len, FontStyle::Regular);
     buf.draw_text_proportional((W - tw) / 2, kHeaderY + header_font_.baseline(), title_, header_font_, false);
+
+    // Battery bar at the bottom center (horizontal)
+    if (battery_pct.has_value()) {
+      const int bat_pct = battery_pct.value();
+      const int kBarW = 26;
+      const int kBarH = 8;
+      const int kBarX = (W - kBarW) / 2;  // Center horizontally
+      const int kBarY = H - kBarH - 6;    // Position at the bottom
+
+      // Outline: rounded corners
+      buf.fill_rect(kBarX + 1, kBarY, kBarW - 2, 1, false);              // top edge
+      buf.fill_rect(kBarX + 1, kBarY + kBarH - 1, kBarW - 2, 1, false);  // bottom edge
+      buf.fill_rect(kBarX, kBarY + 1, 1, kBarH - 2, false);              // left edge
+      buf.fill_rect(kBarX + kBarW - 1, kBarY + 1, 1, kBarH - 2, false);  // right edge
+
+      // Inner bar: sloped right side (left to right)
+      const int max_fill = kBarW - 4;
+      const int filled = (bat_pct * max_fill) / 100;
+      if (filled > 0) {
+        buf.fill_row(kBarY + 5, kBarX + 2, kBarX + 2 + std::min(filled + 3, max_fill), false);
+        buf.fill_row(kBarY + 4, kBarX + 2, kBarX + 2 + std::min(filled + 2, max_fill), false);
+        buf.fill_row(kBarY + 3, kBarX + 2, kBarX + 2 + std::min(filled + 1, max_fill), false);
+        buf.fill_row(kBarY + 2, kBarX + 2, kBarX + 2 + std::min(filled, max_fill), false);
+      }
+    }
   }
 
   if (!ui_font_.valid() || n == 0) {
@@ -96,8 +122,9 @@ void ListMenuScreen::draw_all_(DrawBuffer& buf) const {
 
   const int line_h = ui_font_.y_advance() + 8;
   const int baseline = ui_font_.baseline();
+  // Provide padding below the header
   const int header_h = kHeaderY + (header_font_.valid() ? header_font_.y_advance() : 0) + 8;
-  const int visible = (H - header_h - kButtonHintsH) / line_h;
+  const int visible = (H - header_h - kBottomPadding) / line_h;
 
   const int end = scroll_offset_ + visible < n ? scroll_offset_ + visible : n;
 
@@ -187,7 +214,7 @@ void ListMenuScreen::draw_button_hints_(DrawBuffer& buf) const {
   const int W = DrawBuffer::kWidth;
   const int H = DrawBuffer::kHeight;
   const int baseline = ui_font_.baseline();
-  const int text_y = H - kButtonHintsH / 2 - ui_font_.y_advance() / 2 + baseline + 2;
+  const int text_y = H - kButtonHintsH / 2 - ui_font_.y_advance() / 2 + baseline + 3;
 
   // Four labels: back=◀, select=▶, down=▼, up=▲
   // ◀ = U+25C0 (E2 97 80), ▶ = U+25B6 (E2 96 B6)
@@ -195,9 +222,9 @@ void ListMenuScreen::draw_button_hints_(DrawBuffer& buf) const {
   static const char* kLabels[4] = {"\xe2\x97\x80", "\xe2\x96\xb6", "\xe2\x96\xbc", "\xe2\x96\xb2"};
   static const size_t kLens[4] = {3, 3, 3, 3};
 
-  const int pair0 = W * 165 / 550;
+  const int pair0 = W * 163 / 550;
   const int pair1 = W - pair0;
-  const int gap = 55;  // half-gap within a pair
+  const int gap = 50;  // half-gap within a pair
   const int btns[4] = {pair0 - gap, pair0 + gap, pair1 - gap, pair1 + gap};
   for (int i = 0; i < 4; ++i) {
     const int lw = ui_font_.word_width(kLabels[i], kLens[i], FontStyle::Regular);
@@ -205,7 +232,7 @@ void ListMenuScreen::draw_button_hints_(DrawBuffer& buf) const {
   }
 }
 
-bool ListMenuScreen::update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& /*runtime*/) {
+bool ListMenuScreen::update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& runtime) {
   const int n = count();
 
   // Helper lambdas for selection movement (skip separators).
@@ -238,7 +265,7 @@ bool ListMenuScreen::update(const ButtonState& buttons, DrawBuffer& buf, IRuntim
         // Flush any pending move before back so the screen redraws correctly
         // if on_back() decides to stay (returns true).
         if (moved) {
-          draw_all_(buf);
+          draw_all_(buf, runtime.battery_percentage());
           buf.refresh();
           moved = false;
         }
@@ -305,7 +332,7 @@ bool ListMenuScreen::update(const ButtonState& buttons, DrawBuffer& buf, IRuntim
   }
 
   if (moved || needs_draw) {
-    draw_all_(buf);
+    draw_all_(buf, runtime.battery_percentage());
     buf.refresh();
   }
 

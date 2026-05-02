@@ -127,7 +127,7 @@ static std::string make_book_key(const EpubMetadata& meta, const char* epub_path
   return std::string(name, len);
 }
 
-void ReaderScreen::start(DrawBuffer& buf) {
+void ReaderScreen::start(DrawBuffer& buf, IRuntime& runtime) {
   buf_ = &buf;
   book_key_.clear();
   pos_path_.clear();

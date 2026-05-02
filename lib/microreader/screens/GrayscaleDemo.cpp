@@ -82,7 +82,7 @@ void GrayscaleDemo::apply_grayscale_(DrawBuffer& buf) const {
   buf.grayscale_refresh();
 }
 
-void GrayscaleDemo::start(DrawBuffer& buf) {
+void GrayscaleDemo::start(DrawBuffer& buf, IRuntime& runtime) {
   rotation_ = 0;
   flip_h_ = false;
   draw_bw_(buf);

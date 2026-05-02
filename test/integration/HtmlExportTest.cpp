@@ -144,7 +144,8 @@ static BookStats export_book_to_html(const fs::path& epub_path, const fs::path& 
   screen.set_data_dir(data_dir.string());
 
   auto t0 = Clock::now();
-  screen.start(buf);
+  class MockRuntime : public IRuntime { public: std::optional<uint8_t> battery_percentage() const override { return 50; } bool should_continue() const override { return true; } uint32_t frame_time_ms() const override { return 30; } void wait_next_frame() override {} }; MockRuntime runtime;
+screen.start(buf, runtime);
   auto t1 = Clock::now();
 
   BookStats stats;

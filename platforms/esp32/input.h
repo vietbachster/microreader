@@ -113,7 +113,9 @@ class Esp32InputSource final : public microreader::IInputSource {
     portEXIT_CRITICAL(&lock_);
   }
 
- private:
+ public:
+adc_oneshot_unit_handle_t get_adc_handle() const { return adc_handle_; }
+private:
   static constexpr gpio_num_t kPowerPin = GPIO_NUM_3;
   static constexpr int kAdcTol = 400;     // ±tolerance for threshold match
   static constexpr int kAdcNoBtn = 3800;  // ADC value when no key pressed

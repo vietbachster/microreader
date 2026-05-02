@@ -20,7 +20,7 @@ class GrayscaleDemo final : public IScreen {
     return "Grayscale Demo";
   }
 
-  void start(DrawBuffer& buf) override;
+  void start(DrawBuffer& buf, IRuntime& runtime) override;
   void stop() override;
   bool update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& runtime) override;
 

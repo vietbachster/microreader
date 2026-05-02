@@ -16,33 +16,33 @@ class ScreenManager {
 
   // Push a new screen. Stops the current top, starts the new one.
   // The new screen draws into buf; caller handles the actual refresh.
-  void push(IScreen* screen, DrawBuffer& buf) {
+  void push(IScreen* screen, DrawBuffer& buf, IRuntime& runtime) {
     if (depth_ >= kMaxDepth)
       return;
     if (depth_ > 0)
       stack_[depth_ - 1]->stop();
     stack_[depth_++] = screen;
-    screen->start(buf);
+    screen->start(buf, runtime);
   }
 
   // Pop the top screen. Stops it, then restarts the one below.
-  void pop(DrawBuffer& buf) {
+  void pop(DrawBuffer& buf, IRuntime& runtime) {
     if (depth_ == 0)
       return;
     stack_[--depth_]->stop();
     HEAP_LOG("pop: after stop");
     if (depth_ > 0) {
-      stack_[depth_ - 1]->start(buf);
+      stack_[depth_ - 1]->start(buf, runtime);
       HEAP_LOG("pop: after prev start");
     }
   }
 
   // Restart the top screen (stop + start).
-  void restart_top(DrawBuffer& buf) {
+  void restart_top(DrawBuffer& buf, IRuntime& runtime) {
     if (depth_ == 0)
       return;
     stack_[depth_ - 1]->stop();
-    stack_[depth_ - 1]->start(buf);
+    stack_[depth_ - 1]->start(buf, runtime);
   }
 
   IScreen* top() const {

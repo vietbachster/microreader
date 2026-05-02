@@ -17,7 +17,7 @@ const char* Application::build_info() const {
   return "microreader";
 }
 
-void Application::start(DrawBuffer& buf) {
+void Application::start(DrawBuffer& buf, IRuntime& runtime) {
   ticks_ = 0;
   uptime_ms_ = 0;
   buttons_ = ButtonState{};
@@ -49,7 +49,7 @@ void Application::start(DrawBuffer& buf) {
   // before the menu's on_start() (directory scan + selection restore) runs.
   load_settings_();
 
-  screen_mgr_.push(&menu_, buf);
+  screen_mgr_.push(&menu_, buf, runtime);
 
   // Auto-open last book if one was active at shutdown — but only if the
   // reader font is valid.  Without a font the reader cannot render text, so
@@ -57,7 +57,7 @@ void Application::start(DrawBuffer& buf) {
   // the font on the first book open.
   if (!pending_book_path_.empty()) {
     if (reader_font_ && reader_font_->valid()) {
-      auto_open_book(pending_book_path_.c_str(), buf);
+      auto_open_book(pending_book_path_.c_str(), buf, runtime);
     } else {
       MR_LOGI("app", "skipping auto-open (no valid font) — starting from main menu");
     }
@@ -67,17 +67,17 @@ void Application::start(DrawBuffer& buf) {
   buf.full_refresh();
 }
 
-void Application::auto_open_book(const char* epub_path, DrawBuffer& buf) {
+void Application::auto_open_book(const char* epub_path, DrawBuffer& buf, IRuntime& runtime) {
   reader_.set_path(epub_path);
   if (reader_font_)
     reader_.set_fonts(reader_font_);
 
-  screen_mgr_.push(&reader_, buf);
+  screen_mgr_.push(&reader_, buf, runtime);
 }
 
 void Application::update(const ButtonState& buttons, uint32_t dt_ms, DrawBuffer& buf, IRuntime& runtime) {
   if (!started_)
-    start(buf);
+    start(buf, runtime);
   if (!running_)
     return;
 
@@ -118,19 +118,19 @@ void Application::update(const ButtonState& buttons, uint32_t dt_ms, DrawBuffer&
     if (pending_replace_ != ScreenId::None) {
       ScreenId id = pending_replace_;
       pending_replace_ = ScreenId::None;
-      screen_mgr_.pop(buf);
-      screen_mgr_.push(screen_for_(id), buf);
+      screen_mgr_.pop(buf, runtime);
+      screen_mgr_.push(screen_for_(id), buf, runtime);
       buf.refresh();
     } else if (pending_push_ != ScreenId::None) {
       ScreenId id = pending_push_;
       pending_push_ = ScreenId::None;
-      screen_mgr_.push(screen_for_(id), buf);
+      screen_mgr_.push(screen_for_(id), buf, runtime);
       buf.refresh();
     } else if (!stayed) {
       // Screen signalled exit with no pending navigation — pop back.
       if (top == &reader_)
         save_settings_();
-      screen_mgr_.pop(buf);
+      screen_mgr_.pop(buf, runtime);
       buf.refresh();
     }
   }

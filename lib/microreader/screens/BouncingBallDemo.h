@@ -16,7 +16,7 @@ class BouncingBallDemo final : public IScreen {
     return "Bouncing Ball";
   }
 
-  void start(DrawBuffer& buf) override;
+  void start(DrawBuffer& buf, IRuntime& runtime) override;
   void stop() override;
   bool update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& runtime) override;
 

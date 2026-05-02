@@ -86,7 +86,7 @@ extern "C" void app_main(void) {
 
   static Esp32InputSource input;
   static EInkDisplay epd;
-  static Esp32Runtime runtime(50);
+  static Esp32Runtime runtime(50, input.get_adc_handle());
   static microreader::Application app;
   static microreader::DrawBuffer buf(epd);
 
@@ -148,7 +148,7 @@ extern "C" void app_main(void) {
 
   app.set_invalidate_font_fn([]() { FontPartition::invalidate(); });
 
-  app.start(buf);
+  app.start(buf, runtime);
 
   ESP_LOGI("mem", "after app.start: free=%lu largest=%lu", (unsigned long)esp_get_free_heap_size(),
            (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
@@ -187,7 +187,7 @@ extern "C" void app_main(void) {
       const char* cmd_path = nullptr;
       switch (serial_cmd_take(&cmd_path)) {
         case SerialCmdType::Open:
-          app.auto_open_book(cmd_path, buf);
+          app.auto_open_book(cmd_path, buf, runtime);
           break;
         case SerialCmdType::Bench: {
           microreader::Book book;

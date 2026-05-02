@@ -17,7 +17,7 @@ void BouncingBallDemo::draw_all_(DrawBuffer& buf) const {
     buf.draw_text(t.x, t.y, t.text, true, 1);
 }
 
-void BouncingBallDemo::start(DrawBuffer& buf) {
+void BouncingBallDemo::start(DrawBuffer& buf, IRuntime& runtime) {
   const int W = DrawBuffer::kWidth;
   const int H = DrawBuffer::kHeight;
 

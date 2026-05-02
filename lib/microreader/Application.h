@@ -102,9 +102,9 @@ class Application {
     pending_replace_ = id;
   }
 
-  void start(DrawBuffer& buf);
+  void start(DrawBuffer& buf, IRuntime& runtime);
   // Auto-open a book by path (skips menu, for debugging).
-  void auto_open_book(const char* epub_path, DrawBuffer& buf);
+  void auto_open_book(const char* epub_path, DrawBuffer& buf, IRuntime& runtime);
   void update(const ButtonState& buttons, uint32_t dt_ms, DrawBuffer& buf, IRuntime& runtime);
   bool running() const;
   uint64_t tick_count() const;

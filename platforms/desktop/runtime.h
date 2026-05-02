@@ -78,6 +78,10 @@ class DesktopRuntime final : public microreader::IRuntime {
     transition_flag_ = flag;
   }
 
+  std::optional<uint8_t> battery_percentage() const override {
+    return 50;
+  }
+
   // IRuntime: step mode (P toggles, Space advances one tick).
   bool step_mode() const override {
     return step_mode_;

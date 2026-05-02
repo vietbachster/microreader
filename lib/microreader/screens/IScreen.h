@@ -25,7 +25,7 @@ class IScreen {
 
   // Called once when this screen becomes active.
   // Draws initial content into buf; caller is responsible for buf.refresh().
-  virtual void start(DrawBuffer& buf) = 0;
+  virtual void start(DrawBuffer& buf, IRuntime& runtime) = 0;
 
   // Called once when leaving this screen.
   virtual void stop() = 0;

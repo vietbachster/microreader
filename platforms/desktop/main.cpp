@@ -86,7 +86,7 @@ int main() {
     if (!font_mgr.valid())
       printf("[font] No valid Normal font — using builtin 8x8\n");
 
-    app.start(buf);
+    app.start(buf, runtime);
     microreader::run_loop(app, buf, input, runtime);
   } catch (const std::exception& e) {
     std::cerr << "Fatal: " << e.what() << std::endl;

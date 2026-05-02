@@ -20,7 +20,7 @@ namespace microreader {
 //   on_back()       — handle back button; return true to stay, false to exit (default)
 class ListMenuScreen : public IScreen {
  public:
-  void start(DrawBuffer& buf) override;
+  void start(DrawBuffer& buf, IRuntime& runtime) override;
   void stop() override {}
   bool update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& runtime) override;
 
@@ -79,7 +79,7 @@ class ListMenuScreen : public IScreen {
   BitmapFont ui_font_;
   BitmapFont header_font_;
 
-  void draw_all_(DrawBuffer& buf) const;
+  void draw_all_(DrawBuffer& buf, std::optional<uint8_t> battery_pct = std::nullopt) const;
   void ensure_visible_();
   void center_on_selected_();
   void draw_button_hints_(DrawBuffer& buf) const;
