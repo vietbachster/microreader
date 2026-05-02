@@ -189,14 +189,15 @@ void ListMenuScreen::draw_button_hints_(DrawBuffer& buf) const {
   const int baseline = ui_font_.baseline();
   const int text_y = H - kButtonHintsH / 2 - ui_font_.y_advance() / 2 + baseline + 2;
 
-  // Four labels: back=o, select=x, down=▼, up=▲
-  // ▼ = U+25BC (3 UTF-8 bytes: E2 96 BC), ▲ = U+25B2 (E2 96 B2)
-  static const char* kLabels[4] = {"o", "x", "\xe2\x96\xbc", "\xe2\x96\xb2"};
-  static const size_t kLens[4] = {1, 1, 3, 3};
-  // Physical layout: screen is 5.5cm wide, button pairs are centred 1.7cm from each edge.
-  const int pair0 = W * 17 / 55;
+  // Four labels: back=◀, select=▶, down=▼, up=▲
+  // ◀ = U+25C0 (E2 97 80), ▶ = U+25B6 (E2 96 B6)
+  // ▼ = U+25BC (E2 96 BC), ▲ = U+25B2 (E2 96 B2)
+  static const char* kLabels[4] = {"\xe2\x97\x80", "\xe2\x96\xb6", "\xe2\x96\xbc", "\xe2\x96\xb2"};
+  static const size_t kLens[4] = {3, 3, 3, 3};
+
+  const int pair0 = W * 165 / 550;
   const int pair1 = W - pair0;
-  const int gap = 52;  // half-gap within a pair
+  const int gap = 55;  // half-gap within a pair
   const int btns[4] = {pair0 - gap, pair0 + gap, pair1 - gap, pair1 + gap};
   for (int i = 0; i < 4; ++i) {
     const int lw = ui_font_.word_width(kLabels[i], kLens[i], FontStyle::Regular);
