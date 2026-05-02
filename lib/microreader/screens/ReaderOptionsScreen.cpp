@@ -75,7 +75,7 @@ bool ReaderOptionsScreen::on_select(int index) {
   if (!settings_) {
     if (index == idx_chapters_) {
       app_->replace_screen(ScreenId::ChapterSelect);
-      return true;
+      return false;
     }
     return true;
   }
@@ -108,7 +108,7 @@ bool ReaderOptionsScreen::on_select(int index) {
   }
   if (index == idx_chapters_) {
     app_->replace_screen(ScreenId::ChapterSelect);
-    return true;
+    return false;
   }
   return true;
 }

@@ -53,11 +53,11 @@ void SettingsScreen::on_start() {
 bool SettingsScreen::on_select(int index) {
   if (index == idx_bouncing_ball_) {
     app_->push_screen(ScreenId::BouncingBall);
-    return true;
+    return false;
   }
   if (index == idx_grayscale_demo_) {
     app_->push_screen(ScreenId::GrayscaleDemo);
-    return true;
+    return false;
   }
   if (index == idx_clear_converted_) {
     clear_converted_();

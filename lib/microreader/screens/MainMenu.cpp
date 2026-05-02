@@ -36,12 +36,12 @@ bool MainMenu::on_select(int index) {
   last_selected_path_ = entries_[index].path;
   app_->reader()->set_path(entries_[index].path.c_str());
   app_->push_screen(ScreenId::Reader);
-  return true;
+  return false;
 }
 
 bool MainMenu::on_back() {
   app_->push_screen(ScreenId::Settings);
-  return true;
+  return false;
 }
 
 void MainMenu::scan_directory_() {

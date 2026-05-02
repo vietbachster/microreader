@@ -263,12 +263,6 @@ bool ListMenuScreen::update(const ButtonState& buttons, DrawBuffer& buf, IRuntim
 
       case Button::Button1:  // select
         if (n > 0 && selected_ < n) {
-          // Draw pending move first so the selection highlight is up to date.
-          if (moved) {
-            draw_all_(buf);
-            buf.refresh();
-            moved = false;
-          }
           if (on_select(selected_)) {
             needs_draw = true;
           } else {
