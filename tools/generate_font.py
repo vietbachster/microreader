@@ -86,7 +86,12 @@ def render_glyph(face, codepoint, size):
     if glyph_index == 0:
         return None  # glyph not in font
 
-    # Render in 8-bit grayscale mode for antialiased output.
+    # First, get the unhinted advance so we base our layout on true proportions (Option C)
+    face.load_glyph(glyph_index, freetype.FT_LOAD_NO_HINTING | freetype.FT_LOAD_NO_BITMAP)
+    unhinted_advance = face.glyph.advance.x
+    x_advance = int(round(unhinted_advance / 64.0))
+
+    # Then render the actual bitmap with hinting so it aligns nicely on the pixels
     face.load_glyph(glyph_index, freetype.FT_LOAD_RENDER)
 
     bitmap = face.glyph.bitmap
@@ -96,9 +101,6 @@ def render_glyph(face, codepoint, size):
     y_offset = (
         -face.glyph.bitmap_top
     )  # bitmap_top = pixels above baseline (positive), negate for MBF convention
-    x_advance = (
-        face.glyph.advance.x + 32
-    ) >> 6  # 26.6 fixed-point → rounded integer pixels
 
     if width == 0 or height == 0:
         # Space-like glyph: no bitmap
