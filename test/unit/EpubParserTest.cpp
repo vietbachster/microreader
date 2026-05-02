@@ -1069,7 +1069,7 @@ TEST(XhtmlBody, FigcaptionDefaultStyling) {
   for (auto& r : cap->text.runs) {
     if (r.text.find("Caption text") != std::string::npos) {
       EXPECT_EQ(r.style, FontStyle::Italic);
-      EXPECT_EQ(r.size, FontSize::Small);
+      EXPECT_EQ(r.size, 80);
     }
   }
   ASSERT_TRUE(cap->text.alignment.has_value());

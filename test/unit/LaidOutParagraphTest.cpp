@@ -1,4 +1,4 @@
-#include <gtest/gtest.h>
+﻿#include <gtest/gtest.h>
 
 #include "microreader/content/TextLayout.h"
 
@@ -59,7 +59,7 @@ static TextLayout::LaidOutParagraph make_promoted_lp(uint16_t para_idx, uint16_t
   return lp;
 }
 
-// Build an empty-text LaidOutParagraph (runs were empty — emits one Empty item).
+// Build an empty-text LaidOutParagraph (runs were empty â€” emits one Empty item).
 static TextLayout::LaidOutParagraph make_empty_text_lp(uint16_t para_idx, uint16_t block_h = 16) {
   TextLayout::LaidOutParagraph lp;
   lp.para_idx = para_idx;
@@ -87,7 +87,7 @@ static TextLayout::LaidOutParagraph make_page_break_lp(uint16_t para_idx) {
 }
 
 // ===================================================================
-// collect_backward() — text paragraphs
+// collect_backward() â€” text paragraphs
 // ===================================================================
 
 // collect_backward from end returns the last line.
@@ -128,7 +128,7 @@ TEST(CollectBackward, TextLineDoesntFit) {
 }
 
 // ===================================================================
-// collect_backward() — image paragraphs
+// collect_backward() â€” image paragraphs
 // ===================================================================
 
 // collect_backward returns a slice ending at end_idx.
@@ -162,7 +162,7 @@ TEST(CollectBackward, ImageAtStart) {
 }
 
 // ===================================================================
-// collect() / collect_backward() — Hr paragraphs
+// collect() / collect_backward() â€” Hr paragraphs
 // ===================================================================
 
 TEST(CollectBackward, Hr_Forward) {
@@ -211,7 +211,7 @@ TEST(CollectBackward, Hr_RoundTrip) {
 }
 
 // ===================================================================
-// collect() / collect_backward() — PageBreak paragraphs
+// collect() / collect_backward() â€” PageBreak paragraphs
 // ===================================================================
 
 TEST(CollectBackward, PageBreak_Forward) {
@@ -276,7 +276,7 @@ TEST(CollectBackward, ForwardThenBackwardRoundTrip) {
 }
 
 // ===================================================================
-// collect_text — empty-text paragraphs (forward and backward)
+// collect_text â€” empty-text paragraphs (forward and backward)
 // ===================================================================
 
 TEST(CollectText, EmptyText_Forward) {
@@ -318,13 +318,13 @@ TEST(CollectText, EmptyText_RoundTrip) {
 }
 
 // ===================================================================
-// collect_text — promoted inline image (forward and backward)
+// collect_text â€” promoted inline image (forward and backward)
 // ===================================================================
 // make_promoted_lp(0, 60, 3, 16): idx [0..60) = image, [60..63) = 3 text lines
 
 TEST(CollectText, Promoted_Forward_FullImage) {
   auto lp = make_promoted_lp(0, 60, 3);
-  // Available > promoted_h → single full-image slice
+  // Available > promoted_h â†’ single full-image slice
   auto r = lp.collect(0, 200);
   ASSERT_TRUE(r.has_value());
   EXPECT_EQ(r->item.kind, TextLayout::PageItem::Image);
@@ -335,7 +335,7 @@ TEST(CollectText, Promoted_Forward_FullImage) {
 
 TEST(CollectText, Promoted_Forward_PartialSlice) {
   auto lp = make_promoted_lp(0, 60, 3);
-  // Available=40 → slice [0..40)
+  // Available=40 â†’ slice [0..40)
   auto r = lp.collect(0, 40);
   ASSERT_TRUE(r.has_value());
   EXPECT_EQ(r->item.height, 40);
@@ -345,7 +345,7 @@ TEST(CollectText, Promoted_Forward_PartialSlice) {
 
 TEST(CollectText, Promoted_Forward_ContinueSlice) {
   auto lp = make_promoted_lp(0, 60, 3);
-  // Available=200 from mid-image → remainder [40..60)
+  // Available=200 from mid-image â†’ remainder [40..60)
   auto r = lp.collect(40, 200);
   ASSERT_TRUE(r.has_value());
   EXPECT_EQ(r->item.height, 20);
@@ -355,7 +355,7 @@ TEST(CollectText, Promoted_Forward_ContinueSlice) {
 
 TEST(CollectText, Promoted_Forward_TextLineAfterImage) {
   auto lp = make_promoted_lp(0, 60, 3);
-  // idx=60 → first text line (line_idx=0)
+  // idx=60 â†’ first text line (line_idx=0)
   auto r = lp.collect(60, 200);
   ASSERT_TRUE(r.has_value());
   EXPECT_EQ(r->item.kind, TextLayout::PageItem::TextLine);
@@ -366,7 +366,7 @@ TEST(CollectText, Promoted_Forward_TextLineAfterImage) {
 
 TEST(CollectText, Promoted_Backward_FullImage) {
   auto lp = make_promoted_lp(0, 60, 3);
-  // Backward from end of image region, large available → whole image
+  // Backward from end of image region, large available â†’ whole image
   auto r = lp.collect_backward(60, 200);
   ASSERT_TRUE(r.has_value());
   EXPECT_EQ(r->item.kind, TextLayout::PageItem::Image);
@@ -377,7 +377,7 @@ TEST(CollectText, Promoted_Backward_FullImage) {
 
 TEST(CollectText, Promoted_Backward_PartialSlice) {
   auto lp = make_promoted_lp(0, 60, 3);
-  // Backward from 60 with available=40 → slice [20..60)
+  // Backward from 60 with available=40 â†’ slice [20..60)
   auto r = lp.collect_backward(60, 40);
   ASSERT_TRUE(r.has_value());
   EXPECT_EQ(r->item.height, 40);
@@ -387,7 +387,7 @@ TEST(CollectText, Promoted_Backward_PartialSlice) {
 
 TEST(CollectText, Promoted_Backward_ClampedToStart) {
   auto lp = make_promoted_lp(0, 60, 3);
-  // Backward from 30 with available=200 → slice [0..30) (clamped to start)
+  // Backward from 30 with available=200 â†’ slice [0..30) (clamped to start)
   auto r = lp.collect_backward(30, 200);
   ASSERT_TRUE(r.has_value());
   EXPECT_EQ(r->item.height, 30);
@@ -397,7 +397,7 @@ TEST(CollectText, Promoted_Backward_ClampedToStart) {
 
 TEST(CollectText, Promoted_Backward_TextLineAtBoundary) {
   auto lp = make_promoted_lp(0, 60, 3);
-  // Backward from 61 (end of text line 0) → text line 0
+  // Backward from 61 (end of text line 0) â†’ text line 0
   auto r = lp.collect_backward(61, 200);
   ASSERT_TRUE(r.has_value());
   EXPECT_EQ(r->item.kind, TextLayout::PageItem::TextLine);
@@ -407,7 +407,7 @@ TEST(CollectText, Promoted_Backward_TextLineAtBoundary) {
 
 TEST(CollectText, Promoted_RoundTrip_ImageSlice) {
   auto lp = make_promoted_lp(0, 60, 3);
-  // Forward from 10 with available=30 → slice [10..40). Then backward from 40 with same available.
+  // Forward from 10 with available=30 â†’ slice [10..40). Then backward from 40 with same available.
   auto fwd = lp.collect(10, 30);
   ASSERT_TRUE(fwd.has_value());
   EXPECT_EQ(fwd->item.img_y_crop, 10);
@@ -436,7 +436,7 @@ TEST(CollectText, Promoted_RoundTrip_ImageTextBoundary) {
 }
 
 // ===================================================================
-// collect_text — inline_extra on line 0 (non-promoted inline image)
+// collect_text â€” inline_extra on line 0 (non-promoted inline image)
 // ===================================================================
 
 TEST(CollectText, InlineExtra_AffectsLine0Height) {
@@ -466,9 +466,9 @@ TEST(CollectText, InlineExtra_Backward_Line0) {
   EXPECT_EQ(r->item.height, 24);
   EXPECT_EQ(r->next_idx, 0u);
 
-  // Backward with available=19 < baseline=20 → line 0 doesn't fit.
+  // Backward with available=19 < baseline=20 â†’ line 0 doesn't fit.
   EXPECT_FALSE(lp.collect_backward(1, 19).has_value());
-  // available=20 == baseline=20 → now accepted (baseline-fit rule).
+  // available=20 == baseline=20 â†’ now accepted (baseline-fit rule).
   EXPECT_TRUE(lp.collect_backward(1, 20).has_value());
 }
 
@@ -527,7 +527,7 @@ TEST(MultiItemRoundTrip, TextParagraph) {
 
 TEST(MultiItemRoundTrip, ImageParagraph) {
   auto lp = make_image_lp(0, 100);
-  // No slicing: available > block_height → single item.
+  // No slicing: available > block_height â†’ single item.
   auto fwd = collect_all_forward(lp);
   ASSERT_EQ(fwd.size(), 1u);
   EXPECT_EQ(fwd[0].img_y_crop, 0);
@@ -551,7 +551,7 @@ TEST(MultiItemRoundTrip, ImageParagraph_Sliced_CursorConsistency) {
       break;
     size_t next_cursor = f->next_idx;
 
-    // Backward with exactly item.height as budget → same item.
+    // Backward with exactly item.height as budget â†’ same item.
     auto b = lp.collect_backward(next_cursor, f->item.height);
     ASSERT_TRUE(b.has_value());
     EXPECT_EQ(b->item.img_y_crop, f->item.img_y_crop);
@@ -564,7 +564,7 @@ TEST(MultiItemRoundTrip, ImageParagraph_Sliced_CursorConsistency) {
 }
 
 TEST(MultiItemRoundTrip, PromotedParagraph) {
-  // promoted_h=60, 3 text lines of height 16 → 4 items: image + 3 lines
+  // promoted_h=60, 3 text lines of height 16 â†’ 4 items: image + 3 lines
   auto lp = make_promoted_lp(0, 60, 3);
   auto fwd = collect_all_forward(lp);
   ASSERT_EQ(fwd.size(), 4u);
@@ -620,7 +620,7 @@ TEST(MultiItemRoundTrip, PromotedParagraph_SlicedImage) {
 }
 
 // ===================================================================
-// leading_spacer — collect() and collect_backward()
+// leading_spacer â€” collect() and collect_backward()
 // ===================================================================
 
 // idx 0 returns the Spacer item; real lines start at idx 1.
@@ -667,7 +667,7 @@ TEST(LeadingSpacer, Forward_PastEnd) {
   EXPECT_FALSE(lp.collect(4, 200).has_value());
 }
 
-// Spacer doesn't fit → nullopt.
+// Spacer doesn't fit â†’ nullopt.
 TEST(LeadingSpacer, Forward_SpacerDoesntFit) {
   auto lp = make_text_lp(0, 3, 16);
   lp.leading_spacer = 50;
@@ -711,7 +711,7 @@ TEST(LeadingSpacer, Backward_LastLine) {
   EXPECT_EQ(r->next_idx, 3u);
 }
 
-// Spacer backward doesn't fit → nullopt.
+// Spacer backward doesn't fit â†’ nullopt.
 TEST(LeadingSpacer, Backward_SpacerDoesntFit) {
   auto lp = make_text_lp(0, 3, 16);
   lp.leading_spacer = 50;
@@ -751,7 +751,7 @@ TEST(LeadingSpacer, RoundTrip_AllItems) {
 }
 
 // ===================================================================
-// collect_text — baseline-fit acceptance (lh > available but bl <= available)
+// collect_text â€” baseline-fit acceptance (lh > available but bl <= available)
 // ===================================================================
 
 // Helper: build a text LP with custom baseline (different from default 12).
@@ -771,7 +771,7 @@ static TextLayout::LaidOutParagraph make_text_lp_bl(uint16_t para_idx, int num_l
 
 // Forward: line accepted when baseline fits but full height does not.
 TEST(CollectText, BaselineFit_Forward_Accepts) {
-  // lh=20, bl=16. available=18: bl(16) <= 18 < lh(20) → accept.
+  // lh=20, bl=16. available=18: bl(16) <= 18 < lh(20) â†’ accept.
   auto lp = make_text_lp_bl(0, 3, 20, 16);
   auto r = lp.collect(0, 18);
   ASSERT_TRUE(r.has_value());
@@ -784,7 +784,7 @@ TEST(CollectText, BaselineFit_Forward_Accepts) {
 
 // Forward: line rejected when even baseline doesn't fit.
 TEST(CollectText, BaselineFit_Forward_Rejects) {
-  // lh=20, bl=16. available=15 < bl(16) → reject.
+  // lh=20, bl=16. available=15 < bl(16) â†’ reject.
   auto lp = make_text_lp_bl(0, 3, 20, 16);
   EXPECT_FALSE(lp.collect(0, 15).has_value());
 }
@@ -798,7 +798,7 @@ TEST(CollectText, BaselineFit_Forward_ExactBaseline) {
 // Backward: same baseline-fit rule applies.
 TEST(CollectText, BaselineFit_Backward_Accepts) {
   auto lp = make_text_lp_bl(0, 3, 20, 16);
-  // end_idx=1 → line 0. available=18: bl(16) <= 18 → accept.
+  // end_idx=1 â†’ line 0. available=18: bl(16) <= 18 â†’ accept.
   auto r = lp.collect_backward(1, 18);
   ASSERT_TRUE(r.has_value());
   // Height is always lh; the extended backward budget (ph+desc) ensures symmetry.
@@ -824,7 +824,7 @@ TEST(CollectText, BaselineFit_RoundTrip) {
   ASSERT_TRUE(fwd.has_value());
   EXPECT_EQ(fwd->next_idx, 1u);
 
-  // Backward from next_idx=1 with same available → same line.
+  // Backward from next_idx=1 with same available â†’ same line.
   auto bwd = lp.collect_backward(fwd->next_idx, 18);
   ASSERT_TRUE(bwd.has_value());
   EXPECT_EQ(bwd->item.line_idx, fwd->item.line_idx);

@@ -24,7 +24,7 @@ struct LayoutWord {
   uint16_t len;      // byte length
   uint16_t x;        // pixel offset from left edge
   FontStyle style;
-  FontSize size = FontSize::Normal;
+  uint8_t size_pct = 100;
   VerticalAlign vertical_align = VerticalAlign::Baseline;
   bool continues_prev = false;  // true if placed adjacent to previous word (no inter-word gap)
 };

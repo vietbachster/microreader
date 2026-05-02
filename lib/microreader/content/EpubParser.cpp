@@ -563,14 +563,14 @@ static bool is_breaking(XmlStringView name) {
   return name == "br" || name == "tr";
 }
 
-static FontSize heading_size(XmlStringView name) {
+static uint8_t heading_size_pct(XmlStringView name) {
   if (name == "h1")
-    return FontSize::XXLarge;
+    return 160;
   if (name == "h2")
-    return FontSize::XLarge;
+    return 140;
   if (name == "h3")
-    return FontSize::Large;
-  return FontSize::Normal;
+    return 120;
+  return 100;
 }
 
 static bool is_small_element(XmlStringView name) {
@@ -880,10 +880,10 @@ class BodyParser {
     }
   }
 
-  void set_size(FontSize s) {
-    if (font_size_ != s) {
+  void set_size_pct(uint8_t s) {
+    if (font_size_pct_ != s) {
       flush_text(false);
-      font_size_ = s;
+      font_size_pct_ = s;
     }
   }
 
@@ -1006,7 +1006,7 @@ class BodyParser {
   std::vector<BoolEntry> italic_stack_;
 
   struct SizeEntry {
-    FontSize prev_value;
+    uint8_t prev_value;
     uint8_t depth;
   };
   std::vector<SizeEntry> size_stack_;
@@ -1113,7 +1113,7 @@ class BodyParser {
 
   void flush_text(bool breaking) {
     if (!current_run_.empty()) {
-      Run r{std::move(current_run_), style(), font_size_, breaking};
+      Run r{std::move(current_run_), style(), font_size_pct_, breaking};
       r.vertical_align = vertical_align_;
       r.margin_left = margin_left_;
       r.margin_right = margin_right_;
@@ -1198,7 +1198,7 @@ class BodyParser {
   std::string pending_utf8_;  // incomplete UTF-8 lead byte(s) from end of previous text event
   bool bold_ = false;
   bool italic_ = false;
-  FontSize font_size_ = FontSize::Normal;
+  uint8_t font_size_pct_ = 100;
   bool has_trailing_space_ = false;
 
   Sink sink_ = nullptr;
@@ -1462,8 +1462,8 @@ static EpubError parse_xhtml_events(XmlReader& reader, const CssStylesheet* inli
 
       // figcaption defaults: small italic centered
       if (sv_eq(ev.name, "figcaption")) {
-        if (!style.font_size.has_value())
-          style.font_size = FontSize::Small;
+        if (!style.font_size_pct.has_value())
+          style.font_size_pct = 80;
         if (!style.italic.has_value())
           style.italic = true;
         if (!style.alignment.has_value())
@@ -1570,10 +1570,10 @@ static EpubError parse_xhtml_events(XmlReader& reader, const CssStylesheet* inli
           parser.bold_stack_.push_back({parser.bold_, parser.depth});
           parser.set_bold(true);
         }
-        FontSize hs = heading_size(ev.name);
-        if (hs != FontSize::Normal) {
-          parser.size_stack_.push_back({parser.font_size_, parser.depth});
-          parser.set_size(hs);
+        uint8_t hs_pct = heading_size_pct(ev.name);
+        if (hs_pct != 100) {
+          parser.size_stack_.push_back({parser.font_size_pct_, parser.depth});
+          parser.set_size_pct(hs_pct);
         }
       } else if (is_italic(ev.name)) {
         if (!style.italic.has_value()) {
@@ -1581,8 +1581,8 @@ static EpubError parse_xhtml_events(XmlReader& reader, const CssStylesheet* inli
           parser.set_italic(true);
         }
       } else if (is_small_element(ev.name)) {
-        parser.size_stack_.push_back({parser.font_size_, parser.depth});
-        parser.set_size(FontSize::Small);
+        parser.size_stack_.push_back({parser.font_size_pct_, parser.depth});
+        parser.set_size_pct(80);  // Small
         if (sv_eq(ev.name, "sup")) {
           parser.vertical_align_stack_.push_back({parser.vertical_align_, parser.depth});
           parser.set_vertical_align(VerticalAlign::Super);
@@ -1607,9 +1607,9 @@ static EpubError parse_xhtml_events(XmlReader& reader, const CssStylesheet* inli
         parser.bold_stack_.push_back({parser.bold_, parser.depth});
         parser.set_bold(*style.bold);
       }
-      if (style.font_size.has_value()) {
-        parser.size_stack_.push_back({parser.font_size_, parser.depth});
-        parser.set_size(*style.font_size);
+      if (style.font_size_pct.has_value()) {
+        parser.size_stack_.push_back({parser.font_size_pct_, parser.depth});
+        parser.set_size_pct(*style.font_size_pct);
       }
       if (style.alignment.has_value() && !parser.cell_depth.has_value()) {
         parser.alignment_stack_.push_back({parser.alignment_, parser.depth});
@@ -1683,7 +1683,7 @@ static EpubError parse_xhtml_events(XmlReader& reader, const CssStylesheet* inli
         parser.bold_stack_.pop_back();
       }
       while (!parser.size_stack_.empty() && parser.depth < parser.size_stack_.back().depth) {
-        parser.set_size(parser.size_stack_.back().prev_value);
+        parser.set_size_pct(parser.size_stack_.back().prev_value);
         parser.size_stack_.pop_back();
       }
       while (!parser.vertical_align_stack_.empty() && parser.depth < parser.vertical_align_stack_.back().depth) {

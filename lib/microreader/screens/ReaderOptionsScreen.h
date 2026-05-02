@@ -22,6 +22,7 @@ struct ReaderSettings {
   uint8_t padding_h_idx = 1;                          // horizontal padding preset index (left & right)
   uint8_t padding_v_idx = 1;                          // vertical top padding preset index
   uint8_t line_spacing_idx = 2;                       // paragraph spacing preset index (2 = Normal)
+  uint8_t font_size_idx = 1;                          // base font size preset index (1 = Normal/24px)
   ProgressStyle progress_style = ProgressStyle::Bar;  // reading progress indicator style
 
   static constexpr uint16_t kHPaddingPresets[] = {4, 12, 24, 40};
@@ -32,8 +33,10 @@ struct ReaderSettings {
   static constexpr const char* kHPaddingNames[] = {"Narrow", "Normal", "Wide", "Wider"};
   static constexpr const char* kVPaddingNames[] = {"Tight", "Normal", "Loose", "Looser"};
   static constexpr const char* kSpacingNames[] = {"Tighter", "Tight", "Normal", "Loose", "Looser"};
+  static constexpr const char* kFontSizeNames[] = {"20", "24", "26", "28", "30"};
   static constexpr uint8_t kNumPresets = 4;
   static constexpr uint8_t kNumSpacingPresets = 5;
+  static constexpr uint8_t kNumFontSizePresets = 5;
 
   uint16_t h_padding() const {
     return kHPaddingPresets[padding_h_idx];
@@ -97,6 +100,7 @@ class ReaderOptionsScreen final : public ListMenuScreen {
   int idx_padding_h_ = -1;
   int idx_padding_v_ = -1;
   int idx_line_spacing_ = -1;
+  int idx_font_size_ = -1;
   int idx_progress_ = -1;
   int idx_chapters_ = -1;
 

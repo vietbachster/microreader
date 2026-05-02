@@ -2,7 +2,7 @@
 python tools/generate_font.py resources/fonts/Terminus-Bold.ttf 14 -o resources/fonts/ui-small.mbf --header lib/microreader/display/ui_font_small.h --bw-only
 
 #### build reader font
-python tools/generate_font.py "resources/fonts/Bookerly.ttf" -o resources/fonts/font-normal.mbf --with-styles --bold "resources/fonts/Bookerly Bold.ttf" --italic "resources/fonts/Bookerly Italic.ttf" --bold-italic "resources/fonts/Bookerly Bold Italic.ttf" --bundle --bundle-sizes 20 24 26 28 30 --font-name Bookerly
+python tools/generate_font.py "resources/fonts/Bookerly.ttf" -o resources/fonts/font-normal.mbf --with-styles --bold "resources/fonts/Bookerly Bold.ttf" --italic "resources/fonts/Bookerly Italic.ttf" --bold-italic "resources/fonts/Bookerly Bold Italic.ttf" --bundle --bundle-sizes 20 24 28 32 --font-name Bookerly
 
 #### upload font
 python .\tools\serial_cmd.py --upload-font .\resources\fonts\font-bundle.mfb

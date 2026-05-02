@@ -237,8 +237,8 @@ static void print_summary(const std::vector<BookStats>& all) {
 
 TEST(HtmlExportTest, ExportSmallFolderToHtml) {
   BitmapFontSet font_set;
-  std::vector<BitmapFont> prop_fonts(kFontSizeCount);
-  std::vector<std::vector<uint8_t>> font_data(kFontSizeCount);
+  std::vector<BitmapFont> prop_fonts(kMaxFonts);
+  std::vector<std::vector<uint8_t>> font_data(kMaxFonts);
   ASSERT_TRUE(load_desktop_fonts(font_set, prop_fonts, font_data));
 
   fs::path input_dir = fs::path(small_books_dir());
@@ -265,8 +265,8 @@ TEST(HtmlExportTest, ExportSmallFolderToHtml) {
 
 TEST(HtmlExportTest, ExportAliceIllustrated) {
   BitmapFontSet font_set;
-  std::vector<BitmapFont> prop_fonts(kFontSizeCount);
-  std::vector<std::vector<uint8_t>> font_data(kFontSizeCount);
+  std::vector<BitmapFont> prop_fonts(kMaxFonts);
+  std::vector<std::vector<uint8_t>> font_data(kMaxFonts);
   ASSERT_TRUE(load_desktop_fonts(font_set, prop_fonts, font_data));
 
   fs::path epub_path = fs::path(small_books_dir()) / "alice-illustrated.epub";
@@ -284,8 +284,8 @@ TEST(HtmlExportTest, ExportAliceIllustrated) {
 
 TEST(HtmlExportTest, ExportRegressionTest) {
   BitmapFontSet font_set;
-  std::vector<BitmapFont> prop_fonts(kFontSizeCount);
-  std::vector<std::vector<uint8_t>> font_data(kFontSizeCount);
+  std::vector<BitmapFont> prop_fonts(kMaxFonts);
+  std::vector<std::vector<uint8_t>> font_data(kMaxFonts);
   ASSERT_TRUE(load_desktop_fonts(font_set, prop_fonts, font_data));
 
   fs::path epub_path = fs::path(books_dir()) / "regression_test.epub";

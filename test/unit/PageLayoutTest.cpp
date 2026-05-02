@@ -1323,15 +1323,14 @@ TEST(PageLayout, InlineImageDoesNotIntersectPreviousTextLines) {
   Chapter ch;
   TextParagraph tp1;
   tp1.runs.push_back(microreader::Run("Previous line with some text", FontStyle::Regular, false));
-  tp1.runs.push_back(microreader::Run(" more text", FontStyle::Regular, microreader::FontSize::Large));
+  tp1.runs.push_back(microreader::Run(" more text", FontStyle::Regular, 120));
   ch.paragraphs.push_back(Paragraph::make_text(std::move(tp1)));
 
   TextParagraph tp2;
-  tp2.runs.push_back(
-      microreader::Run("Inline image paragraph starts here", FontStyle::Regular, microreader::FontSize::Normal));
+  tp2.runs.push_back(microreader::Run("Inline image paragraph starts here", FontStyle::Regular, 100));
   tp2.inline_image = ImageRef(42, 80, 75);
-  tp2.runs.push_back(microreader::Run(" and continues with more text to wrap onto the next line", FontStyle::Regular,
-                                      microreader::FontSize::Large));
+  tp2.runs.push_back(
+      microreader::Run(" and continues with more text to wrap onto the next line", FontStyle::Regular, 120));
   tp2.line_height_pct = 130;
   ch.paragraphs.push_back(Paragraph::make_text(std::move(tp2)));
   TestChapterSource src(ch);

@@ -294,7 +294,7 @@ void MrbWriter::serialize_text(const TextParagraph& text, uint16_t spacing) {
   //   spacing_before(2) + line_height_pct(1) + inline_image_idx(2) +
   //   inline_image_w(2) + inline_image_h(2) +
   //   run_count(2) +
-  //   per run: style(1) + size(1) + vertical_align(1) + flags(1) +
+  //   per run: style(1) + size_pct(1) + vertical_align(1) + flags(1) +
   //            margin_left(2) + margin_right(2) + text_len(4) + text[text_len]
 
   // Pre-compute total size to avoid repeated resizes.
@@ -343,7 +343,7 @@ void MrbWriter::serialize_text(const TextParagraph& text, uint16_t spacing) {
   // Runs
   for (const auto& run : text.runs) {
     *p++ = static_cast<uint8_t>(run.style);
-    *p++ = static_cast<uint8_t>(run.size);
+    *p++ = run.size_pct;
     *p++ = static_cast<uint8_t>(run.vertical_align);
     *p++ = run.breaking ? 0x01 : 0x00;
     mrb_write_u16(p, run.margin_left);

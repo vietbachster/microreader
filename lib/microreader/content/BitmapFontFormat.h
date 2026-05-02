@@ -54,7 +54,7 @@ struct MbfHeader {
   uint8_t style_flags;          //  9: bitmask of present styles (bit0=Regular, bit1=Bold, bit2=Italic, bit3=BoldItalic)
   uint16_t num_ranges;          // 10: number of MbfRange entries (Regular style)
   uint16_t num_glyphs;          // 12: total glyph count (Regular style)
-  uint16_t reserved2;           // 14
+  uint16_t nominal_size;        // 14: nominal pixel size requested at generation
   uint32_t bitmap_data_offset;  // 16: byte offset from file start to BW bitmap data (shared by all styles)
   uint32_t bold_offset;         // 20: file offset to Bold MbfStyleSection (0 = absent)
   uint32_t italic_offset;       // 24: file offset to Italic MbfStyleSection (0 = absent)

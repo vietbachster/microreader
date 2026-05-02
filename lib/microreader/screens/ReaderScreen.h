@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <functional>
 #include <memory>
@@ -16,7 +16,7 @@
 namespace microreader {
 
 // Simple EPUB page viewer.
-// Renders text using the 8×8 bitmap font scaled 2× (16×16 glyphs).
+// Renders text using the 8Ã—8 bitmap font scaled 2Ã— (16Ã—16 glyphs).
 // Button2 = next page, Button3 = prev page, Button0 = back to menu.
 // Button1 = open chapter list (if TOC available).
 class ReaderScreen final : public IScreen {
@@ -39,10 +39,9 @@ class ReaderScreen final : public IScreen {
   }
 
   // Set the proportional bitmap font for rendering. If null, falls back to
-  // the builtin 8×8 bitmap font at 2× scale. The font data must outlive
+  // the builtin 8Ã—8 bitmap font at 2Ã— scale. The font data must outlive
   // this screen.
   void set_font(const BitmapFont* font) {
-    font_set_.set(FontSize::Normal, font);
   }
 
   // Set the full font set (Small/Normal/Large). Font data must outlive this screen.
@@ -64,7 +63,7 @@ class ReaderScreen final : public IScreen {
   void stop() override;
   bool update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& runtime) override;
 
-  // Layout constants — exposed so tests and tools can build matching PageOptions.
+  // Layout constants â€” exposed so tests and tools can build matching PageOptions.
   static constexpr int kScale = 2;
   static constexpr int kGlyphW = 8;
   static constexpr int kGlyphH = 8;
@@ -109,7 +108,7 @@ class ReaderScreen final : public IScreen {
   PageContent page_;
   bool open_ok_ = false;
 
-  // Reader options menu — pushed when user presses Button1.
+  // Reader options menu â€” pushed when user presses Button1.
   // Prep (set_settings + populate) happens before calling app_->push_screen(ReaderOptions).
   ReaderSettings reader_settings_;  // user-adjustable settings, mutated by reader_options_
 

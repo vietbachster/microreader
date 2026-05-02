@@ -11,10 +11,12 @@ namespace microreader {
 class FontManager {
  public:
   // Init one font slot. The data pointer must outlive this object.
-  void load_font(FontSize size, const uint8_t* data, size_t sz) {
-    int idx = static_cast<int>(size);
+  void load_font(const uint8_t* data, size_t sz) {
+    if (num_fonts_ >= kMaxFonts)
+      return;
+    int idx = num_fonts_++;
     prop_fonts_[idx].init(data, sz);
-    font_set_.set(size, &prop_fonts_[idx]);
+    font_set_.add(&prop_fonts_[idx]);
   }
 
   // Return the font set (use with app.set_reader_font()).
@@ -30,8 +32,9 @@ class FontManager {
   virtual void ensure_ready(DrawBuffer&) {}
 
  protected:
-  BitmapFont prop_fonts_[kFontSizeCount];
+  BitmapFont prop_fonts_[kMaxFonts];
   BitmapFontSet font_set_;
+  int num_fonts_ = 0;
 };
 
 }  // namespace microreader

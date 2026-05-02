@@ -262,18 +262,18 @@ CssRule CssRule::parse(const char* decl, size_t length, const CssConfig& config)
             rule.text_transform = TextTransform::Uppercase;
         }
       } else if (key == "vertical-align") {
-        // CSS super/sub → FontSize::Small + VerticalAlign
+        // CSS super/sub -> font_size_pct: 75% + VerticalAlign
         if (value == "super") {
-          if (!rule.font_size.has_value())
-            rule.font_size = FontSize::Small;
+          if (!rule.font_size_pct.has_value())
+            rule.font_size_pct = 75;
           rule.vertical_align = VerticalAlign::Super;
         } else if (value == "sub") {
-          if (!rule.font_size.has_value())
-            rule.font_size = FontSize::Small;
+          if (!rule.font_size_pct.has_value())
+            rule.font_size_pct = 75;
           rule.vertical_align = VerticalAlign::Sub;
         } else if (value == "top" || value == "bottom") {
-          if (!rule.font_size.has_value())
-            rule.font_size = FontSize::Small;
+          if (!rule.font_size_pct.has_value())
+            rule.font_size_pct = 75;
         }
       } else if (key == "line-height") {
         // Parse line-height as percentage of our natural y_advance.
@@ -309,74 +309,44 @@ CssRule CssRule::parse(const char* decl, size_t length, const CssConfig& config)
           rule.list_style_none = true;
       } else if (key == "font-size") {
         if (value == "small" || value == "x-small" || value == "xx-small" || value == "smaller")
-          rule.font_size = FontSize::Small;
+          rule.font_size_pct = 80;
         else if (value == "large" || value == "larger")
-          rule.font_size = FontSize::Large;
+          rule.font_size_pct = 120;
         else if (value == "x-large")
-          rule.font_size = FontSize::XLarge;
+          rule.font_size_pct = 140;
         else if (value == "xx-large")
-          rule.font_size = FontSize::XXLarge;
+          rule.font_size_pct = 160;
         else if (value == "medium" || value == "normal")
-          rule.font_size = FontSize::Normal;
+          rule.font_size_pct = 100;
         else {
           // Try parsing numeric values: percentages (90%) and em (0.9em)
           char* end = nullptr;
           if (value.size() > 1 && value.back() == '%') {
             float pct = std::strtof(value.c_str(), &end);
             if (end != value.c_str()) {
-              if (pct < 90.0f)
-                rule.font_size = FontSize::Small;
-              else if (pct <= 105.0f)
-                rule.font_size = FontSize::Normal;
-              else if (pct <= 115.0f)
-                rule.font_size = FontSize::Large;
-              else if (pct <= 130.0f)
-                rule.font_size = FontSize::XLarge;
-              else
-                rule.font_size = FontSize::XXLarge;
+              rule.font_size_pct = static_cast<uint8_t>(std::clamp(pct, 30.0f, 250.0f));
             }
           } else if (value.size() > 2 && value.substr(value.size() - 2) == "em") {
             float em = std::strtof(value.c_str(), &end);
             if (end != value.c_str()) {
-              if (em < 0.90f)
-                rule.font_size = FontSize::Small;
-              else if (em <= 1.05f)
-                rule.font_size = FontSize::Normal;
-              else if (em <= 1.15f)
-                rule.font_size = FontSize::Large;
-              else if (em <= 1.30f)
-                rule.font_size = FontSize::XLarge;
-              else
-                rule.font_size = FontSize::XXLarge;
+              rule.font_size_pct = static_cast<uint8_t>(std::clamp(em * 100.0f, 30.0f, 250.0f));
             }
           } else if (value.size() > 3 && value.substr(value.size() - 3) == "rem") {
             float rem = std::strtof(value.c_str(), &end);
             if (end != value.c_str()) {
-              if (rem < 0.90f)
-                rule.font_size = FontSize::Small;
-              else if (rem <= 1.05f)
-                rule.font_size = FontSize::Normal;
-              else if (rem <= 1.15f)
-                rule.font_size = FontSize::Large;
-              else if (rem <= 1.30f)
-                rule.font_size = FontSize::XLarge;
-              else
-                rule.font_size = FontSize::XXLarge;
+              rule.font_size_pct = static_cast<uint8_t>(std::clamp(rem * 100.0f, 30.0f, 250.0f));
             }
           } else if (value.size() > 2 && value.substr(value.size() - 2) == "pt") {
             float pt = std::strtof(value.c_str(), &end);
             if (end != value.c_str()) {
               float ratio = pt / 12.0f;
-              if (ratio < 0.90f)
-                rule.font_size = FontSize::Small;
-              else if (ratio <= 1.05f)
-                rule.font_size = FontSize::Normal;
-              else if (ratio <= 1.15f)
-                rule.font_size = FontSize::Large;
-              else if (ratio <= 1.30f)
-                rule.font_size = FontSize::XLarge;
-              else
-                rule.font_size = FontSize::XXLarge;
+              rule.font_size_pct = static_cast<uint8_t>(std::clamp(ratio * 100.0f, 30.0f, 250.0f));
+            }
+          } else if (value.size() > 2 && value.substr(value.size() - 2) == "px") {
+            float px = std::strtof(value.c_str(), &end);
+            if (end != value.c_str()) {
+              float ratio = px / 24.0f;
+              rule.font_size_pct = static_cast<uint8_t>(std::clamp(ratio * 100.0f, 30.0f, 250.0f));
             }
           }
         }
@@ -406,7 +376,7 @@ CssRule CssRule::operator+(const CssRule& rhs) const {
   result.italic = rhs.italic.has_value() ? rhs.italic : italic;
   result.bold = rhs.bold.has_value() ? rhs.bold : bold;
   result.indent = rhs.indent.has_value() ? rhs.indent : indent;
-  result.font_size = rhs.font_size.has_value() ? rhs.font_size : font_size;
+  result.font_size_pct = rhs.font_size_pct.has_value() ? rhs.font_size_pct : font_size_pct;
   result.margin_left = rhs.margin_left.has_value() ? rhs.margin_left : margin_left;
   result.margin_right = rhs.margin_right.has_value() ? rhs.margin_right : margin_right;
   result.margin_top = rhs.margin_top.has_value() ? rhs.margin_top : margin_top;

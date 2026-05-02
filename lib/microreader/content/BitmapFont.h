@@ -94,7 +94,7 @@ class BitmapFont : public IFont {
 
   // ── IFont interface ─────────────────────────────────────────────────────
 
-  uint16_t char_width(char32_t ch, FontStyle style, FontSize /*size*/ = FontSize::Normal) const override {
+  uint16_t char_width(char32_t ch, FontStyle style, uint8_t /*size_pct*/ = 100) const override {
     const StyleData& sd = resolve_style_(style);
     int idx = find_glyph_index_in(sd, ch);
     if (idx < 0)
@@ -104,22 +104,22 @@ class BitmapFont : public IFont {
     return sd.glyphs[idx].advance_width;
   }
 
-  uint16_t word_width(const char* text, size_t len, FontStyle style, FontSize size = FontSize::Normal) const override {
+  uint16_t word_width(const char* text, size_t len, FontStyle style, uint8_t size_pct = 100) const override {
     uint16_t w = 0;
     const char* p = text;
     const char* end = text + len;
     while (p < end) {
       char32_t cp = decode_utf8(p, end);
-      w += char_width(cp, style, size);
+      w += char_width(cp, style, size_pct);
     }
     return w;
   }
 
-  uint16_t y_advance(FontSize /*size*/ = FontSize::Normal) const override {
+  uint16_t y_advance(uint8_t /*size_pct*/ = 100) const override {
     return header_ ? header_->y_advance : 0;
   }
 
-  uint16_t baseline(FontSize /*size*/ = FontSize::Normal) const override {
+  uint16_t baseline(uint8_t /*size_pct*/ = 100) const override {
     return header_ ? header_->baseline : 0;
   }
 
@@ -153,6 +153,10 @@ class BitmapFont : public IFont {
 
   bool has_grayscale() const {
     return gray_lsb_bitmaps_ != nullptr;
+  }
+
+  uint16_t nominal_size() const {
+    return header_ ? header_->nominal_size : 0;
   }
 
   uint16_t glyph_height() const {
@@ -263,9 +267,9 @@ class BitmapFont : public IFont {
 };
 
 // ---------------------------------------------------------------------------
-// BitmapFontSet — wraps up to kFontSizeCount BitmapFont pointers
-// (Small/Normal/Large/XLarge/XXLarge) and dispatches IFont methods by FontSize.
-// Missing sizes fall back to Normal.
+// BitmapFontSet — manages multiple dynamically loaded fonts.
+// Dispatches IFont methods to the font matching the requested percentage.
+// Missing sizes fall back toward the best matching pixel height.
 // Also provides glyph_data() for rendering at a specific size.
 // ---------------------------------------------------------------------------
 
@@ -273,60 +277,103 @@ class BitmapFontSet : public IFont {
  public:
   BitmapFontSet() = default;
 
-  void set(FontSize size, const BitmapFont* font) {
-    fonts_[static_cast<uint8_t>(size)] = font;
+  void add(const BitmapFont* font) {
+    if (num_fonts_ < kMaxFonts && font && font->valid()) {
+      fonts_[num_fonts_++] = font;
+    }
   }
 
-  const BitmapFont* get(FontSize size) const {
-    return resolve_(size);
+  void set_base_size_index(int base_idx) {
+    if (base_idx >= 0 && base_idx < num_fonts_) {
+      base_idx_ = base_idx;
+    }
+  }
+
+  int base_size_index() const {
+    return base_idx_;
+  }
+
+  int num_fonts() const {
+    return num_fonts_;
+  }
+
+  const BitmapFont* get_font(int idx) const {
+    if (idx >= 0 && idx < num_fonts_)
+      return fonts_[idx];
+    return nullptr;
+  }
+
+  const BitmapFont* get(uint8_t size_pct) const {
+    return resolve_(size_pct);
   }
 
   bool valid() const {
-    return fonts_[static_cast<uint8_t>(FontSize::Normal)] != nullptr &&
-           fonts_[static_cast<uint8_t>(FontSize::Normal)]->valid();
+    return num_fonts_ > 0 && fonts_[base_idx_] != nullptr && fonts_[base_idx_]->valid();
   }
 
   bool has_grayscale() const {
-    auto* f = fonts_[static_cast<uint8_t>(FontSize::Normal)];
+    if (!valid())
+      return false;
+    auto* f = fonts_[base_idx_];
     return f && f->has_grayscale();
   }
 
   // ── IFont interface ─────────────────────────────────────────────────────
 
-  uint16_t char_width(char32_t ch, FontStyle style, FontSize size = FontSize::Normal) const override {
-    return resolve_(size)->char_width(ch, style, size);
+  uint16_t char_width(char32_t ch, FontStyle style, uint8_t size_pct = 100) const override {
+    return resolve_(size_pct)->char_width(ch, style, 100);
   }
 
-  uint16_t word_width(const char* text, size_t len, FontStyle style, FontSize size = FontSize::Normal) const override {
-    return resolve_(size)->word_width(text, len, style, size);
+  uint16_t word_width(const char* text, size_t len, FontStyle style, uint8_t size_pct = 100) const override {
+    return resolve_(size_pct)->word_width(text, len, style, 100);
   }
 
-  uint16_t y_advance(FontSize size = FontSize::Normal) const override {
-    return resolve_(size)->y_advance(size);
+  uint16_t y_advance(uint8_t size_pct = 100) const override {
+    const BitmapFont* best = resolve_(size_pct);
+    return best ? best->y_advance(100) : 0;
   }
 
-  uint16_t baseline(FontSize size = FontSize::Normal) const override {
-    return resolve_(size)->baseline(size);
+  uint16_t baseline(uint8_t size_pct = 100) const override {
+    const BitmapFont* best = resolve_(size_pct);
+    return best ? best->baseline(100) : 0;
   }
 
   // ── Glyph data (for rendering) ─────────────────────────────────────────
 
-  GlyphData glyph_data(char32_t ch, FontStyle style, FontSize size = FontSize::Normal) const {
-    return resolve_(size)->glyph_data(ch, style);
+  GlyphData glyph_data(char32_t ch, FontStyle style, uint8_t size_pct = 100) const {
+    const BitmapFont* best = resolve_(size_pct);
+    return best ? best->glyph_data(ch, style) : GlyphData{};
   }
 
  private:
-  // Indexed by FontSize enum: [0]=Small, [1]=Normal, [2]=Large, [3]=XLarge, [4]=XXLarge
-  const BitmapFont* fonts_[kFontSizeCount] = {};
+  const BitmapFont* fonts_[kMaxFonts] = {};
+  int num_fonts_ = 0;
+  int base_idx_ = 0;  // Index of 100% font
 
-  const BitmapFont* resolve_(FontSize size) const {
-    uint8_t idx = static_cast<uint8_t>(size);
-    if (idx < kFontSizeCount) {
-      auto* f = fonts_[idx];
-      if (f && f->valid())
-        return f;
+  const BitmapFont* resolve_(uint8_t size_pct) const {
+    if (num_fonts_ == 0)
+      return nullptr;
+    const BitmapFont* base_font = fonts_[base_idx_];
+    if (size_pct == 100)
+      return base_font;
+
+    // Find font with closest matching y_advance
+    int target_height = (static_cast<int>(base_font->y_advance()) * size_pct) / 100;
+
+    const BitmapFont* best_font = base_font;
+    int min_diff = 999999;
+
+    for (int i = 0; i < num_fonts_; ++i) {
+      int h = fonts_[i]->y_advance();
+      int diff = target_height - h;
+      if (diff < 0)
+        diff = -diff;
+      if (diff < min_diff) {
+        min_diff = diff;
+        best_font = fonts_[i];
+      }
     }
-    return fonts_[static_cast<uint8_t>(FontSize::Normal)];  // fallback to Normal
+    return best_font;
   }
 };
 

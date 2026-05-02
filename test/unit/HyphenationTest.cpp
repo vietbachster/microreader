@@ -1,4 +1,4 @@
-#include <gtest/gtest.h>
+﻿#include <gtest/gtest.h>
 
 #include "microreader/content/Font.h"
 #include "microreader/content/hyphenation/Hyphenation.h"
@@ -16,25 +16,25 @@ static FixedFont font8(8, 16);
 // ---------------------------------------------------------------------------
 
 TEST(FindHyphenBreak, ShortWordNoSplit) {
-  // len < 6 → Liang skipped, no '-' → returns 0
+  // len < 6 â†’ Liang skipped, no '-' â†’ returns 0
   bool has_hyphen = true;
   size_t r =
-      find_hyphen_break(font8, "Hi", 2, FontStyle::Regular, FontSize::Normal, HyphenationLang::German, 100, has_hyphen);
+      find_hyphen_break(font8, "Hi", 2, FontStyle::Regular, 100, HyphenationLang::German, 100, has_hyphen);
   EXPECT_EQ(r, 0u);
   EXPECT_FALSE(has_hyphen);
 }
 
 TEST(FindHyphenBreak, AvilZeroReturnsZero) {
   bool has_hyphen = true;
-  size_t r = find_hyphen_break(font8, "Abendessen", 10, FontStyle::Regular, FontSize::Normal, HyphenationLang::German,
+  size_t r = find_hyphen_break(font8, "Abendessen", 10, FontStyle::Regular, 100, HyphenationLang::German,
                                0, has_hyphen);
   EXPECT_EQ(r, 0u);
 }
 
 TEST(FindHyphenBreak, NoLangNoSplit) {
-  // HyphenationLang::None disables Liang; no existing '-' → 0
+  // HyphenationLang::None disables Liang; no existing '-' â†’ 0
   bool has_hyphen = false;
-  size_t r = find_hyphen_break(font8, "Abendessen", 10, FontStyle::Regular, FontSize::Normal, HyphenationLang::None,
+  size_t r = find_hyphen_break(font8, "Abendessen", 10, FontStyle::Regular, 100, HyphenationLang::None,
                                200, has_hyphen);
   EXPECT_EQ(r, 0u);
 }
@@ -46,9 +46,9 @@ TEST(FindHyphenBreak, NoLangNoSplit) {
 TEST(FindHyphenBreak, LiangGermanSplit) {
   // "Abendessen" (10 chars = 80px). Liang DE breaks at "Abend|essen" (pos 5).
   // prefix "Abend" = 5 * 8 = 40px. Hyphen = 8px. Total = 48px.
-  // Give avail = 50px → prefix + hyphen (48) fits.
+  // Give avail = 50px â†’ prefix + hyphen (48) fits.
   bool has_hyphen = true;  // should be set to false (no existing '-')
-  size_t r = find_hyphen_break(font8, "Abendessen", 10, FontStyle::Regular, FontSize::Normal, HyphenationLang::German,
+  size_t r = find_hyphen_break(font8, "Abendessen", 10, FontStyle::Regular, 100, HyphenationLang::German,
                                50, has_hyphen);
   EXPECT_GT(r, 0u);
   EXPECT_LE(r, 10u);
@@ -56,9 +56,9 @@ TEST(FindHyphenBreak, LiangGermanSplit) {
 }
 
 TEST(FindHyphenBreak, LiangSplitPrefixTooWide) {
-  // "Abendessen" = 80px. avail = 10px: no prefix + hyphen can fit → 0
+  // "Abendessen" = 80px. avail = 10px: no prefix + hyphen can fit â†’ 0
   bool has_hyphen = false;
-  size_t r = find_hyphen_break(font8, "Abendessen", 10, FontStyle::Regular, FontSize::Normal, HyphenationLang::German,
+  size_t r = find_hyphen_break(font8, "Abendessen", 10, FontStyle::Regular, 100, HyphenationLang::German,
                                10, has_hyphen);
   EXPECT_EQ(r, 0u);
 }
@@ -73,7 +73,7 @@ TEST(FindHyphenBreak, PrefersExistingHyphen) {
   const char* word = "sehr-lang";
   size_t len = 9;
   bool has_hyphen = false;
-  size_t r = find_hyphen_break(font8, word, len, FontStyle::Regular, FontSize::Normal, HyphenationLang::German, 40,
+  size_t r = find_hyphen_break(font8, word, len, FontStyle::Regular, 100, HyphenationLang::German, 40,
                                has_hyphen);
   EXPECT_EQ(r, 5u);         // break after "sehr-"
   EXPECT_TRUE(has_hyphen);  // prefix ends with '-', no synthetic '-' needed
@@ -81,13 +81,13 @@ TEST(FindHyphenBreak, PrefersExistingHyphen) {
 
 TEST(FindHyphenBreak, ExistingHyphenWhenLiangWouldAlsoWork) {
   // Word with both an existing '-' and Liang positions.
-  // "Abend-essen": '-' at index 5 → prefix "Abend-" = 6 * 8 = 48px.
+  // "Abend-essen": '-' at index 5 â†’ prefix "Abend-" = 6 * 8 = 48px.
   // Liang would give "Abend" at pos 5 too (but prefix is "Abend-" here).
   // Give avail = 50px: existing '-' break at pos 6 (prefix "Abend-", 48px) fits.
   const char* word = "Abend-essen";
   size_t len = 11;
   bool has_hyphen = false;
-  size_t r = find_hyphen_break(font8, word, len, FontStyle::Regular, FontSize::Normal, HyphenationLang::German, 50,
+  size_t r = find_hyphen_break(font8, word, len, FontStyle::Regular, 100, HyphenationLang::German, 50,
                                has_hyphen);
   EXPECT_EQ(r, 6u);
   EXPECT_TRUE(has_hyphen);
@@ -95,13 +95,13 @@ TEST(FindHyphenBreak, ExistingHyphenWhenLiangWouldAlsoWork) {
 
 TEST(FindHyphenBreak, ExistingHyphenTooWide_FallsBackToLiang) {
   // "very-longword" (13 chars). '-' at index 4, prefix "very-" = 40px.
-  // avail = 30px → prefix "very-" (40px) does NOT fit.
-  // Liang EN may not break "longword" usefully in 30px either → result 0 or some small pos.
+  // avail = 30px â†’ prefix "very-" (40px) does NOT fit.
+  // Liang EN may not break "longword" usefully in 30px either â†’ result 0 or some small pos.
   // Main assertion: does NOT use the '-' split (40px > 30px).
   const char* word = "very-longword";
   size_t len = 13;
   bool has_hyphen = false;
-  size_t r = find_hyphen_break(font8, word, len, FontStyle::Regular, FontSize::Normal, HyphenationLang::English, 30,
+  size_t r = find_hyphen_break(font8, word, len, FontStyle::Regular, 100, HyphenationLang::English, 30,
                                has_hyphen);
   // If a split was found, it must not be at the '-' position (5), since that's 40px > 30px.
   if (r > 0) {
@@ -111,11 +111,11 @@ TEST(FindHyphenBreak, ExistingHyphenTooWide_FallsBackToLiang) {
 
 TEST(FindHyphenBreak, CompoundWordRightmostHyphen) {
   // "a-b-c-longword": hyphens at 1, 3, 5. avail = 50px.
-  // Rightmost fitting '-' suffix: "a-b-c-" = 6 * 8 = 48px ≤ 50px → break at pos 6.
+  // Rightmost fitting '-' suffix: "a-b-c-" = 6 * 8 = 48px â‰¤ 50px â†’ break at pos 6.
   const char* word = "a-b-c-longword";
   size_t len = 14;
   bool has_hyphen = false;
-  size_t r = find_hyphen_break(font8, word, len, FontStyle::Regular, FontSize::Normal, HyphenationLang::English, 50,
+  size_t r = find_hyphen_break(font8, word, len, FontStyle::Regular, 100, HyphenationLang::English, 50,
                                has_hyphen);
   EXPECT_EQ(r, 6u);
   EXPECT_TRUE(has_hyphen);
@@ -141,7 +141,7 @@ TEST(FindHyphenBreak, CompoundWordFull_300px) {
   const char* word = "very-long-hyphenated-compound-word-that-should-break-somehow";
   size_t len = 60;
   bool has_hyphen = false;
-  size_t r = find_hyphen_break(font8, word, len, FontStyle::Regular, FontSize::Normal, HyphenationLang::English, 300,
+  size_t r = find_hyphen_break(font8, word, len, FontStyle::Regular, 100, HyphenationLang::English, 300,
                                has_hyphen);
   EXPECT_EQ(r, 35u);        // "very-long-hyphenated-compound-word-"
   EXPECT_TRUE(has_hyphen);  // prefix ends with '-', no synthetic hyphen
@@ -153,7 +153,7 @@ TEST(FindHyphenBreak, CompoundWordFull_80px) {
   const char* word = "very-long-hyphenated-compound-word-that-should-break-somehow";
   size_t len = 60;
   bool has_hyphen = false;
-  size_t r = find_hyphen_break(font8, word, len, FontStyle::Regular, FontSize::Normal, HyphenationLang::English, 80,
+  size_t r = find_hyphen_break(font8, word, len, FontStyle::Regular, 100, HyphenationLang::English, 80,
                                has_hyphen);
   EXPECT_EQ(r, 10u);  // "very-long-"
   EXPECT_TRUE(has_hyphen);
@@ -164,7 +164,7 @@ TEST(FindHyphenBreak, CompoundWordFull_TooNarrow) {
   const char* word = "very-long-hyphenated-compound-word-that-should-break-somehow";
   size_t len = 60;
   bool has_hyphen = true;
-  size_t r = find_hyphen_break(font8, word, len, FontStyle::Regular, FontSize::Normal, HyphenationLang::English, 39,
+  size_t r = find_hyphen_break(font8, word, len, FontStyle::Regular, 100, HyphenationLang::English, 39,
                                has_hyphen);
   EXPECT_EQ(r, 0u);
   EXPECT_FALSE(has_hyphen);
@@ -177,7 +177,7 @@ TEST(FindHyphenBreak, CompoundWordNeverDoubleHyphen) {
   size_t len = 60;
   for (uint16_t avail = 10; avail <= 480; avail += 10) {
     bool has_hyphen = false;
-    size_t r = find_hyphen_break(font8, word, len, FontStyle::Regular, FontSize::Normal, HyphenationLang::English,
+    size_t r = find_hyphen_break(font8, word, len, FontStyle::Regular, 100, HyphenationLang::English,
                                  avail, has_hyphen);
     if (r > 0) {
       EXPECT_EQ(word[r - 1], '-') << "prefix should end with '-' for avail=" << avail;
@@ -187,16 +187,16 @@ TEST(FindHyphenBreak, CompoundWordNeverDoubleHyphen) {
 }
 
 // Trailing punctuation must not produce a split where the suffix is only
-// punctuation characters. E.g. "befördert." must not split as "befördert-|."
+// punctuation characters. E.g. "befÃ¶rdert." must not split as "befÃ¶rdert-|."
 TEST(FindHyphenBreak, TrailingPunctuationNotSuffix) {
-  // "befördert." in UTF-8: 'ö' = 2 bytes, total 11 bytes
+  // "befÃ¶rdert." in UTF-8: 'Ã¶' = 2 bytes, total 11 bytes
   const char* word = "bef\xc3\xb6rdert.";
   size_t len = std::strlen(word);  // 11
   // avail just too small for the whole word, forcing a split candidate search
-  // glyph_width=8, hyphen=8: "befördert-" = 10 codepoints + '-' = 11 * 8 = 88px
+  // glyph_width=8, hyphen=8: "befÃ¶rdert-" = 10 codepoints + '-' = 11 * 8 = 88px
   // avail=80 means the whole word doesn't fit but most of it does
   bool has_hyphen = false;
-  size_t r = find_hyphen_break(font8, word, len, FontStyle::Regular, FontSize::Normal, HyphenationLang::German, 80,
+  size_t r = find_hyphen_break(font8, word, len, FontStyle::Regular, 100, HyphenationLang::German, 80,
                                has_hyphen);
   // Whatever split point is chosen, the suffix (word+r) must NOT be purely punctuation
   if (r > 0 && r < len) {
@@ -214,20 +214,20 @@ TEST(FindHyphenBreak, TrailingPunctuationNotSuffix) {
   }
 }
 
-// "hat.»" (German: trailing period + closing angle-quote) must not split as "ha-|t.»".
-// The » is 2-byte UTF-8 (0xC2 0xBB) and was previously not stripped, causing Liang
+// "hat.Â»" (German: trailing period + closing angle-quote) must not split as "ha-|t.Â»".
+// The Â» is 2-byte UTF-8 (0xC2 0xBB) and was previously not stripped, causing Liang
 // to find a spurious break inside the real word.
 TEST(FindHyphenBreak, TrailingAngleQuoteNotSuffix) {
-  // "hat.\xc2\xbb" — 6 bytes total
+  // "hat.\xc2\xbb" â€” 6 bytes total
   const char* word = "hat.\xc2\xbb";
   size_t len = std::strlen(word);  // 6
   bool has_hyphen = false;
   // avail=32: "hat" is 3*8=24px, "hat-" = 32px which just fits.
-  // Without the fix Liang would return a break at pos=2 ("ha-|t.»").
-  size_t r = find_hyphen_break(font8, word, len, FontStyle::Regular, FontSize::Normal, HyphenationLang::German, 32,
+  // Without the fix Liang would return a break at pos=2 ("ha-|t.Â»").
+  size_t r = find_hyphen_break(font8, word, len, FontStyle::Regular, 100, HyphenationLang::German, 32,
                                has_hyphen);
-  // A break at pos=2 ("ha") would leave "t.»" as suffix — wrong.
+  // A break at pos=2 ("ha") would leave "t.Â»" as suffix â€” wrong.
   // After the fix: no valid break point should be returned (word is too short
   // once punctuation is stripped: "hat" = 3 chars < 6 minimum for Liang).
-  EXPECT_EQ(r, 0u) << "Should not split 'hat' — it's only 3 chars after stripping trailing punctuation";
+  EXPECT_EQ(r, 0u) << "Should not split 'hat' â€” it's only 3 chars after stripping trailing punctuation";
 }

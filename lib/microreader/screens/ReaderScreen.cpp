@@ -1,4 +1,4 @@
-#include "ReaderScreen.h"
+﻿#include "ReaderScreen.h"
 
 #include <cstdio>
 #include <cstring>
@@ -20,10 +20,10 @@
 namespace microreader {
 
 // ---------------------------------------------------------------------------
-// ReaderScreen — image size resolution
+// ReaderScreen â€” image size resolution
 // ---------------------------------------------------------------------------
 
-// resolve_image_size_ removed — image size resolution is now handled by
+// resolve_image_size_ removed â€” image size resolution is now handled by
 // make_image_size_query() (MrbReader.h), stored in image_size_fn_.
 
 bool ReaderScreen::decode_image_to_buffer_(uint32_t offset, DrawBuffer& buf, int dest_x, int dest_y, uint16_t max_w,
@@ -375,6 +375,9 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
   // Use proportional font if available, otherwise fallback to fixed.
   FixedFont fixed_font(kGlyphW * kScale, kGlyphH * kScale + 4);
   const BitmapFontSet* fset = ext_font_set_ ? ext_font_set_ : (font_set_.valid() ? &font_set_ : nullptr);
+  if (fset) {
+    const_cast<BitmapFontSet*>(fset)->set_base_size_index(reader_settings_.font_size_idx);
+  }
   IFont& font = fset ? static_cast<IFont&>(const_cast<BitmapFontSet&>(*fset)) : static_cast<IFont&>(fixed_font);
   PageOptions opts(static_cast<uint16_t>(W), static_cast<uint16_t>(H), kPaddingTop, 8 /*para_spacing*/,
                    reader_settings_.justify ? Alignment::Justify : Alignment::Start);
@@ -390,7 +393,7 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
 
   page_ = layout_engine_.layout();
 
-  // ── Collect image positions from layout ─────────────────────────────────
+  // â”€â”€ Collect image positions from layout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   struct ImageToDraw {
     int x, y, w, h;
     uint32_t offset;
@@ -431,7 +434,7 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
   // Track whether grayscale pass is needed (deferred to update()).
   grayscale_pending_ = fset && fset->has_grayscale();
 
-  // ── BW rendering ────────────────────────────────────────────────────────
+  // â”€â”€ BW rendering â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   buf.fill(true);
 
   if (fset) {
@@ -497,7 +500,7 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
     }
   }
 
-  // ── Timing ──────────────────────────────────────────────────────────────
+  // â”€â”€ Timing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   int n_words = 0;
   for (const auto& ci : page_.items)
     if (const PageTextItem* ti = std::get_if<PageTextItem>(&ci))
@@ -551,16 +554,16 @@ void ReaderScreen::render_text_(DrawBuffer& buf, const BitmapFontSet& fset, Gray
       int x = left_padding + w.x;
       int baseline_y = static_cast<int>(item->y_offset) + item->baseline;
       if (w.vertical_align == VerticalAlign::Super)
-        baseline_y -= fset.y_advance(w.size) * 20 / 100;
+        baseline_y -= fset.y_advance(w.size_pct) * 20 / 100;
       else if (w.vertical_align == VerticalAlign::Sub)
-        baseline_y += fset.y_advance(w.size) * 20 / 100;
+        baseline_y += fset.y_advance(w.size_pct) * 20 / 100;
       char text[64];
       int tlen = static_cast<int>(w.len);
       if (tlen > 63)
         tlen = 63;
       std::memcpy(text, w.text, tlen);
       text[tlen] = '\0';
-      buf.draw_text_plane(render, x, baseline_y, text, static_cast<size_t>(tlen), fset, plane, white, w.style, w.size);
+      buf.draw_text_plane(render, x, baseline_y, text, static_cast<size_t>(tlen), fset, plane, white, w.style, w.size_pct);
     }
   }
 }
@@ -570,12 +573,12 @@ void ReaderScreen::apply_grayscale_(DrawBuffer& buf) {
   if (!fset || !fset->has_grayscale())
     return;
 
-  // LSB plane → BW RAM (no refresh)
+  // LSB plane â†’ BW RAM (no refresh)
   buf.fill(false);
   render_text_(buf, *fset, GrayPlane::LSB, true, reader_settings_.h_padding());
   buf.write_ram_bw();
 
-  // MSB plane → RED RAM (no refresh)
+  // MSB plane â†’ RED RAM (no refresh)
   buf.fill(false);
   render_text_(buf, *fset, GrayPlane::MSB, true, reader_settings_.h_padding());
   buf.write_ram_red();

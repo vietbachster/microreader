@@ -27,7 +27,7 @@ HyphenationLang detect_language(const std::optional<std::string>& lang_tag);
 // Returns 0 if no split fits. avail must already exclude any inter-word space.
 // out_prefix_has_hyphen is set to true when the prefix already ends with '-'
 // (i.e. no synthetic hyphen should be drawn).
-size_t find_hyphen_break(const IFont& font, const char* word_ptr, size_t len, FontStyle style, FontSize size,
+size_t find_hyphen_break(const IFont& font, const char* word_ptr, size_t len, FontStyle style, uint8_t size_pct,
                          HyphenationLang lang, uint16_t avail, bool& out_prefix_has_hyphen);
 
 }  // namespace microreader

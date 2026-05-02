@@ -255,7 +255,7 @@ bool MrbReader::deserialize_text(const uint8_t* data, size_t size, Paragraph& ou
 
     Run& run = out.text.runs[i];
     run.style = static_cast<FontStyle>(data[pos++]);
-    run.size = static_cast<FontSize>(data[pos++]);
+    run.size_pct = data[pos++];
     run.vertical_align = static_cast<VerticalAlign>(data[pos++]);
     uint8_t flags = data[pos++];
     run.breaking = (flags & 0x01) != 0;

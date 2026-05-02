@@ -116,9 +116,9 @@ void collect_sink(void* raw, Paragraph&& para) {
 static std::vector<Run> merge_runs(const std::vector<Run>& runs) {
   std::vector<Run> merged;
   for (const auto& r : runs) {
-    if (!merged.empty() && !merged.back().breaking && merged.back().style == r.style && merged.back().size == r.size &&
-        merged.back().vertical_align == r.vertical_align && merged.back().margin_left == r.margin_left &&
-        merged.back().margin_right == r.margin_right) {
+    if (!merged.empty() && !merged.back().breaking && merged.back().style == r.style &&
+        merged.back().size_pct == r.size_pct && merged.back().vertical_align == r.vertical_align &&
+        merged.back().margin_left == r.margin_left && merged.back().margin_right == r.margin_right) {
       merged.back().text += r.text;
       merged.back().breaking = r.breaking;
     } else {
@@ -139,7 +139,7 @@ void assert_paragraph_equal(const Paragraph& a, const Paragraph& b, const std::s
       std::string rctx = ctx + " run[" + std::to_string(ri) + "]";
       EXPECT_EQ(ar[ri].text, br[ri].text) << rctx << " text";
       EXPECT_EQ(ar[ri].style, br[ri].style) << rctx << " style";
-      EXPECT_EQ(ar[ri].size, br[ri].size) << rctx << " size";
+      EXPECT_EQ(ar[ri].size_pct, br[ri].size_pct) << rctx << " size";
       EXPECT_EQ(ar[ri].vertical_align, br[ri].vertical_align) << rctx << " valign";
       EXPECT_EQ(ar[ri].breaking, br[ri].breaking) << rctx << " breaking";
       EXPECT_EQ(ar[ri].margin_left, br[ri].margin_left) << rctx << " margin_left";

@@ -436,10 +436,10 @@ TEST(TextLayout, AllWordsPreservedAfterWrap) {
 TEST(TextLayout, LargeWordsSameWidth) {
   // Large and Normal words have the same width (bitmap font can't resize glyphs).
   TextParagraph para_normal;
-  para_normal.runs.push_back(microreader::Run("Hello", FontStyle::Regular, FontSize::Normal));
+  para_normal.runs.push_back(microreader::Run("Hello", FontStyle::Regular, 100));
 
   TextParagraph para_large;
-  para_large.runs.push_back(microreader::Run("Hello", FontStyle::Regular, FontSize::Large));
+  para_large.runs.push_back(microreader::Run("Hello", FontStyle::Regular, 100));
 
   LayoutOptions opts{300, Alignment::Start};
   auto lines_n = TextLayout(font8).layout_paragraph(opts, para_normal);
@@ -448,18 +448,18 @@ TEST(TextLayout, LargeWordsSameWidth) {
   ASSERT_EQ(lines_n.size(), 1u);
   ASSERT_EQ(lines_l.size(), 1u);
 
-  uint16_t end_n = lines_n[0].words[0].x + font8.word_width("Hello", 5, FontStyle::Regular, FontSize::Normal);
-  uint16_t end_l = lines_l[0].words[0].x + font8.word_width("Hello", 5, FontStyle::Regular, FontSize::Large);
+  uint16_t end_n = lines_n[0].words[0].x + font8.word_width("Hello", 5, FontStyle::Regular, 100);
+  uint16_t end_l = lines_l[0].words[0].x + font8.word_width("Hello", 5, FontStyle::Regular, 100);
   EXPECT_EQ(end_l, end_n);
 }
 
 TEST(TextLayout, SmallWordsSameWidth) {
   // Small and Normal words have the same width (bitmap font can't resize glyphs).
   TextParagraph para_normal;
-  para_normal.runs.push_back(microreader::Run("Hello", FontStyle::Regular, FontSize::Normal));
+  para_normal.runs.push_back(microreader::Run("Hello", FontStyle::Regular, 100));
 
   TextParagraph para_small;
-  para_small.runs.push_back(microreader::Run("Hello", FontStyle::Regular, FontSize::Small));
+  para_small.runs.push_back(microreader::Run("Hello", FontStyle::Regular, 100));
 
   LayoutOptions opts{300, Alignment::Start};
   auto lines_n = TextLayout(font8).layout_paragraph(opts, para_normal);
@@ -468,8 +468,8 @@ TEST(TextLayout, SmallWordsSameWidth) {
   ASSERT_EQ(lines_n.size(), 1u);
   ASSERT_EQ(lines_s.size(), 1u);
 
-  uint16_t end_n = lines_n[0].words[0].x + font8.word_width("Hello", 5, FontStyle::Regular, FontSize::Normal);
-  uint16_t end_s = lines_s[0].words[0].x + font8.word_width("Hello", 5, FontStyle::Regular, FontSize::Small);
+  uint16_t end_n = lines_n[0].words[0].x + font8.word_width("Hello", 5, FontStyle::Regular, 100);
+  uint16_t end_s = lines_s[0].words[0].x + font8.word_width("Hello", 5, FontStyle::Regular, 100);
   EXPECT_EQ(end_s, end_n);
 }
 
@@ -478,10 +478,10 @@ TEST(TextLayout, LargeTextSameWrapping) {
   std::string text = "The quick brown fox jumps over the lazy dog";
 
   TextParagraph para_normal;
-  para_normal.runs.push_back(microreader::Run(text, FontStyle::Regular, FontSize::Normal));
+  para_normal.runs.push_back(microreader::Run(text, FontStyle::Regular, 100));
 
   TextParagraph para_large;
-  para_large.runs.push_back(microreader::Run(text, FontStyle::Regular, FontSize::Large));
+  para_large.runs.push_back(microreader::Run(text, FontStyle::Regular, 100));
 
   LayoutOptions opts{200, Alignment::Start};
   auto lines_n = TextLayout(font8).layout_paragraph(opts, para_normal);
@@ -492,9 +492,9 @@ TEST(TextLayout, LargeTextSameWrapping) {
 
 TEST(TextLayout, LayoutWordCarriesFontSize) {
   TextParagraph para;
-  para.runs.push_back(microreader::Run("Normal", FontStyle::Regular, FontSize::Normal));
-  para.runs.push_back(microreader::Run(" Large", FontStyle::Bold, FontSize::Large));
-  para.runs.push_back(microreader::Run(" Small", FontStyle::Italic, FontSize::Small));
+  para.runs.push_back(microreader::Run("Normal", FontStyle::Regular, 100));
+  para.runs.push_back(microreader::Run(" Large", FontStyle::Bold, 100));
+  para.runs.push_back(microreader::Run(" Small", FontStyle::Italic, 100));
 
   LayoutOptions opts{500, Alignment::Start};
   auto lines = TextLayout(font8).layout_paragraph(opts, para);
@@ -502,20 +502,20 @@ TEST(TextLayout, LayoutWordCarriesFontSize) {
   ASSERT_EQ(lines.size(), 1u);
   ASSERT_EQ(lines[0].words.size(), 3u);
 
-  EXPECT_EQ(lines[0].words[0].size, FontSize::Normal);
-  EXPECT_EQ(lines[0].words[1].size, FontSize::Large);
-  EXPECT_EQ(lines[0].words[2].size, FontSize::Small);
+  EXPECT_EQ(lines[0].words[0].size_pct, 100);
+  EXPECT_EQ(lines[0].words[1].size_pct, 100);
+  EXPECT_EQ(lines[0].words[2].size_pct, 100);
 }
 
 TEST(TextLayout, MixedSizesLineHeight) {
   // A page with a Large-text line should use a taller y_advance for that line
   Chapter ch;
   TextParagraph tp_large;
-  tp_large.runs.push_back(microreader::Run("Heading", FontStyle::Bold, FontSize::Large));
+  tp_large.runs.push_back(microreader::Run("Heading", FontStyle::Bold, 100));
   ch.paragraphs.push_back(Paragraph::make_text(std::move(tp_large)));
 
   TextParagraph tp_normal;
-  tp_normal.runs.push_back(microreader::Run("Body text paragraph.", FontStyle::Regular, FontSize::Normal));
+  tp_normal.runs.push_back(microreader::Run("Body text paragraph.", FontStyle::Regular, 100));
   ch.paragraphs.push_back(Paragraph::make_text(std::move(tp_normal)));
   TestChapterSource src(ch);
 
@@ -531,39 +531,39 @@ TEST(TextLayout, MixedSizesLineHeight) {
 
   // Large line height = 16 * 5/4 = 20, plus para_spacing = 8 → gap = 28
   // Normal line height would be 16 + 8 = 24
-  EXPECT_GT(gap, font8.y_advance(FontSize::Normal));
+  EXPECT_GT(gap, font8.y_advance(100));
 }
 
 TEST(TextLayout, FixedFontSizeScaling) {
   // Width is constant regardless of FontSize (bitmap font can't resize glyphs).
-  EXPECT_EQ(font8.char_width('A', FontStyle::Regular, FontSize::Small),
-            font8.char_width('A', FontStyle::Regular, FontSize::Normal));
-  EXPECT_EQ(font8.char_width('A', FontStyle::Regular, FontSize::Large),
-            font8.char_width('A', FontStyle::Regular, FontSize::Normal));
-  EXPECT_EQ(font8.char_width('A', FontStyle::Regular, FontSize::XLarge),
-            font8.char_width('A', FontStyle::Regular, FontSize::Normal));
-  EXPECT_EQ(font8.char_width('A', FontStyle::Regular, FontSize::XXLarge),
-            font8.char_width('A', FontStyle::Regular, FontSize::Normal));
+  EXPECT_EQ(font8.char_width('A', FontStyle::Regular, 100),
+            font8.char_width('A', FontStyle::Regular, 100));
+  EXPECT_EQ(font8.char_width('A', FontStyle::Regular, 100),
+            font8.char_width('A', FontStyle::Regular, 100));
+  EXPECT_EQ(font8.char_width('A', FontStyle::Regular, 100),
+            font8.char_width('A', FontStyle::Regular, 100));
+  EXPECT_EQ(font8.char_width('A', FontStyle::Regular, 100),
+            font8.char_width('A', FontStyle::Regular, 100));
 
   // y_advance still scales (line heights can vary without causing overlap).
-  EXPECT_LT(font8.y_advance(FontSize::Small), font8.y_advance(FontSize::Normal));
-  EXPECT_GT(font8.y_advance(FontSize::Large), font8.y_advance(FontSize::Normal));
-  EXPECT_GT(font8.y_advance(FontSize::XLarge), font8.y_advance(FontSize::Large));
-  EXPECT_GT(font8.y_advance(FontSize::XXLarge), font8.y_advance(FontSize::XLarge));
+  EXPECT_LT(font8.y_advance(100), font8.y_advance(100));
+  EXPECT_GT(font8.y_advance(100), font8.y_advance(100));
+  EXPECT_GT(font8.y_advance(100), font8.y_advance(100));
+  EXPECT_GT(font8.y_advance(100), font8.y_advance(100));
 
   // Width: always 8 regardless of size
-  EXPECT_EQ(font8.char_width('A', FontStyle::Regular, FontSize::Small), 8);
-  EXPECT_EQ(font8.char_width('A', FontStyle::Regular, FontSize::Normal), 8);
-  EXPECT_EQ(font8.char_width('A', FontStyle::Regular, FontSize::Large), 8);
-  EXPECT_EQ(font8.char_width('A', FontStyle::Regular, FontSize::XLarge), 8);
-  EXPECT_EQ(font8.char_width('A', FontStyle::Regular, FontSize::XXLarge), 8);
+  EXPECT_EQ(font8.char_width('A', FontStyle::Regular, 100), 8);
+  EXPECT_EQ(font8.char_width('A', FontStyle::Regular, 100), 8);
+  EXPECT_EQ(font8.char_width('A', FontStyle::Regular, 100), 8);
+  EXPECT_EQ(font8.char_width('A', FontStyle::Regular, 100), 8);
+  EXPECT_EQ(font8.char_width('A', FontStyle::Regular, 100), 8);
 
   // Line heights: 16*90%=14, 16, 16*110%=17, 16*120%=19, 16*130%=20
-  EXPECT_EQ(font8.y_advance(FontSize::Small), 14);
-  EXPECT_EQ(font8.y_advance(FontSize::Normal), 16);
-  EXPECT_EQ(font8.y_advance(FontSize::Large), 17);
-  EXPECT_EQ(font8.y_advance(FontSize::XLarge), 19);
-  EXPECT_EQ(font8.y_advance(FontSize::XXLarge), 20);
+  EXPECT_EQ(font8.y_advance(100), 14);
+  EXPECT_EQ(font8.y_advance(100), 16);
+  EXPECT_EQ(font8.y_advance(100), 17);
+  EXPECT_EQ(font8.y_advance(100), 19);
+  EXPECT_EQ(font8.y_advance(100), 20);
 }
 
 // ---------------------------------------------------------------------------

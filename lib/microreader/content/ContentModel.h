@@ -19,18 +19,10 @@ enum class FontStyle : uint8_t {
 };
 
 // ---------------------------------------------------------------------------
-// Font size — 5 discrete sizes mapped to pre-rendered bitmap fonts
+// Font size limit
 // ---------------------------------------------------------------------------
 
-enum class FontSize : uint8_t {
-  Small = 0,
-  Normal = 1,
-  Large = 2,
-  XLarge = 3,
-  XXLarge = 4,
-};
-
-static constexpr int kFontSizeCount = 5;
+static constexpr int kMaxFonts = 5;
 
 // ---------------------------------------------------------------------------
 // Text alignment
@@ -56,20 +48,22 @@ enum class VerticalAlign : uint8_t {
 struct Run {
   std::string text;
   FontStyle style = FontStyle::Regular;
-  FontSize size = FontSize::Normal;
+  uint8_t size_pct = 100;
   VerticalAlign vertical_align = VerticalAlign::Baseline;
   bool breaking = false;      // true for <br> line breaks
   uint16_t margin_left = 0;   // inline left margin in pixels
   uint16_t margin_right = 0;  // inline right margin in pixels
 
   Run() = default;
-  Run(std::string t, FontStyle s = FontStyle::Regular, bool br = false)
-      : text(std::move(t)), style(s), size(FontSize::Normal), breaking(br) {}
-  Run(std::string t, FontStyle s, FontSize sz, bool br = false)
-      : text(std::move(t)), style(s), size(sz), breaking(br) {}
+  Run(const std::string& t, FontStyle s = FontStyle::Regular, bool br = false)
+      : text(t), style(s), size_pct(100), breaking(br) {}
+  Run(const char* t, FontStyle s = FontStyle::Regular, bool br = false)
+      : text(t), style(s), size_pct(100), breaking(br) {}
+  Run(const std::string& t, FontStyle s, int sz, bool br = false) : text(t), style(s), size_pct(sz), breaking(br) {}
+  Run(const char* t, FontStyle s, int sz, bool br = false) : text(t), style(s), size_pct(sz), breaking(br) {}
 
   bool operator==(const Run& o) const {
-    return text == o.text && style == o.style && size == o.size && vertical_align == o.vertical_align &&
+    return text == o.text && style == o.style && size_pct == o.size_pct && vertical_align == o.vertical_align &&
            breaking == o.breaking && margin_left == o.margin_left && margin_right == o.margin_right;
   }
 };

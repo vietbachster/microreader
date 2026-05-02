@@ -50,22 +50,21 @@ int main() {
     std::filesystem::create_directories(data_path + "/data");
     app.set_data_dir(data_path.c_str());
 
-    // Load proportional fonts (5 sizes) if available.
+    // Load proportional fonts if available.
     microreader::FontManager font_mgr;
-    std::vector<uint8_t> font_data[microreader::kFontSizeCount];
+    std::vector<uint8_t> font_data[5];
 
     struct SizeInfo {
-      microreader::FontSize size;
       int idx;
       const char* label;
       const char* suffix;
     };
     static constexpr SizeInfo kSizes[] = {
-        {microreader::FontSize::Small,   0, "Small",   "small"  },
-        {microreader::FontSize::Normal,  1, "Normal",  "normal" },
-        {microreader::FontSize::Large,   2, "Large",   "large"  },
-        {microreader::FontSize::XLarge,  3, "XLarge",  "xlarge" },
-        {microreader::FontSize::XXLarge, 4, "XXLarge", "xxlarge"},
+        {0, "Small",   "small"  },
+        {1, "Normal",  "normal" },
+        {2, "Large",   "large"  },
+        {3, "XLarge",  "xlarge" },
+        {4, "XXLarge", "xxlarge"},
     };
 
     static std::string fonts_dir = std::filesystem::absolute("resources/fonts").string();
@@ -73,7 +72,7 @@ int main() {
       std::string path = fonts_dir + "/font-" + si.suffix + ".mbf";
       font_data[si.idx] = load_file(path.c_str());
       if (!font_data[si.idx].empty()) {
-        font_mgr.load_font(si.size, font_data[si.idx].data(), font_data[si.idx].size());
+        font_mgr.load_font(font_data[si.idx].data(), font_data[si.idx].size());
         if (font_mgr.valid())
           printf("[font] %s: %s (%zu bytes)\n", si.label, path.c_str(), font_data[si.idx].size());
         else

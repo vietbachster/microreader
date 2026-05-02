@@ -1,4 +1,4 @@
-#include <gtest/gtest.h>
+﻿#include <gtest/gtest.h>
 
 #include <cstdio>
 #include <filesystem>
@@ -40,7 +40,7 @@ class MrbFormatTest : public ::testing::Test {
   static void expect_run_eq(const microreader::Run& a, const microreader::Run& b, const std::string& ctx) {
     EXPECT_EQ(a.text, b.text) << ctx;
     EXPECT_EQ(a.style, b.style) << ctx;
-    EXPECT_EQ(a.size, b.size) << ctx;
+    EXPECT_EQ(a.size_pct, b.size_pct) << ctx;
     EXPECT_EQ(a.vertical_align, b.vertical_align) << ctx;
     EXPECT_EQ(a.breaking, b.breaking) << ctx;
     EXPECT_EQ(a.margin_left, b.margin_left) << ctx;
@@ -82,7 +82,7 @@ class MrbFormatTest : public ::testing::Test {
 };
 
 // ---------------------------------------------------------------------------
-// Round-trip: write paragraphs → read back, compare
+// Round-trip: write paragraphs â†’ read back, compare
 // ---------------------------------------------------------------------------
 
 TEST_F(MrbFormatTest, RoundTrip_TextParagraph) {
@@ -220,13 +220,13 @@ TEST_F(MrbFormatTest, RoundTrip_AllRunStyles) {
   tp.alignment = Alignment::Justify;
   tp.indent = 30;
 
-  microreader::Run r1{"Regular text ", FontStyle::Regular, FontSize::Normal};
-  microreader::Run r2{"Bold text ", FontStyle::Bold, FontSize::Large};
+  microreader::Run r1{"Regular text ", FontStyle::Regular, 100};
+  microreader::Run r2{"Bold text ", FontStyle::Bold, 100};
   r2.margin_left = 12;
-  microreader::Run r3{"Italic small", FontStyle::Italic, FontSize::Small};
+  microreader::Run r3{"Italic small", FontStyle::Italic, 100};
   r3.margin_right = 8;
   r3.vertical_align = VerticalAlign::Super;
-  microreader::Run r4{"BoldItalic break", FontStyle::BoldItalic, FontSize::Normal, true};
+  microreader::Run r4{"BoldItalic break", FontStyle::BoldItalic, 100, true};
   r4.vertical_align = VerticalAlign::Sub;
 
   tp.runs = {r1, r2, r3, r4};
@@ -321,7 +321,7 @@ TEST_F(MrbFormatTest, RoundTrip_EmptyChapter) {
 }
 
 TEST_F(MrbFormatTest, RoundTrip_UnicodeText) {
-  auto para = make_text("Ünïcödë Hëllö Wörld — 日本語テスト");
+  auto para = make_text("ÃœnÃ¯cÃ¶dÃ« HÃ«llÃ¶ WÃ¶rld â€” æ—¥æœ¬èªžãƒ†ã‚¹ãƒˆ");
 
   MrbWriter writer;
   ASSERT_TRUE(writer.open(tmp_path_.c_str()));
@@ -334,7 +334,7 @@ TEST_F(MrbFormatTest, RoundTrip_UnicodeText) {
   ASSERT_TRUE(reader.open(tmp_path_.c_str()));
   Paragraph out;
   ASSERT_TRUE(load_chapter_para(reader, 0, 0, out));
-  EXPECT_EQ(out.text.runs[0].text, "Ünïcödë Hëllö Wörld — 日本語テスト");
+  EXPECT_EQ(out.text.runs[0].text, "ÃœnÃ¯cÃ¶dÃ« HÃ«llÃ¶ WÃ¶rld â€” æ—¥æœ¬èªžãƒ†ã‚¹ãƒˆ");
 }
 
 TEST_F(MrbFormatTest, RoundTrip_ImageRefTable) {
@@ -365,7 +365,7 @@ TEST_F(MrbFormatTest, RoundTrip_ImageRefTable) {
 }
 
 // ---------------------------------------------------------------------------
-// EPUB → MRB conversion test (using fixture EPUBs)
+// EPUB â†’ MRB conversion test (using fixture EPUBs)
 // ---------------------------------------------------------------------------
 
 #ifdef TEST_FIXTURES_DIR
@@ -424,8 +424,8 @@ TEST_F(MrbFormatTest, ConvertMultiChapterEpub) {
 
 // ---------------------------------------------------------------------------
 // Verify that Book + MrbReader can be re-opened without leaking memory.
-// Simulates the ReaderScreen flow: open book A → convert → read MRB → close
-// → open book B → convert → read MRB.
+// Simulates the ReaderScreen flow: open book A â†’ convert â†’ read MRB â†’ close
+// â†’ open book B â†’ convert â†’ read MRB.
 // ---------------------------------------------------------------------------
 
 #ifdef TEST_FIXTURES_DIR
@@ -451,7 +451,7 @@ TEST_F(MrbFormatTest, ReopenBookReleasesResources) {
     uint16_t ch_count_a = reader.chapter_count();
     EXPECT_GT(ch_count_a, 0);
   }
-  // Book + MrbReader destructors run here — all resources released.
+  // Book + MrbReader destructors run here â€” all resources released.
 
   // ---- Round 2: open book B ----
   {
@@ -544,7 +544,7 @@ TEST_F(MrbFormatTest, OpenWrongMagic) {
 //   Chapter 1: 1 long body paragraph (995 chars)
 //
 // Paragraph-based progress at the boundary: 1/(1+1) = 50%
-// Char-based progress at the boundary:      5/(5+995) = 0.5% → rounds to 0%
+// Char-based progress at the boundary:      5/(5+995) = 0.5% â†’ rounds to 0%
 //
 // This test verifies:
 //   - char_count is stored and retrieved correctly
@@ -581,7 +581,7 @@ TEST_F(MrbFormatTest, ProgressAccuracy_CharVsParagraph) {
   EXPECT_EQ(reader.total_char_count(), 1000u);
 
   // Paragraph-based progress at end of chapter 0:
-  //   paragraphs_before = 1, total_paragraphs = 2  → 50%
+  //   paragraphs_before = 1, total_paragraphs = 2  â†’ 50%
   {
     uint32_t cur = 1;  // 1 paragraph in chapter 0
     int pct_para = static_cast<int>(cur * 100u / reader.paragraph_count());
@@ -589,7 +589,7 @@ TEST_F(MrbFormatTest, ProgressAccuracy_CharVsParagraph) {
   }
 
   // Char-based progress at end of chapter 0:
-  //   chars_before_ch1 = 5, total_chars = 1000  → 0%
+  //   chars_before_ch1 = 5, total_chars = 1000  â†’ 0%
   {
     uint64_t total = reader.total_char_count();
     uint64_t chars_before_ch1 = reader.chapter_char_count(0);

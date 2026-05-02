@@ -109,7 +109,7 @@ int hyphenate_word(const char* word, size_t /*len*/, HyphenationLang lang, size_
   return liang_hyphenate(word, 2, 2, '.', out_positions, max_positions, pats);
 }
 
-size_t find_hyphen_break(const IFont& font, const char* word_ptr, size_t len, FontStyle style, FontSize size,
+size_t find_hyphen_break(const IFont& font, const char* word_ptr, size_t len, FontStyle style, uint8_t size_pct,
                          HyphenationLang lang, uint16_t avail, bool& out_prefix_has_hyphen) {
   out_prefix_has_hyphen = false;
   if (len == 0 || avail == 0)
@@ -118,7 +118,7 @@ size_t find_hyphen_break(const IFont& font, const char* word_ptr, size_t len, Fo
   // Prefer breaking at an existing '-' in the token (right-most that fits).
   for (size_t i = len - 1; i > 0; --i) {
     if (word_ptr[i - 1] == '-') {
-      uint16_t prefix_w = font.word_width(word_ptr, static_cast<uint16_t>(i), style, size);
+      uint16_t prefix_w = font.word_width(word_ptr, static_cast<uint16_t>(i), style, size_pct);
       if (prefix_w <= avail) {
         out_prefix_has_hyphen = true;
         return i;
@@ -170,12 +170,12 @@ size_t find_hyphen_break(const IFont& font, const char* word_ptr, size_t len, Fo
   int n = hyphenate_word(buf, hyph_len, lang, positions, 32);
   if (n <= 0)
     return 0;
-  const uint16_t hyphen_w = font.char_width('-', style, size);
+  const uint16_t hyphen_w = font.char_width('-', style, size_pct);
   for (int i = n - 1; i >= 0; --i) {
     size_t pos = positions[i];
     if (pos == 0 || pos >= len)
       continue;
-    uint16_t prefix_w = font.word_width(word_ptr, static_cast<uint16_t>(pos), style, size);
+    uint16_t prefix_w = font.word_width(word_ptr, static_cast<uint16_t>(pos), style, size_pct);
     bool ends_with_hyphen = (word_ptr[pos - 1] == '-');
     uint16_t extra = ends_with_hyphen ? 0 : hyphen_w;
     if (prefix_w + extra <= avail) {

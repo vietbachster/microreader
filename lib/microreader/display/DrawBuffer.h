@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <algorithm>
 #include <cstddef>
@@ -36,7 +36,7 @@ class IDisplay {
   // Full physical refresh. Both BW and RED RAM are set to `pixels`.
   virtual void full_refresh(const uint8_t* pixels, RefreshMode mode, bool turnOffScreen = false) = 0;
 
-  // Partial refresh: new_pixels → BW RAM. Driver tracks previous frame for RED RAM.
+  // Partial refresh: new_pixels â†’ BW RAM. Driver tracks previous frame for RED RAM.
   // prev_pixels is the previous BW frame (used to restore BW RAM after grayscale revert).
   virtual void partial_refresh(const uint8_t* new_pixels, const uint8_t* prev_pixels) = 0;
 
@@ -64,7 +64,7 @@ class IDisplay {
   // new_buf/old_buf: 1-bit packed, row-major, stride_bytes per row.
   // (phys_x, phys_y): physical top-left; (phys_w, phys_h): pixel dimensions.
   // phys_x must be byte-aligned (multiple of 8).
-  // Default: no-op — platforms may override for efficient region updates.
+  // Default: no-op â€” platforms may override for efficient region updates.
   virtual void partial_refresh_region(int phys_x, int phys_y, int phys_w, int phys_h, const uint8_t* new_buf,
                                       int stride_bytes) {
     (void)phys_x;
@@ -98,12 +98,12 @@ class IDisplay {
 
 // Double-buffered display with simple draw helpers.
 //
-// Uses Deg90 (portrait) rotation: logical 480×788, physical 788×480.
+// Uses Deg90 (portrait) rotation: logical 480Ã—788, physical 788Ã—480.
 // The "inactive" buffer is drawn to; "active" is what's currently displayed.
 // refresh() swaps and does a partial hardware refresh.
 //
 // Scratch buffer loan: scratch_buf1()/scratch_buf2() expose both ~48KB buffers
-// for callers (e.g. EPUB→MRB conversion). Call reset_after_scratch() when done.
+// for callers (e.g. EPUBâ†’MRB conversion). Call reset_after_scratch() when done.
 class DrawBuffer {
  public:
   // Logical portrait dimensions.
@@ -124,7 +124,8 @@ class DrawBuffer {
     return display_;
   }
 
-  // ── Draw helpers (logical portrait coordinates) ─────────────────────────
+  // â”€â”€ Draw helpers (logical portrait coordinates)
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   // Fill the entire inactive buffer.
   void fill(bool white = true) {
@@ -133,7 +134,7 @@ class DrawBuffer {
 
   // Fill a logical rectangle.
   void fill_rect(int lx, int ly, int lw, int lh, bool white) {
-    // Deg90: logical (lx,ly,lw,lh) → physical (px=ly, py=PhysH-lx-lw, pw=lh, ph=lw)
+    // Deg90: logical (lx,ly,lw,lh) â†’ physical (px=ly, py=PhysH-lx-lw, pw=lh, ph=lw)
     fill_rect_physical_(full_target_(), ly, DisplayFrame::kPhysicalHeight - lx - lw, lh, lw, white);
   }
 
@@ -144,7 +145,7 @@ class DrawBuffer {
     x2 = std::min(x2, kWidth);
     if (x1 >= x2 || ly < 0 || ly >= kHeight)
       return;
-    // Deg90: logical row ly → physical col ly; logical cols [x1,x2) → physical rows [PhysH-x2, PhysH-x1)
+    // Deg90: logical row ly â†’ physical col ly; logical cols [x1,x2) â†’ physical rows [PhysH-x2, PhysH-x1)
     fill_col_physical_(full_target_(), ly, DisplayFrame::kPhysicalHeight - x2, DisplayFrame::kPhysicalHeight - x1,
                        white);
   }
@@ -243,8 +244,8 @@ class DrawBuffer {
   }
 
   // Draw text with the UI font, including background fill.
-  // white=true  → white background, black glyphs (normal unselected item).
-  // white=false → black background, white glyphs (highlighted selected item).
+  // white=true  â†’ white background, black glyphs (normal unselected item).
+  // white=false â†’ black background, white glyphs (highlighted selected item).
   // The scale parameter is accepted for API compatibility but ignored.
   void draw_text(int x, int y, const char* text, bool white, int /*scale*/ = 1) {
     if (!text || !*text)
@@ -332,7 +333,7 @@ class DrawBuffer {
         const int lx = gx + col;
         const bool bit_set = (row_data[col >> 3] >> (7 - (col & 7))) & 1;
         if (invert_select ? bit_set : !bit_set) {
-          // Ink pixel — compute absolute physical coords (Deg90: logical Y → physical X).
+          // Ink pixel â€” compute absolute physical coords (Deg90: logical Y â†’ physical X).
           const int px = ly;
           const int py = DisplayFrame::kPhysicalHeight - 1 - lx;
           if (px < t.phys_x0 || px >= t.phys_x0 + t.phys_w)
@@ -365,27 +366,27 @@ class DrawBuffer {
     return draw_text_proportional(x, baseline_y, text, text ? strlen(text) : 0, font, white, style);
   }
 
-  // Overload taking a BitmapFontSet + FontSize — resolves to the appropriate BitmapFont.
+  // Overload taking a BitmapFontSet + size_pct — resolves to the appropriate BitmapFont.
   int draw_text_proportional(int x, int baseline_y, const char* text, size_t len, const BitmapFontSet& fonts,
-                             bool white, FontStyle style = FontStyle::Regular, FontSize size = FontSize::Normal) {
-    const BitmapFont* f = fonts.get(size);
+                             bool white, FontStyle style = FontStyle::Regular, uint8_t size_pct = 100) {
+    const BitmapFont* f = fonts.get(size_pct);
     return f ? draw_text_proportional(x, baseline_y, text, len, *f, white, style) : x;
   }
 
   // Convenience overload for null-terminated strings with BitmapFontSet.
   int draw_text_proportional(int x, int baseline_y, const char* text, const BitmapFontSet& fonts, bool white,
-                             FontStyle style = FontStyle::Regular, FontSize size = FontSize::Normal) {
-    return draw_text_proportional(x, baseline_y, text, text ? strlen(text) : 0, fonts, white, style, size);
+                             FontStyle style = FontStyle::Regular, uint8_t size_pct = 100) {
+    return draw_text_proportional(x, baseline_y, text, text ? strlen(text) : 0, fonts, white, style, size_pct);
   }
 
-  // ── Plane-aware text rendering (for grayscale two-pass) ─────────────────
+  // â”€â”€ Plane-aware text rendering (for grayscale two-pass) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   // Render text from a specific grayscale plane into an explicit buffer.
   int draw_text_plane(uint8_t* buf, int x, int baseline_y, const char* text, size_t len, const BitmapFontSet& fonts,
-                      GrayPlane plane, bool white, FontStyle style = FontStyle::Regular,
-                      FontSize size = FontSize::Normal);
+                      GrayPlane plane, bool white, FontStyle style = FontStyle::Regular, uint8_t size_pct = 100);
 
-  // ── Grayscale display operations ─────────────────────────────────────
+  // â”€â”€ Grayscale display operations
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   // Write the inactive buffer to BW RAM only (no refresh).
   void write_ram_bw() {
@@ -429,9 +430,10 @@ class DrawBuffer {
     }
   }
 
-  // ── Display operations ──────────────────────────────────────────────────
+  // â”€â”€ Display operations
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-  // Swap active↔inactive, then do a partial hardware refresh.
+  // Swap activeâ†”inactive, then do a partial hardware refresh.
   void refresh() {
     display_.partial_refresh(inactive_(), active_());
     active_idx_ = 1 - active_idx_;
@@ -470,7 +472,7 @@ class DrawBuffer {
     display_.deep_sleep();
   }
 
-  // ── Scratch buffer loan (for EPUB conversion / image decode) ────────────
+  // â”€â”€ Scratch buffer loan (for EPUB conversion / image decode) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   // Loan the inactive buffer as scratch (will be overwritten before next refresh).
   uint8_t* scratch_buf1() {
@@ -491,21 +493,22 @@ class DrawBuffer {
     active_valid_ = false;
   }
 
-  // ── Loading box region update ────────────────────────────────────────────
+  // â”€â”€ Loading box region update
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   //
   // A small fixed region at the bottom-centre of the logical screen, used to
-  // show a "Converting…" indicator while both display buffers are in use as
+  // show a "Convertingâ€¦" indicator while both display buffers are in use as
   // scratch.  The region is byte-aligned in physical space so the extraction
   // can be done with plain memcpy (no bit-shifting).
   //
-  // Logical box: 256 × 40 px, centred horizontally, 4 px from the bottom.
+  // Logical box: 256 Ã— 40 px, centred horizontally, 4 px from the bottom.
   //   lx = (480 - 256) / 2 = 112,  ly = 788 - 40 - 4 = 744
   // Physical (Deg90 rotation):
   //   px = ly = 744  (byte-aligned: 744 / 8 = 93)
   //   py = PhysH - lx - lw = 480 - 112 - 256 = 112
-  //   pw = lh = 40   →  stride = 5 bytes
+  //   pw = lh = 40   â†’  stride = 5 bytes
   //   ph = lw = 256
-  // Mini-buffer size: 5 × 256 = 1280 bytes each (stack-allocated).
+  // Mini-buffer size: 5 Ã— 256 = 1280 bytes each (stack-allocated).
 
   static constexpr int kLoadLogW = 256;
   static constexpr int kLoadLogH = 32;
@@ -527,11 +530,11 @@ class DrawBuffer {
 
   // Draw a loading box (label + progress bar) and push it to the display
   // via a region-only hardware update.  The main draw buffers are NEVER
-  // touched — all rendering goes directly into the 1280-byte mini-buffer.
+  // touched â€” all rendering goes directly into the 1280-byte mini-buffer.
   // Both display buffers may be used as scratch before or after this call.
   //
-  //   text         — label shown inside the box (e.g. "Converting…")
-  //   progress_pct — 0-100; controls how much of the bar is filled
+  //   text         â€” label shown inside the box (e.g. "Convertingâ€¦")
+  //   progress_pct â€” 0-100; controls how much of the bar is filled
   void show_loading(const char* text, int progress_pct) {
     static_assert((kLoadPhysX + 12) % 8 == 0, "kLoadPhysX + panel offset must be byte-aligned");
     if (display_.is_busy())
@@ -671,21 +674,21 @@ class DrawBuffer {
       draw_text_to_(t, text_lx, baseline_ly, text, font, /*white=*/false);
     }
 
-    // Outline: 160×7, rounded corners (corner pixels stay white).
+    // Outline: 160Ã—7, rounded corners (corner pixels stay white).
     fill(kBarX + 1, kBarY, kBarW - 2, 1);              // top edge
     fill(kBarX + 1, kBarY + kBarH - 1, kBarW - 2, 1);  // bottom edge
     fill(kBarX, kBarY + 1, 1, kBarH - 2);              // left edge
     fill(kBarX + kBarW - 1, kBarY + 1, 1, kBarH - 2);  // right edge
 
-    // Inner bar: 3 rows (kBarH=7 → border(0), pad(1), bar(2,3,4), pad(5), border(6)).
+    // Inner bar: 3 rows (kBarH=7 â†’ border(0), pad(1), bar(2,3,4), pad(5), border(6)).
     // Sloped right side: bottom row widest, each row above is 1px shorter.
     const int max_fill = kBarW - 4;  // usable width inside border
     const int filled = (progress_pct * max_fill) / 100;
     const int max_w = kBarW - 4;
     if (filled > 0) {
-      fill(kBarX + 2, kBarY + 4, std::min(filled + 2, max_w), 1);  // bottom row — widest
+      fill(kBarX + 2, kBarY + 4, std::min(filled + 2, max_w), 1);  // bottom row â€” widest
       fill(kBarX + 2, kBarY + 3, std::min(filled + 1, max_w), 1);  // middle row
-      fill(kBarX + 2, kBarY + 2, std::min(filled, max_w), 1);      // top row — narrowest
+      fill(kBarX + 2, kBarY + 2, std::min(filled, max_w), 1);      // top row â€” narrowest
     }
   }
 };
@@ -735,8 +738,8 @@ inline int DrawBuffer::draw_text_proportional(int x, int baseline_y, const char*
 
 inline int DrawBuffer::draw_text_plane(uint8_t* buf, int x, int baseline_y, const char* text, size_t len,
                                        const BitmapFontSet& fonts, GrayPlane plane, bool white, FontStyle style,
-                                       FontSize size) {
-  const BitmapFont* f = fonts.get(size);
+                                       uint8_t size_pct) {
+  const BitmapFont* f = fonts.get(size_pct);
   if (!text || len == 0 || !f || !f->valid())
     return x;
   const char* p = text;

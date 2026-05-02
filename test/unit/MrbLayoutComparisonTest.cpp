@@ -30,7 +30,7 @@ static void assert_words_equal(const LayoutWord& a, const LayoutWord& b, const s
   EXPECT_EQ(a_text, b_text) << ctx << " text";
   EXPECT_EQ(a.x, b.x) << ctx << " x (text='" << a_text << "')";
   EXPECT_EQ(a.style, b.style) << ctx << " style";
-  EXPECT_EQ(a.size, b.size) << ctx << " size";
+  EXPECT_EQ(a.size_pct, b.size_pct) << ctx << " size";
   EXPECT_EQ(a.vertical_align, b.vertical_align) << ctx << " vertical_align";
   EXPECT_EQ(a.continues_prev, b.continues_prev) << ctx << " continues_prev";
 }

@@ -31,7 +31,7 @@ static inline std::vector<uint8_t> load_mbf(const std::string& suffix) {
 }
 
 // Load all 5 font sizes into the provided BitmapFontSet.
-// `prop_fonts` and `font_data` must be pre-sized to kFontSizeCount;
+// `prop_fonts` and `font_data` must be pre-sized to kMaxFonts;
 // caller owns those vectors and must keep them alive as long as font_set is used.
 // Returns true if every size was loaded and initialised successfully.
 static inline bool load_desktop_fonts(microreader::BitmapFontSet& font_set,
@@ -41,26 +41,26 @@ static inline bool load_desktop_fonts(microreader::BitmapFontSet& font_set,
     microreader::FontSize size;
     const char* suffix;
   } kSizes[] = {
-      {microreader::FontSize::Small,   "small"  },
-      {microreader::FontSize::Normal,  "normal" },
-      {microreader::FontSize::Large,   "large"  },
-      {microreader::FontSize::XLarge,  "xlarge" },
-      {microreader::FontSize::XXLarge, "xxlarge"},
+      {microreader::80,  "small"  },
+      {microreader::100, "normal" },
+      {microreader::120, "large"  },
+      {microreader::140, "xlarge" },
+      {microreader::160, "xxlarge"},
   };
 
   font_data.clear();
-  font_data.resize(microreader::kFontSizeCount);
+  font_data.resize(microreader::kMaxFonts);
   prop_fonts.clear();
-  prop_fonts.resize(microreader::kFontSizeCount);
+  prop_fonts.resize(microreader::kMaxFonts);
 
-  for (size_t i = 0; i < microreader::kFontSizeCount; ++i) {
+  for (size_t i = 0; i < microreader::kMaxFonts; ++i) {
     font_data[i] = load_mbf(kSizes[i].suffix);
     if (font_data[i].empty())
       return false;
     prop_fonts[i].init(font_data[i].data(), font_data[i].size());
     if (!prop_fonts[i].valid())
       return false;
-    font_set.set(kSizes[i].size, &prop_fonts[i]);
+    font_set.add(&prop_fonts[i]);
   }
 
   return font_set.valid();

@@ -9,9 +9,11 @@ constexpr uint16_t ReaderSettings::kHPaddingPresets[];
 constexpr uint16_t ReaderSettings::kVPaddingPresets[];
 constexpr int16_t ReaderSettings::kSpacingPresets[];
 constexpr uint8_t ReaderSettings::kNumSpacingPresets;
+constexpr uint8_t ReaderSettings::kNumFontSizePresets;
 constexpr const char* ReaderSettings::kHPaddingNames[];
 constexpr const char* ReaderSettings::kVPaddingNames[];
 constexpr const char* ReaderSettings::kSpacingNames[];
+constexpr const char* ReaderSettings::kFontSizeNames[];
 
 // ---------------------------------------------------------------------------
 
@@ -49,6 +51,28 @@ void ReaderOptionsScreen::on_start() {
     idx_justify_ = count();
     add_item(fmt_setting(tmp, sizeof(tmp), "Justify", settings_->justify ? "On" : "Off"));
 
+    idx_font_size_ = count();
+    if (app_ && app_->font_manager() && app_->font_manager()->valid()) {
+      auto* fonts = app_->font_manager()->font_set();
+      int sz = 0;
+      if (fonts && settings_->font_size_idx < fonts->num_fonts()) {
+        auto* f = fonts->get_font(settings_->font_size_idx);
+        if (f) {
+          sz = f->nominal_size();
+          if (sz == 0)
+            sz = f->y_advance();
+        }
+      }
+      char val[16];
+      if (sz > 0)
+        snprintf(val, sizeof(val), "%d", sz);
+      else
+        snprintf(val, sizeof(val), "Unknown");
+      add_item(fmt_setting(tmp, sizeof(tmp), "Size", val));
+    } else {
+      add_item(fmt_setting(tmp, sizeof(tmp), "Size", ReaderSettings::kFontSizeNames[settings_->font_size_idx]));
+    }
+
     idx_padding_h_ = count();
     add_item(fmt_setting(tmp, sizeof(tmp), "H-Margin", ReaderSettings::kHPaddingNames[settings_->padding_h_idx]));
 
@@ -82,6 +106,17 @@ bool ReaderOptionsScreen::on_select(int index) {
 
   if (index == idx_justify_) {
     settings_->justify = !settings_->justify;
+    refresh_items_(index);
+    return true;
+  }
+  if (index == idx_font_size_) {
+    uint8_t max_idx = ReaderSettings::kNumFontSizePresets;
+    if (app_ && app_->font_manager() && app_->font_manager()->valid()) {
+      auto* fonts = app_->font_manager()->font_set();
+      if (fonts && fonts->num_fonts() > 0)
+        max_idx = static_cast<uint8_t>(fonts->num_fonts());
+    }
+    settings_->font_size_idx = static_cast<uint8_t>((settings_->font_size_idx + 1) % max_idx);
     refresh_items_(index);
     return true;
   }

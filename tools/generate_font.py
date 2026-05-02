@@ -336,7 +336,7 @@ def build_mbf(face, size, codepoint_ranges, bw_only=False):
             0,  # style_flags
             num_ranges,
             num_glyphs,
-            0,  # reserved2
+            size,  # nominal_size
             bitmap_data_offset,
             0,  # bold_offset
             0,  # italic_offset
@@ -469,7 +469,7 @@ def build_multi_style_mbf(faces, size, codepoint_ranges, bw_only=False):
             style_flags,
             len(reg_ranges),
             len(reg_glyphs),
-            0,  # reserved2
+            size,  # nominal_size
             bitmap_data_offset,
             style_offsets.get("bold", 0),
             style_offsets.get("italic", 0),

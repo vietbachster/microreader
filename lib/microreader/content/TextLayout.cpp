@@ -193,7 +193,7 @@ static std::vector<LayoutLine> layout_para_lines(const IFont& font, const Layout
     if (current.words.empty()) {
       size_t i = 0, wl;
       while (i < text_len && (wl = ws_len(text, text_len, i)) > 0) {
-        x += font.char_width(' ', run.style, run.size);
+        x += font.char_width(' ', run.style, run.size_pct);
         i += wl;
       }
     }
@@ -211,13 +211,13 @@ static std::vector<LayoutLine> layout_para_lines(const IFont& font, const Layout
       // Loop handles multi-line hyphenation: each iteration places a chunk or
       // emits a hyphenated prefix and continues with the remaining suffix.
       while (true) {
-        uint16_t word_w = font.word_width(word_ptr, word_len, run.style, run.size);
+        uint16_t word_w = font.word_width(word_ptr, word_len, run.style, run.size_pct);
         uint16_t needed = word_w + (needs_space ? space_width : 0);
         if (x + needed <= line_width) {
           // Fits normally.
           if (needs_space)
             x += space_width;
-          current.words.push_back(LayoutWord{word_ptr, word_len, x, run.style, run.size, run.vertical_align,
+          current.words.push_back(LayoutWord{word_ptr, word_len, x, run.style, run.size_pct, run.vertical_align,
                                              !needs_space && !current.words.empty()});
           x += word_w;
           break;
@@ -227,19 +227,19 @@ static std::vector<LayoutLine> layout_para_lines(const IFont& font, const Layout
             line_width > x + (needs_space ? space_width : 0) ? line_width - x - (needs_space ? space_width : 0) : 0;
         bool prefix_has_hyphen = false;
         size_t split =
-            find_hyphen_break(font, word_ptr, word_len, run.style, run.size, hyph_lang, avail, prefix_has_hyphen);
+            find_hyphen_break(font, word_ptr, word_len, run.style, run.size_pct, hyph_lang, avail, prefix_has_hyphen);
         if (split > 0) {
           // Emit prefix + hyphen, flush, then loop with the suffix.
-          const uint16_t prefix_w = font.word_width(word_ptr, static_cast<uint16_t>(split), run.style, run.size);
+          const uint16_t prefix_w = font.word_width(word_ptr, static_cast<uint16_t>(split), run.style, run.size_pct);
           // Don't add a synthetic hyphen if the prefix already ends with one.
-          const uint16_t hyphen_w = prefix_has_hyphen ? 0 : font.char_width('-', run.style, run.size);
+          const uint16_t hyphen_w = prefix_has_hyphen ? 0 : font.char_width('-', run.style, run.size_pct);
           if (needs_space)
             x += space_width;
           current.words.push_back(
-              LayoutWord{word_ptr, static_cast<uint16_t>(split), x, run.style, run.size, run.vertical_align, false});
+              LayoutWord{word_ptr, static_cast<uint16_t>(split), x, run.style, run.size_pct, run.vertical_align, false});
           x += prefix_w;
           if (!prefix_has_hyphen) {
-            current.words.push_back(LayoutWord{"-", 1, x, run.style, run.size, run.vertical_align, true});
+            current.words.push_back(LayoutWord{"-", 1, x, run.style, run.size_pct, run.vertical_align, true});
             x += hyphen_w;
           }
           current.hyphenated = true;
@@ -255,7 +255,7 @@ static std::vector<LayoutLine> layout_para_lines(const IFont& font, const Layout
         }
         if (current.words.empty()) {
           // No hyphenation and line is empty — force placement to avoid infinite loop.
-          current.words.push_back(LayoutWord{word_ptr, word_len, x, run.style, run.size, run.vertical_align, false});
+          current.words.push_back(LayoutWord{word_ptr, word_len, x, run.style, run.size_pct, run.vertical_align, false});
           x += word_w;
           break;
         }
@@ -329,7 +329,7 @@ static void scale_image(const PageOptions& opts, uint16_t content_width, uint16_
 static uint16_t compute_line_height(const IFont& font, const LayoutLine& line, uint16_t pct) {
   uint16_t h = font.y_advance();
   for (const auto& w : line.words) {
-    uint16_t wh = font.y_advance(w.size);
+    uint16_t wh = font.y_advance(w.size_pct);
     if (wh > h)
       h = wh;
   }
@@ -344,7 +344,7 @@ static uint16_t compute_line_height(const IFont& font, const LayoutLine& line, u
 static uint16_t line_baseline(const IFont& font, const LayoutLine& line) {
   uint16_t bl = font.baseline();
   for (const auto& w : line.words) {
-    uint16_t b = font.baseline(w.size);
+    uint16_t b = font.baseline(w.size_pct);
     if (b > bl)
       bl = b;
   }

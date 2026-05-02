@@ -24,7 +24,7 @@ struct CssRule {
   std::optional<bool> italic;
   std::optional<bool> bold;
   std::optional<int16_t> indent;
-  std::optional<FontSize> font_size;
+  std::optional<uint8_t> font_size_pct;
   std::optional<uint16_t> margin_left;
   std::optional<uint16_t> margin_right;
   std::optional<uint16_t> margin_top;
@@ -42,7 +42,7 @@ struct CssRule {
 
   bool has_any() const {
     return alignment.has_value() || italic.has_value() || bold.has_value() || indent.has_value() ||
-           font_size.has_value() || margin_left.has_value() || margin_right.has_value() || margin_top.has_value() ||
+           font_size_pct.has_value() || margin_left.has_value() || margin_right.has_value() || margin_top.has_value() ||
            margin_bottom.has_value() || is_float.has_value() || is_hidden.has_value() ||
            page_break_before.has_value() || page_break_after.has_value() || text_transform.has_value() ||
            vertical_align.has_value() || line_height_pct.has_value() || list_style_none.has_value() ||

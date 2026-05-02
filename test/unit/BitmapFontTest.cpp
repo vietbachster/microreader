@@ -46,11 +46,11 @@ static constexpr struct {
   microreader::FontSize size;
   const char* suffix;
 } kRealSizes[] = {
-    {microreader::FontSize::Small,   "small"  },
-    {microreader::FontSize::Normal,  "normal" },
-    {microreader::FontSize::Large,   "large"  },
-    {microreader::FontSize::XLarge,  "xlarge" },
-    {microreader::FontSize::XXLarge, "xxlarge"},
+    {microreader::80,  "small"  },
+    {microreader::100, "normal" },
+    {microreader::120, "large"  },
+    {microreader::140, "xlarge" },
+    {microreader::160, "xxlarge"},
 };
 
 // Each generated .mbf file must be valid and have sensible header metrics.
@@ -69,16 +69,16 @@ TEST(BitmapFontRealFileTest, AllSizesLoadAndAreValid) {
 
 // Larger pixel-size files should have greater or equal y_advance than smaller ones.
 TEST(BitmapFontRealFileTest, MetricsScaleWithSize) {
-  std::vector<std::vector<uint8_t>> data(microreader::kFontSizeCount);
-  std::vector<microreader::BitmapFont> fonts(microreader::kFontSizeCount);
-  for (size_t i = 0; i < microreader::kFontSizeCount; ++i) {
+  std::vector<std::vector<uint8_t>> data(microreader::kMaxFonts);
+  std::vector<microreader::BitmapFont> fonts(microreader::kMaxFonts);
+  for (size_t i = 0; i < microreader::kMaxFonts; ++i) {
     data[i] = load_mbf(kRealSizes[i].suffix);
     ASSERT_FALSE(data[i].empty()) << kRealSizes[i].suffix;
     fonts[i].init(data[i].data(), data[i].size());
     ASSERT_TRUE(fonts[i].valid()) << kRealSizes[i].suffix;
   }
   // Small ≤ Normal ≤ Large ≤ XLarge ≤ XXLarge
-  for (size_t i = 1; i < microreader::kFontSizeCount; ++i) {
+  for (size_t i = 1; i < microreader::kMaxFonts; ++i) {
     EXPECT_LE(fonts[i - 1].y_advance(), fonts[i].y_advance())
         << kRealSizes[i - 1].suffix << " should not be taller than " << kRealSizes[i].suffix;
   }
@@ -135,16 +135,16 @@ TEST(BitmapFontRealFileTest, GrayscalePlanesPresent) {
 
 // BitmapFontSet loaded with all 5 sizes must be valid and dispatch correctly.
 TEST(BitmapFontRealFileTest, BitmapFontSetLoadsAllSizes) {
-  std::vector<std::vector<uint8_t>> data(microreader::kFontSizeCount);
-  std::vector<microreader::BitmapFont> fonts(microreader::kFontSizeCount);
+  std::vector<std::vector<uint8_t>> data(microreader::kMaxFonts);
+  std::vector<microreader::BitmapFont> fonts(microreader::kMaxFonts);
   microreader::BitmapFontSet font_set;
 
-  for (size_t i = 0; i < microreader::kFontSizeCount; ++i) {
+  for (size_t i = 0; i < microreader::kMaxFonts; ++i) {
     data[i] = load_mbf(kRealSizes[i].suffix);
     ASSERT_FALSE(data[i].empty()) << kRealSizes[i].suffix;
     fonts[i].init(data[i].data(), data[i].size());
     ASSERT_TRUE(fonts[i].valid()) << kRealSizes[i].suffix;
-    font_set.set(kRealSizes[i].size, &fonts[i]);
+    font_set.add(&fonts[i]);
   }
 
   EXPECT_TRUE(font_set.valid());
