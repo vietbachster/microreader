@@ -23,7 +23,10 @@ void ListMenuScreen::start(DrawBuffer& buf) {
   // (e.g. returning from a sub-screen after navigating away).
   if (!on_start_set_selection_ && prev_selected > 0 && prev_selected < count())
     selected_ = prev_selected;
-  ensure_visible_();
+  if (on_start_set_selection_)
+    center_on_selected_();
+  else
+    ensure_visible_();
   draw_all_(buf);
 }
 
@@ -39,6 +42,33 @@ void ListMenuScreen::ensure_visible_() {
     scroll_offset_ = selected_;
   else if (selected_ >= scroll_offset_ + visible)
     scroll_offset_ = selected_ - visible + 1;
+
+  // Scroll padding: keep at least 2 items visible above/below the selection.
+  static constexpr int kPad = 2;
+  if (selected_ - scroll_offset_ < kPad && scroll_offset_ > 0)
+    scroll_offset_ = std::max(0, selected_ - kPad);
+  else if (selected_ - scroll_offset_ > visible - 1 - kPad) {
+    const int max_scroll = count() > visible ? count() - visible : 0;
+    scroll_offset_ = std::min(max_scroll, selected_ - (visible - 1 - kPad));
+  }
+}
+
+void ListMenuScreen::center_on_selected_() {
+  if (!ui_font_.valid() || count() == 0)
+    return;
+  const int line_h = ui_font_.y_advance() + 8;
+  const int header_h = kHeaderY + (header_font_.valid() ? header_font_.y_advance() : 0) + 8;
+  const int visible = (DrawBuffer::kHeight - header_h - kButtonHintsH) / line_h;
+  if (visible <= 0)
+    return;
+  // Center the selection: put it in the middle of the visible window.
+  int offset = selected_ - visible / 2;
+  const int max_scroll = count() > visible ? count() - visible : 0;
+  if (offset < 0)
+    offset = 0;
+  if (offset > max_scroll)
+    offset = max_scroll;
+  scroll_offset_ = offset;
 }
 
 void ListMenuScreen::draw_all_(DrawBuffer& buf) const {
