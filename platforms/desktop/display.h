@@ -16,6 +16,7 @@ class DesktopEmulatorDisplay final : public microreader::IDisplay {
   static constexpr int kPixels = microreader::DisplayFrame::kPhysicalWidth * microreader::DisplayFrame::kPhysicalHeight;
 
   static constexpr uint32_t kRefreshDelayMs = 400;
+  static constexpr uint32_t kRefreshDelayRegionMs = 10;  // used for the loading bar
 
   explicit DesktopEmulatorDisplay(DesktopRuntime& rt) : rt_(rt), sim_(kPixels, 1.0f) {}
 
@@ -133,7 +134,7 @@ class DesktopEmulatorDisplay final : public microreader::IDisplay {
       }
     }
     render_();
-    SDL_Delay(kRefreshDelayMs);
+    SDL_Delay(kRefreshDelayRegionMs);
   }
 
  private:

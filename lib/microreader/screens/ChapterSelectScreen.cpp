@@ -11,6 +11,7 @@ void ChapterSelectScreen::populate(const TableOfContents& toc, uint16_t current_
     e.label = entry.label;
     e.chapter_idx = entry.file_idx;
     e.para_index = entry.para_index;
+    e.depth = entry.depth;
     // Select the last TOC entry at or before the current reading position.
     // For earlier chapters any entry qualifies; for the current chapter
     // also compare para_index.
@@ -22,9 +23,10 @@ void ChapterSelectScreen::populate(const TableOfContents& toc, uint16_t current_
 }
 
 void ChapterSelectScreen::on_start() {
+  set_alignment_left(true);
   title_ = !entries_.empty() ? "Chapters" : "No chapters";
   for (auto& e : entries_)
-    add_item(e.label.c_str());
+    add_item(e.label.c_str(), e.depth);
   set_selected(initial_selected_);
 }
 

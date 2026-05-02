@@ -137,7 +137,6 @@ void ListMenuScreen::draw_all_(DrawBuffer& buf, std::optional<uint8_t> battery_p
   const int items_y = n <= visible ? header_h + (H - header_h - total_h) / 2 : header_h;
 
   static const char kEllipsis[] = "...";
-  const int kMaxItemW = W - 120;
   const int ellipsis_w = ui_font_.word_width(kEllipsis, 3, FontStyle::Regular);
   char trunc_buf[260];
 
@@ -153,9 +152,12 @@ void ListMenuScreen::draw_all_(DrawBuffer& buf, std::optional<uint8_t> battery_p
     size_t len = label_str.size();
     int iw = ui_font_.word_width(label, len, FontStyle::Regular);
 
+    const int indent_px = align_left_ ? (32 + ((i < (int)indents_.size() ? indents_[i] : 0) * 20)) : 0;
+    const int max_item_w = align_left_ ? (W - 32 - indent_px) : (W - 120);
+
     // Truncate with "..." if the label is too wide to fit.
-    if (iw > kMaxItemW) {
-      const int budget = kMaxItemW - ellipsis_w;
+    if (iw > max_item_w) {
+      const int budget = max_item_w - ellipsis_w;
       size_t fit = 0;
       const char* p = label;
       while (*p) {
@@ -175,16 +177,26 @@ void ListMenuScreen::draw_all_(DrawBuffer& buf, std::optional<uint8_t> battery_p
       iw = ui_font_.word_width(label, len, FontStyle::Regular);
     }
 
-    const int ix = (W - iw) / 2;
+    const int ix = align_left_ ? indent_px : (W - iw) / 2;
     const int iy = y;
     if (i == selected_) {
       const int bar_w = 3;  // horizontal padding on each side (rounded cap adds 1 more)
       const int bar_h = ui_font_.y_advance() + 1;
-      buf.fill_rect(ix - bar_w - 1, iy, 1, bar_h - 2, false);
-      buf.fill_rect(ix - bar_w, iy - 1, iw + bar_w * 2, bar_h, false);
-      buf.fill_rect(ix + iw + bar_w, iy, 1, bar_h - 2, false);
 
-      buf.draw_text_proportional(ix, iy + baseline, label, len, ui_font_, true);
+      if (align_left_) {
+        // Full width bar for left-aligned
+        const int bar_x = 16;
+        const int bar_width = W - 32;
+        buf.fill_rect(bar_x + 1, iy - 1, bar_width - 2, bar_h, false);  // Body
+        buf.fill_rect(bar_x, iy, 1, bar_h - 2, false);                  // Left cap
+        buf.fill_rect(bar_x + bar_width - 1, iy, 1, bar_h - 2, false);  // Right cap
+        buf.draw_text_proportional(ix, iy + baseline, label, len, ui_font_, true);
+      } else {
+        buf.fill_rect(ix - bar_w - 1, iy, 1, bar_h - 2, false);
+        buf.fill_rect(ix - bar_w, iy - 1, iw + bar_w * 2, bar_h, false);
+        buf.fill_rect(ix + iw + bar_w, iy, 1, bar_h - 2, false);
+        buf.draw_text_proportional(ix, iy + baseline, label, len, ui_font_, true);
+      }
     } else {
       buf.draw_text_proportional(ix, iy + baseline, label, len, ui_font_, false);
     }
@@ -193,16 +205,21 @@ void ListMenuScreen::draw_all_(DrawBuffer& buf, std::optional<uint8_t> battery_p
 
   // Scrollbar on the right edge when items overflow
   if (n > visible) {
-    const int sb_x = W - 8;
-    const int sb_w = 3;
+    const int sb_x = W - 12;
+    const int sb_w = 4;
     const int sb_top = items_y - 1;
-    const int sb_bottom = items_y + total_h - 1;
+    const int last_item_bottom = items_y + total_h - line_h + ui_font_.y_advance();
+    const int sb_bottom = last_item_bottom;
     const int sb_total_h = sb_bottom - sb_top;
     const int thumb_h = sb_total_h * visible / n < 6 ? 6 : sb_total_h * visible / n;
     const int track = sb_total_h - thumb_h;
     const int max_scroll = n - visible;
     const int thumb_y = sb_top + (max_scroll > 0 ? track * scroll_offset_ / max_scroll : 0);
-    buf.fill_rect(sb_x, thumb_y, sb_w, thumb_h, false);
+
+    // Draw rounded scrollbar thumb (width 4)
+    buf.fill_rect(sb_x + 1, thumb_y, sb_w - 2, 1, false);                // Top cap
+    buf.fill_rect(sb_x, thumb_y + 1, sb_w, thumb_h - 2, false);          // Body
+    buf.fill_rect(sb_x + 1, thumb_y + thumb_h - 1, sb_w - 2, 1, false);  // Bottom cap
   }
 
   draw_button_hints_(buf);

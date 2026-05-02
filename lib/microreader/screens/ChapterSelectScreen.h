@@ -53,6 +53,7 @@ class ChapterSelectScreen final : public ListMenuScreen {
     std::string label;
     uint16_t chapter_idx;
     uint16_t para_index;
+    uint8_t depth;
   };
   std::vector<Entry> entries_;
   int initial_selected_ = 0;

@@ -27,18 +27,25 @@ class ListMenuScreen : public IScreen {
  protected:
   const char* title_ = nullptr;
 
-  void add_item(const std::string& label) {
+  void set_alignment_left(bool left) {
+    align_left_ = left;
+  }
+
+  void add_item(const std::string& label, int indent = 0) {
     labels_.push_back(label);
     separators_.push_back(false);
+    indents_.push_back(indent);
   }
   // Insert a visual separator (thin horizontal line, non-selectable).
   void add_separator() {
     labels_.push_back("");
     separators_.push_back(true);
+    indents_.push_back(0);
   }
   void clear_items() {
     labels_.clear();
     separators_.clear();
+    indents_.clear();
     selected_ = 0;
     scroll_offset_ = 0;
   }
@@ -69,6 +76,8 @@ class ListMenuScreen : public IScreen {
  private:
   std::vector<std::string> labels_;
   std::vector<bool> separators_;
+  std::vector<int> indents_;
+  bool align_left_ = false;
   int selected_ = 0;
   int scroll_offset_ = 0;
   bool on_start_set_selection_ = false;
