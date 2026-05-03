@@ -37,24 +37,13 @@ static inline std::vector<uint8_t> load_mbf(const std::string& suffix) {
 static inline bool load_desktop_fonts(microreader::BitmapFontSet& font_set,
                                       std::vector<microreader::BitmapFont>& prop_fonts,
                                       std::vector<std::vector<uint8_t>>& font_data) {
-  static constexpr struct {
-    microreader::FontSize size;
-    const char* suffix;
-  } kSizes[] = {
-      {microreader::80,  "small"  },
-      {microreader::100, "normal" },
-      {microreader::120, "large"  },
-      {microreader::140, "xlarge" },
-      {microreader::160, "xxlarge"},
-  };
-
   font_data.clear();
   font_data.resize(microreader::kMaxFonts);
   prop_fonts.clear();
   prop_fonts.resize(microreader::kMaxFonts);
 
   for (size_t i = 0; i < microreader::kMaxFonts; ++i) {
-    font_data[i] = load_mbf(kSizes[i].suffix);
+    font_data[i] = load_mbf(std::to_string(i));
     if (font_data[i].empty())
       return false;
     prop_fonts[i].init(font_data[i].data(), font_data[i].size());

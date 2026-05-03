@@ -54,27 +54,14 @@ int main() {
     microreader::FontManager font_mgr;
     std::vector<uint8_t> font_data[5];
 
-    struct SizeInfo {
-      int idx;
-      const char* label;
-      const char* suffix;
-    };
-    static constexpr SizeInfo kSizes[] = {
-        {0, "Small",   "small"  },
-        {1, "Normal",  "normal" },
-        {2, "Large",   "large"  },
-        {3, "XLarge",  "xlarge" },
-        {4, "XXLarge", "xxlarge"},
-    };
-
     static std::string fonts_dir = std::filesystem::absolute("resources/fonts").string();
-    for (const auto& si : kSizes) {
-      std::string path = fonts_dir + "/font-" + si.suffix + ".mbf";
-      font_data[si.idx] = load_file(path.c_str());
-      if (!font_data[si.idx].empty()) {
-        font_mgr.load_font(font_data[si.idx].data(), font_data[si.idx].size());
+    for (int i = 0; i < 5; i++) {
+      std::string path = fonts_dir + "/font-" + std::to_string(i) + ".mbf";
+      font_data[i] = load_file(path.c_str());
+      if (!font_data[i].empty()) {
+        font_mgr.load_font(font_data[i].data(), font_data[i].size());
         if (font_mgr.valid())
-          printf("[font] %s: %s (%zu bytes)\n", si.label, path.c_str(), font_data[si.idx].size());
+          printf("[font] Size index %d: %s (%zu bytes)\n", i, path.c_str(), font_data[i].size());
         else
           printf("[font] Invalid font file: %s\n", path.c_str());
       }

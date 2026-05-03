@@ -778,24 +778,12 @@ def _generate_bundle(faces, args, codepoint_ranges, multi_style):
     out_dir = os.path.dirname(os.path.abspath(args.output)) or "."
     os.makedirs(out_dir, exist_ok=True)
 
-    # Names for the font sizes (indexed by position in the list)
-    size_names = [
-        "Small",
-        "Normal",
-        "Large",
-        "XLarge",
-        "XXLarge",
-        "Size5",
-        "Size6",
-        "Size7",
-        "Size8",
-        "Size9",
-    ]
-    sizes = list(zip(size_names, args.bundle_sizes))
+    sizes = list(enumerate(args.bundle_sizes))
 
     mbf_files = []  # (label, px_size, mbf_bytes, stats)
 
-    for label, px_size in sizes:
+    for idx, px_size in sizes:
+        label = f"Size{idx}"
         print(f"\n{'='*40}")
         print(f"  {label} ({px_size}px)")
         print(f"{'='*40}")
@@ -810,7 +798,7 @@ def _generate_bundle(faces, args, codepoint_ranges, multi_style):
                 face, px_size, codepoint_ranges, bw_only=args.bw_only
             )
 
-        out_path = os.path.join(out_dir, f"font-{label.lower()}.mbf")
+        out_path = os.path.join(out_dir, f"font-{idx}.mbf")
         with open(out_path, "wb") as f:
             f.write(data)
 

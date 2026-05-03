@@ -46,11 +46,11 @@ static constexpr struct {
   microreader::FontSize size;
   const char* suffix;
 } kRealSizes[] = {
-    {microreader::80,  "small"  },
-    {microreader::100, "normal" },
-    {microreader::120, "large"  },
-    {microreader::140, "xlarge" },
-    {microreader::160, "xxlarge"},
+    {microreader::80,  "0" },
+    {microreader::100, "1" },
+    {microreader::120, "2" },
+    {microreader::140, "3" },
+    {microreader::160, "4" },
 };
 
 // Each generated .mbf file must be valid and have sensible header metrics.
