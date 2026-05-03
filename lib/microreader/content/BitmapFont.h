@@ -357,15 +357,15 @@ class BitmapFontSet : public IFont {
     if (size_pct == 100)
       return base_font;
 
-    // Find font with closest matching y_advance
-    int target_height = (static_cast<int>(base_font->y_advance()) * size_pct) / 100;
+    // Find font with closest matching nominal_size (using x100 scaled math to avoid rounding loss)
+    int target_height_x100 = static_cast<int>(base_font->nominal_size()) * size_pct;
 
     const BitmapFont* best_font = base_font;
     int min_diff = 999999;
 
     for (int i = 0; i < num_fonts_; ++i) {
-      int h = fonts_[i]->y_advance();
-      int diff = target_height - h;
+      int h_x100 = fonts_[i]->nominal_size() * 100;
+      int diff = target_height_x100 - h_x100;
       if (diff < 0)
         diff = -diff;
       if (diff < min_diff) {

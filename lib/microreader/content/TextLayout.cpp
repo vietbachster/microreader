@@ -342,12 +342,14 @@ static void scale_image(const PageOptions& opts, uint16_t content_width, uint16_
 }
 
 static uint16_t compute_line_height(const IFont& font, const LayoutLine& line, uint16_t pct) {
-  uint16_t h = font.y_advance();
+  uint16_t h = 0;
   for (const auto& w : line.words) {
     uint16_t wh = font.y_advance(w.size_pct);
     if (wh > h)
       h = wh;
   }
+  if (h == 0)
+    h = font.y_advance();
   if (pct != 100) {
     h = static_cast<uint16_t>(h * pct / 100);
     if (h < 1)
