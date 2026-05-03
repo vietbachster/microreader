@@ -17,25 +17,45 @@ enum class ProgressStyle : uint8_t {
   Bar = 2,
 };
 
+enum class AlignOverride : uint8_t {
+  Book = 0,
+  Left,
+  Center,
+  Right,
+  Justify,
+};
+
+enum class SpacingOverride : uint8_t {
+  Book = 0,
+  Spacing_0_8x,
+  Spacing_0_9x,
+  Spacing_1_0x,
+  Spacing_1_1x,
+  Spacing_1_2x,
+};
+
 struct ReaderSettings {
-  bool justify = false;                               // false = left-align (default); true = justify
+  AlignOverride align_override = AlignOverride::Book;
+  SpacingOverride spacing_override = SpacingOverride::Spacing_1_0x;
   uint8_t padding_h_idx = 1;                          // horizontal padding preset index (left & right)
   uint8_t padding_v_idx = 1;                          // vertical top padding preset index
-  uint8_t line_spacing_idx = 2;                       // paragraph spacing preset index (2 = Normal)
   uint8_t font_size_idx = 1;                          // base font size preset index (1 = Normal/24px)
   ProgressStyle progress_style = ProgressStyle::Bar;  // reading progress indicator style
 
   static constexpr uint16_t kHPaddingPresets[] = {4, 12, 24, 40};
   static constexpr uint16_t kVPaddingPresets[] = {0, 4, 8, 12};
-  // Extra pixels added to every line's height. 0 = Normal (font default).
-  // Negative values tighten lines; positive values open them up.
-  static constexpr int16_t kSpacingPresets[] = {-8, -4, 0, 4, 8};
+
+  static constexpr uint16_t kSpacingPercents[] = {0, 80, 90, 100, 110, 120};  // Index matches SpacingOverride
+
   static constexpr const char* kHPaddingNames[] = {"Narrow", "Normal", "Wide", "Wider"};
   static constexpr const char* kVPaddingNames[] = {"Tight", "Normal", "Loose", "Looser"};
-  static constexpr const char* kSpacingNames[] = {"Tighter", "Tight", "Normal", "Loose", "Looser"};
+  static constexpr const char* kAlignNames[] = {"Book", "Left", "Center", "Right", "Justify"};
+  static constexpr const char* kSpacingNames[] = {"Book", "0.8x", "0.9x", "1.0x", "1.1x", "1.2x"};
   static constexpr const char* kFontSizeNames[] = {"20", "24", "28", "32"};
+
   static constexpr uint8_t kNumPresets = 4;
-  static constexpr uint8_t kNumSpacingPresets = 5;
+  static constexpr uint8_t kNumAlignPresets = 5;
+  static constexpr uint8_t kNumSpacingPresets = 6;
   static constexpr uint8_t kNumFontSizePresets = 4;
 
   uint16_t h_padding() const {
@@ -44,8 +64,8 @@ struct ReaderSettings {
   uint16_t v_padding() const {
     return kVPaddingPresets[padding_v_idx];
   }
-  int16_t extra_line_spacing() const {
-    return kSpacingPresets[line_spacing_idx];
+  uint16_t line_height_multiplier_percent() const {
+    return kSpacingPercents[static_cast<uint8_t>(spacing_override)];
   }
   // Bottom padding reserved for the progress indicator.
   uint16_t progress_bottom() const {

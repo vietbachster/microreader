@@ -1613,7 +1613,7 @@ static EpubError parse_xhtml_events(XmlReader& reader, const CssStylesheet* inli
       }
       if (style.has_alignment_ && !parser.cell_depth.has_value()) {
         parser.alignment_stack_.push_back({parser.alignment_, parser.depth});
-        parser.alignment_ = static_cast<Alignment>(style.alignment);
+        parser.alignment_ = std::make_optional<Alignment>(static_cast<Alignment>(style.alignment));
       }
       if (style.has_indent_ && !parser.cell_depth.has_value()) {
         parser.indent_ = style.indent;

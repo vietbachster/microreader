@@ -380,13 +380,24 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
     const_cast<BitmapFontSet*>(fset)->set_base_size_index(reader_settings_.font_size_idx);
   }
   IFont& font = fset ? static_cast<IFont&>(const_cast<BitmapFontSet&>(*fset)) : static_cast<IFont&>(fixed_font);
-  PageOptions opts(static_cast<uint16_t>(W), static_cast<uint16_t>(H), kPaddingTop, 8 /*para_spacing*/,
-                   reader_settings_.justify ? Alignment::Justify : Alignment::Start);
+  std::optional<Alignment> align_override = std::nullopt;
+  if (reader_settings_.align_override != AlignOverride::Book) {
+    if (reader_settings_.align_override == AlignOverride::Left)
+      align_override = Alignment::Start;
+    else if (reader_settings_.align_override == AlignOverride::Center)
+      align_override = Alignment::Center;
+    else if (reader_settings_.align_override == AlignOverride::Right)
+      align_override = Alignment::End;
+    else if (reader_settings_.align_override == AlignOverride::Justify)
+      align_override = Alignment::Justify;
+  }
+
+  PageOptions opts(static_cast<uint16_t>(W), static_cast<uint16_t>(H), kPaddingTop, 8, align_override);
   opts.padding_right = reader_settings_.h_padding();
   opts.padding_bottom = static_cast<uint16_t>(reader_settings_.progress_bottom() + reader_settings_.v_padding());
   opts.padding_left = reader_settings_.h_padding();
   opts.padding_top = static_cast<uint16_t>(kPaddingTop + reader_settings_.v_padding());
-  opts.extra_line_spacing = reader_settings_.extra_line_spacing();
+  opts.line_height_multiplier_percent = reader_settings_.line_height_multiplier_percent();
   opts.center_text = true;
   layout_engine_.set_font(font);
   layout_engine_.set_options(opts);

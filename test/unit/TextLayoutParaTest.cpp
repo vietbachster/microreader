@@ -174,7 +174,7 @@ TEST(TextLayout, AlignCenter) {
   para.alignment = Alignment::Center;
 
   // "Hi" = 16px on width 100 → room = 84 → nudge = 42
-  LayoutOptions opts{100, Alignment::Start};
+  LayoutOptions opts{100};
   auto lines = TextLayout(font8).layout_paragraph(opts, para);
 
   ASSERT_EQ(lines.size(), 1);
@@ -186,7 +186,7 @@ TEST(TextLayout, AlignEnd) {
   para.runs.push_back(microreader::Run("Hi", FontStyle::Regular, false));
   para.alignment = Alignment::End;
 
-  LayoutOptions opts{100, Alignment::Start};
+  LayoutOptions opts{100};
   auto lines = TextLayout(font8).layout_paragraph(opts, para);
 
   ASSERT_EQ(lines.size(), 1);
@@ -205,8 +205,8 @@ TEST(TextLayout, JustifyTwoWords) {
   auto lines = TextLayout(font8).layout_paragraph(opts, para);
 
   ASSERT_EQ(lines.size(), 1);
-  // Last line - no justification
-  EXPECT_EQ(lines[0].words[0].x, 0);
+  // Last line - centered when justify is used
+  EXPECT_EQ(lines[0].words[0].x, 8);
 }
 
 TEST(TextLayout, JustifyMultipleLines) {
@@ -245,8 +245,8 @@ TEST(TextLayout, JustifyWideLineGetsStretched) {
   // First line must be justified: second word must be further right than its natural position.
   EXPECT_EQ(lines[0].words[0].x, 0);
   EXPECT_GT(lines[0].words[1].x, 24u) << "First line should be justified (word 2 must move right)";
-  // Last line must not be justified.
-  EXPECT_EQ(lines.back().words[0].x, 0);
+  // Last line must be centered with justify
+  EXPECT_EQ(lines.back().words[0].x, 55);
 }
 
 // ===== Indent test =====

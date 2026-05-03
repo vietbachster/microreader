@@ -184,10 +184,10 @@ void microreader::Application::save_settings_() {
 
   // Reader display settings
   const ReaderSettings& rs = reader->reader_settings();
-  std::fprintf(f, "justify=%d\n", rs.justify ? 1 : 0);
+  std::fprintf(f, "align_override=%u\n", static_cast<unsigned>(rs.align_override));
   std::fprintf(f, "padding_h=%u\n", static_cast<unsigned>(rs.padding_h_idx));
   std::fprintf(f, "padding_v=%u\n", static_cast<unsigned>(rs.padding_v_idx));
-  std::fprintf(f, "line_spacing=%u\n", static_cast<unsigned>(rs.line_spacing_idx));
+  std::fprintf(f, "spacing_override=%u\n", static_cast<unsigned>(rs.spacing_override));
   std::fprintf(f, "progress=%u\n", static_cast<unsigned>(rs.progress_style));
 
   std::fclose(f);
@@ -218,20 +218,27 @@ void microreader::Application::load_settings_() {
       last_book_path = sval;
     else if (std::sscanf(line, "book_sel=%511[^\n]", sval) == 1)
       book_sel = sval;
-    else if (std::sscanf(line, "justify=%u", &uval) == 1)
-      rs.justify = (uval != 0);
+    else if (std::sscanf(line, "align_override=%u", &uval) == 1)
+      rs.align_override =
+          uval < ReaderSettings::kNumAlignPresets ? static_cast<AlignOverride>(uval) : AlignOverride::Book;
+    else if (std::sscanf(line, "justify=%u", &uval) == 1)  // Backwards compatibility
+      rs.align_override = uval != 0 ? AlignOverride::Justify : AlignOverride::Left;
     else if (std::sscanf(line, "padding_h=%u", &uval) == 1)
       rs.padding_h_idx = uval < ReaderSettings::kNumPresets ? static_cast<uint8_t>(uval) : 1;
     else if (std::sscanf(line, "padding_v=%u", &uval) == 1)
       rs.padding_v_idx = uval < ReaderSettings::kNumPresets ? static_cast<uint8_t>(uval) : 1;
-    else if (std::sscanf(line, "line_spacing=%u", &uval) == 1)
-      rs.line_spacing_idx = uval < ReaderSettings::kNumSpacingPresets ? static_cast<uint8_t>(uval) : 2;
+    else if (std::sscanf(line, "spacing_override=%u", &uval) == 1)
+      rs.spacing_override = uval < ReaderSettings::kNumSpacingPresets ? static_cast<SpacingOverride>(uval)
+                                                                      : SpacingOverride::Spacing_1_0x;
+    else if (std::sscanf(line, "line_spacing=%u", &uval) == 1)  // Backwards compatibility
+      rs.spacing_override = SpacingOverride::Book;
     else if (std::sscanf(line, "progress=%u", &uval) == 1)
       rs.progress_style = uval <= 2 ? static_cast<ProgressStyle>(uval) : ProgressStyle::Bar;
   }
   std::fclose(f);
-  MR_LOGI("app", "Loaded settings: justify=%d ph=%u pv=%u ls=%u prog=%u sel=%s", rs.justify, rs.padding_h_idx,
-          rs.padding_v_idx, rs.line_spacing_idx, static_cast<unsigned>(rs.progress_style), book_sel.c_str());
+  MR_LOGI("app", "Loaded settings: align=%u ph=%u pv=%u ls=%u prog=%u sel=%s", static_cast<unsigned>(rs.align_override),
+          rs.padding_h_idx, rs.padding_v_idx, static_cast<unsigned>(rs.spacing_override),
+          static_cast<unsigned>(rs.progress_style), book_sel.c_str());
 
   // Restore book list selection highlight
   if (!book_sel.empty())

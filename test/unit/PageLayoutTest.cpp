@@ -625,19 +625,19 @@ static bool items_within_bounds(const PageContent& page, const PageOptions& opts
 }
 
 TEST(ExtraLineSpacing, PositiveIncreasesLineHeight) {
-  // 3 one-line paragraphs. extra_line_spacing=+4 makes each line 4px taller.
+  // 3 one-line paragraphs. multiplier=125 makes each line 4px taller.
   // font8.y_advance()=16, so each line becomes 20px.
   // The gap between items reflects line height (they follow immediately after the previous line).
   auto ch = make_multi_para_chapter(3, 10);
   TestChapterSource src(ch);
 
   PageOptions opts_normal(200, 120, 0, 10);
-  opts_normal.extra_line_spacing = 0;
+  opts_normal.line_height_multiplier_percent = 0;
   auto page_normal = TextLayout(font8, opts_normal, src, PagePosition(0, 0)).layout();
   ASSERT_EQ(page_normal.text_items().size(), 3u);
 
   PageOptions opts_loose(200, 120, 0, 10);
-  opts_loose.extra_line_spacing = 4;
+  opts_loose.line_height_multiplier_percent = 125;
   auto page_loose = TextLayout(font8, opts_loose, src, PagePosition(0, 0)).layout();
   ASSERT_EQ(page_loose.text_items().size(), 3u);
 
@@ -650,24 +650,24 @@ TEST(ExtraLineSpacing, PositiveIncreasesLineHeight) {
 }
 
 TEST(ExtraLineSpacing, NegativeDecreasesLineHeight) {
-  // 3 one-line paragraphs. extra_line_spacing=-2 makes each line 2px shorter.
+  // 3 one-line paragraphs. multiplier=87 makes each line 2px shorter.
   auto ch = make_multi_para_chapter(3, 10);
   TestChapterSource src(ch);
 
   PageOptions opts_normal(200, 120, 0, 10);
-  opts_normal.extra_line_spacing = 0;
+  opts_normal.line_height_multiplier_percent = 0;
   auto page_normal = TextLayout(font8, opts_normal, src, PagePosition(0, 0)).layout();
   ASSERT_EQ(page_normal.text_items().size(), 3u);
 
   PageOptions opts_tight(200, 120, 0, 10);
-  opts_tight.extra_line_spacing = -2;
+  opts_tight.line_height_multiplier_percent = 87;
   auto page_tight = TextLayout(font8, opts_tight, src, PagePosition(0, 0)).layout();
   ASSERT_EQ(page_tight.text_items().size(), 3u);
 
-  EXPECT_EQ(page_normal.text_items()[1].y_offset - page_tight.text_items()[1].y_offset, 2)
-      << "extra_line_spacing=-2 should shift second item up by 2px";
-  EXPECT_EQ(page_normal.text_items()[2].y_offset - page_tight.text_items()[2].y_offset, 4)
-      << "extra_line_spacing=-2 should shift third item up by 4px";
+  EXPECT_EQ(page_normal.text_items()[1].y_offset - page_tight.text_items()[1].y_offset, 3)
+      << "multiplier=87 should shift second item up by 3px";
+  EXPECT_EQ(page_normal.text_items()[2].y_offset - page_tight.text_items()[2].y_offset, 6)
+      << "multiplier=87 should shift third item up by 6px";
   EXPECT_TRUE(items_within_bounds(page_tight, opts_tight)) << "Items must stay within page bounds";
 }
 
@@ -677,7 +677,7 @@ TEST(ExtraLineSpacing, ItemsStayWithinPageWhenLoose) {
   TestChapterSource src(ch);
 
   PageOptions opts(200, 100, 4, 8);
-  opts.extra_line_spacing = 6;
+  opts.line_height_multiplier_percent = 125;
   auto page = TextLayout(font8, opts, src, PagePosition(0, 0)).layout();
 
   EXPECT_TRUE(items_within_bounds(page, opts)) << "No item should exceed page height - padding_bottom";
@@ -685,12 +685,12 @@ TEST(ExtraLineSpacing, ItemsStayWithinPageWhenLoose) {
 }
 
 TEST(ExtraLineSpacing, ItemsStayWithinPageWhenTight) {
-  // Many paragraphs, negative extra_line_spacing. All items should still be within bounds.
+  // Many paragraphs, tight multiplier. All items should still be within bounds.
   auto ch = make_multi_para_chapter(10, 8);
   TestChapterSource src(ch);
 
   PageOptions opts(200, 100, 4, 8);
-  opts.extra_line_spacing = -4;
+  opts.line_height_multiplier_percent = 80;
   auto page = TextLayout(font8, opts, src, PagePosition(0, 0)).layout();
 
   EXPECT_TRUE(items_within_bounds(page, opts)) << "No item should exceed page height - padding_bottom";
@@ -698,31 +698,28 @@ TEST(ExtraLineSpacing, ItemsStayWithinPageWhenTight) {
 }
 
 TEST(ExtraLineSpacing, LineHeightClampedToMinOne) {
-  // extra_line_spacing so negative the line height would go to 0. Must clamp to 1.
-  // font8.y_advance()=16, so -20 would make lines 0 or negative without clamping.
+  // extreme low percentage. Must clamp to 1.
   auto ch = make_multi_para_chapter(3, 4);
   TestChapterSource src(ch);
 
   PageOptions opts(200, 90, 0, 8);
-  opts.extra_line_spacing = -20;
+  opts.line_height_multiplier_percent = 1;
   auto page = TextLayout(font8, opts, src, PagePosition(0, 0)).layout();
 
-  // Y offsets should still increase (line height clamped to 1, not zero or negative).
+  // Y offsets should still increase
   for (size_t i = 1; i < page.text_items().size(); ++i)
     EXPECT_GT(page.text_items()[i].y_offset, page.text_items()[i - 1].y_offset)
         << "Y offsets must increase even with extreme negative line spacing";
 }
 
 TEST(ExtraLineSpacing, SpreadStillWorksWithLineSpacing) {
-  // Spread should still run when extra_line_spacing != 0.
-  // 3 paras, spacing_before=8, extra_line_spacing=+3 → lines 19px tall.
-  // Total content: 3×(8+19) = 81px. Use page=95 so all fit + slack=14 < 2×dy → spread fires.
+  // Spread should still run when line height is modified.
   auto ch = make_multi_para_chapter(3, 8);
   TestChapterSource src(ch);
 
   PageOptions opts(200, 95, 0, 8);
   opts.center_text = true;
-  opts.extra_line_spacing = 3;
+  opts.line_height_multiplier_percent = 120;
   auto page = TextLayout(font8, opts, src, PagePosition(0, 0)).layout();
 
   ASSERT_EQ(page.text_items().size(), 3u) << "All 3 paragraphs must fit so we can verify spread ran";

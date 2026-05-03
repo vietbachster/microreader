@@ -7,11 +7,13 @@
 namespace microreader {
 constexpr uint16_t ReaderSettings::kHPaddingPresets[];
 constexpr uint16_t ReaderSettings::kVPaddingPresets[];
-constexpr int16_t ReaderSettings::kSpacingPresets[];
+constexpr uint16_t ReaderSettings::kSpacingPercents[];
+constexpr uint8_t ReaderSettings::kNumAlignPresets;
 constexpr uint8_t ReaderSettings::kNumSpacingPresets;
 constexpr uint8_t ReaderSettings::kNumFontSizePresets;
 constexpr const char* ReaderSettings::kHPaddingNames[];
 constexpr const char* ReaderSettings::kVPaddingNames[];
+constexpr const char* ReaderSettings::kAlignNames[];
 constexpr const char* ReaderSettings::kSpacingNames[];
 constexpr const char* ReaderSettings::kFontSizeNames[];
 
@@ -49,7 +51,8 @@ void ReaderOptionsScreen::on_start() {
 
   if (settings_) {
     idx_justify_ = count();
-    add_item(fmt_setting(tmp, sizeof(tmp), "Justify", settings_->justify ? "On" : "Off"));
+    add_item(fmt_setting(tmp, sizeof(tmp), "Align",
+                         ReaderSettings::kAlignNames[static_cast<uint8_t>(settings_->align_override)]));
 
     idx_font_size_ = count();
     if (app_ && app_->font_manager() && app_->font_manager()->valid()) {
@@ -80,7 +83,8 @@ void ReaderOptionsScreen::on_start() {
     add_item(fmt_setting(tmp, sizeof(tmp), "V-Margin", ReaderSettings::kVPaddingNames[settings_->padding_v_idx]));
 
     idx_line_spacing_ = count();
-    add_item(fmt_setting(tmp, sizeof(tmp), "Line spacing", ReaderSettings::kSpacingNames[settings_->line_spacing_idx]));
+    add_item(fmt_setting(tmp, sizeof(tmp), "Line spacing",
+                         ReaderSettings::kSpacingNames[static_cast<uint8_t>(settings_->spacing_override)]));
 
     idx_progress_ = count();
     const char* prog_name = settings_->progress_style == ProgressStyle::None         ? "None"
@@ -105,7 +109,8 @@ void ReaderOptionsScreen::on_select(int index) {
   }
 
   if (index == idx_justify_) {
-    settings_->justify = !settings_->justify;
+    settings_->align_override = static_cast<AlignOverride>((static_cast<uint8_t>(settings_->align_override) + 1) %
+                                                           ReaderSettings::kNumAlignPresets);
     refresh_items_(index);
     return;
   }
@@ -131,8 +136,8 @@ void ReaderOptionsScreen::on_select(int index) {
     return;
   }
   if (index == idx_line_spacing_) {
-    settings_->line_spacing_idx =
-        static_cast<uint8_t>((settings_->line_spacing_idx + 1) % ReaderSettings::kNumSpacingPresets);
+    settings_->spacing_override = static_cast<SpacingOverride>((static_cast<uint8_t>(settings_->spacing_override) + 1) %
+                                                               ReaderSettings::kNumSpacingPresets);
     refresh_items_(index);
     return;
   }

@@ -132,8 +132,9 @@ static void align_line(Alignment alignment, uint16_t room, uint16_t line_width, 
         w.x += room;
       break;
     case Alignment::Justify:
-      if (!is_last)
+      if (!is_last) {
         justify_words(room, line_width, space_width, words);
+      }
       break;
     default:
       break;
@@ -149,7 +150,20 @@ static std::vector<LayoutLine> layout_para_lines(const IFont& font, const Layout
                                                  HyphenationLang hyph_lang = HyphenationLang::None) {
   const uint16_t max_width = opts.width;
   const uint16_t space_width = font.char_width(' ', FontStyle::Regular);
-  const Alignment align = para.alignment.value_or(opts.alignment);
+
+  Alignment align = para.alignment.value_or(Alignment::Start);
+  if (opts.align_override.has_value()) {
+    // Structural alignments (Center/End) from the book should not be overridden by normal body text settings
+    // (Left/Justify)
+    if (opts.align_override.value() == Alignment::Start || opts.align_override.value() == Alignment::Justify) {
+      if (align != Alignment::Center && align != Alignment::End) {
+        align = opts.align_override.value();
+      }
+    } else {
+      align = opts.align_override.value();  // Force Center or Right on everything if the user explicitly chose that
+    }
+  }
+
   const int16_t indent = para.indent.value_or(0);
 
   std::vector<LayoutLine> lines;
@@ -235,8 +249,8 @@ static std::vector<LayoutLine> layout_para_lines(const IFont& font, const Layout
           const uint16_t hyphen_w = prefix_has_hyphen ? 0 : font.char_width('-', run.style, run.size_pct);
           if (needs_space)
             x += space_width;
-          current.words.push_back(
-              LayoutWord{word_ptr, static_cast<uint16_t>(split), x, run.style, run.size_pct, run.vertical_align, false});
+          current.words.push_back(LayoutWord{word_ptr, static_cast<uint16_t>(split), x, run.style, run.size_pct,
+                                             run.vertical_align, false});
           x += prefix_w;
           if (!prefix_has_hyphen) {
             current.words.push_back(LayoutWord{"-", 1, x, run.style, run.size_pct, run.vertical_align, true});
@@ -255,7 +269,8 @@ static std::vector<LayoutLine> layout_para_lines(const IFont& font, const Layout
         }
         if (current.words.empty()) {
           // No hyphenation and line is empty — force placement to avoid infinite loop.
-          current.words.push_back(LayoutWord{word_ptr, word_len, x, run.style, run.size_pct, run.vertical_align, false});
+          current.words.push_back(
+              LayoutWord{word_ptr, word_len, x, run.style, run.size_pct, run.vertical_align, false});
           x += word_w;
           break;
         }
@@ -409,19 +424,16 @@ const TextLayout::LaidOutParagraph& TextLayout::get_laid_out_(size_t pi) const {
       slot.inline_img = img;
       LayoutOptions lo;
       lo.width = cw;
-      lo.alignment = opts.alignment;
+      lo.align_override = opts.align_override;
       if (img.has_image && img.width > 0 && img.height > 0 && !img.promoted)
         lo.first_line_extra_indent = img.width + 4;
       slot.lines = layout_para_lines(font, lo, para.text, hyphenation_lang_);
       slot.line_heights.resize(slot.lines.size());
       slot.line_baselines.resize(slot.lines.size());
       for (size_t i = 0; i < slot.lines.size(); ++i) {
-        uint16_t lh = compute_line_height(font, slot.lines[i], para.text.line_height_pct);
-        if (opts.extra_line_spacing != 0) {
-          int32_t adjusted = static_cast<int32_t>(lh) + opts.extra_line_spacing;
-          lh = adjusted < 1 ? 1 : static_cast<uint16_t>(adjusted);
-        }
-        slot.line_heights[i] = lh;
+        uint16_t pct =
+            opts.line_height_multiplier_percent != 0 ? opts.line_height_multiplier_percent : para.text.line_height_pct;
+        slot.line_heights[i] = compute_line_height(font, slot.lines[i], pct);
         slot.line_baselines[i] = line_baseline(font, slot.lines[i]);
       }
       if (!img.promoted && img.has_image && img.width > 0 && img.height > 0 && !slot.lines.empty()) {

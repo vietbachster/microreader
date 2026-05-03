@@ -40,12 +40,12 @@ struct LayoutLine {
 
 struct LayoutOptions {
   uint16_t width = 300;  // available line width in pixels
-  Alignment alignment = Alignment::Justify;
+  std::optional<Alignment> align_override;
   uint16_t first_line_extra_indent = 0;  // extra left indent for inline images on first line
   HyphenationLang hyphenation_lang = HyphenationLang::None;
 
   LayoutOptions() = default;
-  LayoutOptions(uint16_t w, Alignment a = Alignment::Justify) : width(w), alignment(a) {}
+  LayoutOptions(uint16_t w, std::optional<Alignment> a = std::nullopt) : width(w), align_override(a) {}
 };
 
 // ---------------------------------------------------------------------------
@@ -125,14 +125,14 @@ struct PageOptions {
   uint16_t padding_right = 10;
   uint16_t padding_bottom = 10;
   uint16_t padding_left = 10;
-  uint16_t para_spacing = 8;       // pixels between paragraphs (fallback when CSS spacing_before not set)
-  int16_t extra_line_spacing = 0;  // signed additive pixels added to every line's height (user line-spacing setting)
-  Alignment alignment = Alignment::Justify;
+  uint16_t para_spacing = 8;                    // pixels between paragraphs (fallback when CSS spacing_before not set)
+  uint16_t line_height_multiplier_percent = 0;  // 0 = use CSS/Book default. Otherwise scale by this percent.
+  std::optional<Alignment> align_override;
   bool center_text = false;  // vertically center text content within the padded area
 
   PageOptions() = default;
   // Uniform padding constructor: sets all four sides to pad.
-  PageOptions(uint16_t w, uint16_t h, uint16_t pad = 10, uint16_t ps = 8, Alignment a = Alignment::Justify)
+  PageOptions(uint16_t w, uint16_t h, uint16_t pad = 10, uint16_t ps = 8, std::optional<Alignment> a = std::nullopt)
       : width(w),
         height(h),
         padding_top(pad),
@@ -140,7 +140,7 @@ struct PageOptions {
         padding_bottom(pad),
         padding_left(pad),
         para_spacing(ps),
-        alignment(a) {}
+        align_override(a) {}
 };
 
 // Optional callback for resolving image dimensions lazily at layout time.
