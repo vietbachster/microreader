@@ -50,18 +50,18 @@ void SettingsScreen::on_start() {
 #endif
 }
 
-bool SettingsScreen::on_select(int index) {
+void SettingsScreen::on_select(int index) {
   if (index == idx_bouncing_ball_) {
     app_->push_screen(ScreenId::BouncingBall);
-    return false;
+    return;
   }
   if (index == idx_grayscale_demo_) {
     app_->push_screen(ScreenId::GrayscaleDemo);
-    return false;
+    return;
   }
   if (index == idx_clear_converted_) {
     clear_converted_();
-    return true;  // stay on screen
+    return;  // stay on screen
   }
 #ifdef ESP_PLATFORM
   if (index == idx_switch_ota_) {
@@ -73,7 +73,7 @@ bool SettingsScreen::on_select(int index) {
   if (index == idx_invalidate_font_) {
     if (app_)
       app_->invalidate_font();
-    return true;  // stay on settings screen
+    return;  // stay on settings screen
   }
   if (index == idx_spiffs_) {
     const esp_partition_t* part =
@@ -134,7 +134,7 @@ bool SettingsScreen::on_select(int index) {
     esp_restart();
   }
 #endif
-  return true;
+  return;
 }
 
 void SettingsScreen::clear_converted_() {

@@ -22,7 +22,7 @@ class GrayscaleDemo final : public IScreen {
 
   void start(DrawBuffer& buf, IRuntime& runtime) override;
   void stop() override;
-  bool update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& runtime) override;
+  void update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& runtime) override;
 
  private:
   int rotation_ = 0;  // 0..3 — multiples of 90° CW

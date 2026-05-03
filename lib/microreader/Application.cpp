@@ -112,7 +112,7 @@ void Application::update(const ButtonState& buttons, uint32_t dt_ms, DrawBuffer&
 
   IScreen* top = screen_mgr_.top();
   if (top) {
-    bool stayed = top->update(buttons_, buf, runtime);
+    top->update(buttons_, buf, runtime);
 
     // Process pending navigation (queued by screens via push_screen/replace_screen).
     if (pending_replace_ != ScreenId::None) {
@@ -126,15 +126,15 @@ void Application::update(const ButtonState& buttons, uint32_t dt_ms, DrawBuffer&
       pending_push_ = ScreenId::None;
       screen_mgr_.push(screen_for_(id), buf, runtime);
       buf.refresh();
-    } else if (!stayed) {
-      // Screen signalled exit with no pending navigation — pop back.
+    } else if (pending_pop_count_ > 0) {
+      int count = pending_pop_count_;
+      pending_pop_count_ = 0;
       if (top == &reader_)
         save_settings_();
-      screen_mgr_.pop(buf, runtime);
+      screen_mgr_.pop(count, buf, runtime);
       buf.refresh();
     }
   }
-
 }  // namespace microreader
 
 IScreen* microreader::Application::screen_for_(ScreenId id) {

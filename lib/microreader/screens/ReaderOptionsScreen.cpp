@@ -95,19 +95,19 @@ void ReaderOptionsScreen::refresh_items_(int restore_selection) {
   set_selected(restore_selection);
 }
 
-bool ReaderOptionsScreen::on_select(int index) {
+void ReaderOptionsScreen::on_select(int index) {
   if (!settings_) {
     if (index == idx_chapters_) {
-      app_->replace_screen(ScreenId::ChapterSelect);
-      return false;
+      app_->push_screen(ScreenId::ChapterSelect);
+      return;
     }
-    return true;
+    return;
   }
 
   if (index == idx_justify_) {
     settings_->justify = !settings_->justify;
     refresh_items_(index);
-    return true;
+    return;
   }
   if (index == idx_font_size_) {
     uint8_t max_idx = ReaderSettings::kNumFontSizePresets;
@@ -118,34 +118,34 @@ bool ReaderOptionsScreen::on_select(int index) {
     }
     settings_->font_size_idx = static_cast<uint8_t>((settings_->font_size_idx + 1) % max_idx);
     refresh_items_(index);
-    return true;
+    return;
   }
   if (index == idx_padding_h_) {
     settings_->padding_h_idx = static_cast<uint8_t>((settings_->padding_h_idx + 1) % ReaderSettings::kNumPresets);
     refresh_items_(index);
-    return true;
+    return;
   }
   if (index == idx_padding_v_) {
     settings_->padding_v_idx = static_cast<uint8_t>((settings_->padding_v_idx + 1) % ReaderSettings::kNumPresets);
     refresh_items_(index);
-    return true;
+    return;
   }
   if (index == idx_line_spacing_) {
     settings_->line_spacing_idx =
         static_cast<uint8_t>((settings_->line_spacing_idx + 1) % ReaderSettings::kNumSpacingPresets);
     refresh_items_(index);
-    return true;
+    return;
   }
   if (index == idx_progress_) {
     settings_->progress_style = static_cast<ProgressStyle>((static_cast<uint8_t>(settings_->progress_style) + 1) % 3);
     refresh_items_(index);
-    return true;
+    return;
   }
   if (index == idx_chapters_) {
-    app_->replace_screen(ScreenId::ChapterSelect);
-    return false;
+    app_->push_screen(ScreenId::ChapterSelect);
+    return;
   }
-  return true;
+  return;
 }
 
 }  // namespace microreader

@@ -18,7 +18,7 @@ class BouncingBallDemo final : public IScreen {
 
   void start(DrawBuffer& buf, IRuntime& runtime) override;
   void stop() override;
-  bool update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& runtime) override;
+  void update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& runtime) override;
 
  private:
   static constexpr int kBallRadius = 30;

@@ -1,5 +1,7 @@
 #include "ChapterSelectScreen.h"
 
+#include "../Application.h"
+
 namespace microreader {
 
 void ChapterSelectScreen::populate(const TableOfContents& toc, uint16_t current_chapter, uint16_t current_para) {
@@ -30,11 +32,11 @@ void ChapterSelectScreen::on_start() {
   set_selected(initial_selected_);
 }
 
-bool ChapterSelectScreen::on_select(int index) {
+void ChapterSelectScreen::on_select(int index) {
   pending_chapter_ = entries_[index].chapter_idx;
   pending_para_index_ = entries_[index].para_index;
   has_pending_ = true;
-  return false;
+  app_->pop_screen(2);
 }
 
 }  // namespace microreader

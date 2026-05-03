@@ -4,6 +4,8 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "../Application.h"
+
 namespace microreader {
 
 void BouncingBallDemo::draw_all_(DrawBuffer& buf) const {
@@ -44,9 +46,11 @@ void BouncingBallDemo::start(DrawBuffer& buf, IRuntime& runtime) {
 
 void BouncingBallDemo::stop() {}
 
-bool BouncingBallDemo::update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& /*runtime*/) {
-  if (buttons.is_pressed(Button::Button0))
-    return false;
+void BouncingBallDemo::update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& /*runtime*/) {
+  if (buttons.is_pressed(Button::Button0)) {
+    app_->pop_screen();
+    return;
+  }
 
   const int W = DrawBuffer::kWidth;
   const int H = DrawBuffer::kHeight;
@@ -95,7 +99,6 @@ bool BouncingBallDemo::update(const ButtonState& buttons, DrawBuffer& buf, IRunt
 
   draw_all_(buf);
   buf.refresh();
-  return true;
 }
 
 }  // namespace microreader

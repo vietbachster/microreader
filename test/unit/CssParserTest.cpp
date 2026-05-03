@@ -307,58 +307,58 @@ TEST(CssStylesheet, MultipleClasses) {
 
 TEST(CssParserTest, ParseFontSizeSmall) {
   auto rule = CssRule::parse("font-size: small");
-  ASSERT_TRUE(rule.font_size.has_value());
-  EXPECT_EQ(*rule.font_size, 80);
+  ASSERT_TRUE(rule.font_size_pct.has_value());
+  EXPECT_EQ(*rule.font_size_pct, 80);
 }
 
 TEST(CssParserTest, ParseFontSizeLarge) {
   auto rule = CssRule::parse("font-size: large");
-  ASSERT_TRUE(rule.font_size.has_value());
-  EXPECT_EQ(*rule.font_size, 120);
+  ASSERT_TRUE(rule.font_size_pct.has_value());
+  EXPECT_EQ(*rule.font_size_pct, 120);
 }
 
 TEST(CssParserTest, ParseFontSizeXLarge) {
   auto rule = CssRule::parse("font-size: x-large");
-  ASSERT_TRUE(rule.font_size.has_value());
-  EXPECT_EQ(*rule.font_size, 140);
+  ASSERT_TRUE(rule.font_size_pct.has_value());
+  EXPECT_EQ(*rule.font_size_pct, 140);
 }
 
 TEST(CssParserTest, ParseFontSizeSmaller) {
   auto rule = CssRule::parse("font-size: smaller");
-  ASSERT_TRUE(rule.font_size.has_value());
-  EXPECT_EQ(*rule.font_size, 80);
+  ASSERT_TRUE(rule.font_size_pct.has_value());
+  EXPECT_EQ(*rule.font_size_pct, 80);
 }
 
 TEST(CssParserTest, ParseFontSizeMedium) {
   auto rule = CssRule::parse("font-size: medium");
-  ASSERT_TRUE(rule.font_size.has_value());
-  EXPECT_EQ(*rule.font_size, 100);
+  ASSERT_TRUE(rule.font_size_pct.has_value());
+  EXPECT_EQ(*rule.font_size_pct, 100);
 }
 
 TEST(CssParserTest, ParseFontSizeUnknownIgnored) {
   auto rule = CssRule::parse("font-size: 14px");
-  EXPECT_FALSE(rule.font_size.has_value());
+  EXPECT_FALSE(rule.font_size_pct.has_value());
 }
 
 TEST(CssParserTest, FontSizeMerge) {
   CssRule a;
-  a.font_size = 80;
+  a.font_size_pct = 80;
   CssRule b;
-  b.font_size = 120;
+  b.font_size_pct = 120;
 
   auto merged = a + b;
-  ASSERT_TRUE(merged.font_size.has_value());
-  EXPECT_EQ(*merged.font_size, 120);  // rhs wins
+  ASSERT_TRUE(merged.font_size_pct.has_value());
+  EXPECT_EQ(*merged.font_size_pct, 120);  // rhs wins
 }
 
 TEST(CssParserTest, FontSizeMergePreservesLhs) {
   CssRule a;
-  a.font_size = 80;
+  a.font_size_pct = 80;
   CssRule b;
 
   auto merged = a + b;
-  ASSERT_TRUE(merged.font_size.has_value());
-  EXPECT_EQ(*merged.font_size, 80);  // lhs preserved when rhs empty
+  ASSERT_TRUE(merged.font_size_pct.has_value());
+  EXPECT_EQ(*merged.font_size_pct, 80);  // lhs preserved when rhs empty
 }
 
 TEST(CssParserTest, FontSizeInStylesheet) {
@@ -366,12 +366,12 @@ TEST(CssParserTest, FontSizeInStylesheet) {
   sheet.extend_from_sheet("h1 { font-size: large; } .footnote { font-size: small; }");
 
   auto h1 = sheet.get("h1", nullptr, nullptr);
-  ASSERT_TRUE(h1.font_size.has_value());
-  EXPECT_EQ(*h1.font_size, 120);
+  ASSERT_TRUE(h1.font_size_pct.has_value());
+  EXPECT_EQ(*h1.font_size_pct, 120);
 
   auto fn = sheet.get("span", nullptr, "footnote");
-  ASSERT_TRUE(fn.font_size.has_value());
-  EXPECT_EQ(*fn.font_size, 80);
+  ASSERT_TRUE(fn.font_size_pct.has_value());
+  EXPECT_EQ(*fn.font_size_pct, 80);
 }
 
 // ---------------------------------------------------------------------------
@@ -381,44 +381,44 @@ TEST(CssParserTest, FontSizeInStylesheet) {
 TEST(CssParserTest, FontSizePercent90IsNormal) {
   // 90% is within the normal band (90-105%)
   auto rule = CssRule::parse("font-size: 90%");
-  ASSERT_TRUE(rule.font_size.has_value());
-  EXPECT_EQ(*rule.font_size, 100);
+  ASSERT_TRUE(rule.font_size_pct.has_value());
+  EXPECT_EQ(*rule.font_size_pct, 100);
 }
 
 TEST(CssParserTest, FontSizePercent60IsSmall) {
   auto rule = CssRule::parse("font-size: 60%");
-  ASSERT_TRUE(rule.font_size.has_value());
-  EXPECT_EQ(*rule.font_size, 80);
+  ASSERT_TRUE(rule.font_size_pct.has_value());
+  EXPECT_EQ(*rule.font_size_pct, 80);
 }
 
 TEST(CssParserTest, FontSizePercent100IsNormal) {
   auto rule = CssRule::parse("font-size: 100%");
-  ASSERT_TRUE(rule.font_size.has_value());
-  EXPECT_EQ(*rule.font_size, 100);
+  ASSERT_TRUE(rule.font_size_pct.has_value());
+  EXPECT_EQ(*rule.font_size_pct, 100);
 }
 
 TEST(CssParserTest, FontSizePercent110IsLarge) {
   auto rule = CssRule::parse("font-size: 110%");
-  ASSERT_TRUE(rule.font_size.has_value());
-  EXPECT_EQ(*rule.font_size, 120);
+  ASSERT_TRUE(rule.font_size_pct.has_value());
+  EXPECT_EQ(*rule.font_size_pct, 120);
 }
 
 TEST(CssParserTest, FontSizePercent120IsXLarge) {
   auto rule = CssRule::parse("font-size: 120%");
-  ASSERT_TRUE(rule.font_size.has_value());
-  EXPECT_EQ(*rule.font_size, 140);
+  ASSERT_TRUE(rule.font_size_pct.has_value());
+  EXPECT_EQ(*rule.font_size_pct, 140);
 }
 
 TEST(CssParserTest, FontSizePercent150IsXXLarge) {
   auto rule = CssRule::parse("font-size: 150%");
-  ASSERT_TRUE(rule.font_size.has_value());
-  EXPECT_EQ(*rule.font_size, 160);
+  ASSERT_TRUE(rule.font_size_pct.has_value());
+  EXPECT_EQ(*rule.font_size_pct, 160);
 }
 
 TEST(CssParserTest, FontSizePercent300IsXXLarge) {
   auto rule = CssRule::parse("font-size: 300%");
-  ASSERT_TRUE(rule.font_size.has_value());
-  EXPECT_EQ(*rule.font_size, 160);
+  ASSERT_TRUE(rule.font_size_pct.has_value());
+  EXPECT_EQ(*rule.font_size_pct, 160);
 }
 
 // ---------------------------------------------------------------------------
@@ -428,32 +428,32 @@ TEST(CssParserTest, FontSizePercent300IsXXLarge) {
 TEST(CssParserTest, FontSizeEm09IsNormal) {
   // 0.9em is within the normal band (0.90-1.05)
   auto rule = CssRule::parse("font-size: 0.9em");
-  ASSERT_TRUE(rule.font_size.has_value());
-  EXPECT_EQ(*rule.font_size, 100);
+  ASSERT_TRUE(rule.font_size_pct.has_value());
+  EXPECT_EQ(*rule.font_size_pct, 100);
 }
 
 TEST(CssParserTest, FontSizeEm075IsSmall) {
   auto rule = CssRule::parse("font-size: 0.75em");
-  ASSERT_TRUE(rule.font_size.has_value());
-  EXPECT_EQ(*rule.font_size, 80);
+  ASSERT_TRUE(rule.font_size_pct.has_value());
+  EXPECT_EQ(*rule.font_size_pct, 80);
 }
 
 TEST(CssParserTest, FontSizeEm1IsNormal) {
   auto rule = CssRule::parse("font-size: 1em");
-  ASSERT_TRUE(rule.font_size.has_value());
-  EXPECT_EQ(*rule.font_size, 100);
+  ASSERT_TRUE(rule.font_size_pct.has_value());
+  EXPECT_EQ(*rule.font_size_pct, 100);
 }
 
 TEST(CssParserTest, FontSizeEm125IsXLarge) {
   auto rule = CssRule::parse("font-size: 1.25em");
-  ASSERT_TRUE(rule.font_size.has_value());
-  EXPECT_EQ(*rule.font_size, 140);
+  ASSERT_TRUE(rule.font_size_pct.has_value());
+  EXPECT_EQ(*rule.font_size_pct, 140);
 }
 
 TEST(CssParserTest, FontSizeEm175IsXXLarge) {
   auto rule = CssRule::parse("font-size: 1.75em");
-  ASSERT_TRUE(rule.font_size.has_value());
-  EXPECT_EQ(*rule.font_size, 160);
+  ASSERT_TRUE(rule.font_size_pct.has_value());
+  EXPECT_EQ(*rule.font_size_pct, 160);
 }
 
 // ---------------------------------------------------------------------------
@@ -462,31 +462,31 @@ TEST(CssParserTest, FontSizeEm175IsXXLarge) {
 
 TEST(CssParserTest, FontSizePercent85IsSmall) {
   auto rule = CssRule::parse("font-size: 85%");
-  ASSERT_TRUE(rule.font_size.has_value());
-  EXPECT_EQ(*rule.font_size, 80);
+  ASSERT_TRUE(rule.font_size_pct.has_value());
+  EXPECT_EQ(*rule.font_size_pct, 80);
 }
 
 TEST(CssParserTest, FontSizePercent84IsSmall) {
   auto rule = CssRule::parse("font-size: 84%");
-  ASSERT_TRUE(rule.font_size.has_value());
-  EXPECT_EQ(*rule.font_size, 80);
+  ASSERT_TRUE(rule.font_size_pct.has_value());
+  EXPECT_EQ(*rule.font_size_pct, 80);
 }
 
 TEST(CssParserTest, FontSizePercent115IsLarge) {
   auto rule = CssRule::parse("font-size: 115%");
-  ASSERT_TRUE(rule.font_size.has_value());
-  EXPECT_EQ(*rule.font_size, 120);
+  ASSERT_TRUE(rule.font_size_pct.has_value());
+  EXPECT_EQ(*rule.font_size_pct, 120);
 }
 
 TEST(CssParserTest, FontSizePercent116IsXLarge) {
   auto rule = CssRule::parse("font-size: 116%");
-  ASSERT_TRUE(rule.font_size.has_value());
-  EXPECT_EQ(*rule.font_size, 140);
+  ASSERT_TRUE(rule.font_size_pct.has_value());
+  EXPECT_EQ(*rule.font_size_pct, 140);
 }
 
 TEST(CssParserTest, FontSizePxIgnored) {
   auto rule = CssRule::parse("font-size: 14px");
-  EXPECT_FALSE(rule.font_size.has_value());
+  EXPECT_FALSE(rule.font_size_pct.has_value());
 }
 
 // ---------------------------------------------------------------------------
@@ -496,40 +496,40 @@ TEST(CssParserTest, FontSizePxIgnored) {
 TEST(CssParserTest, FontSizePt10IsSmall) {
   // 10pt / 12pt base = 0.833, below 0.90 threshold
   auto rule = CssRule::parse("font-size: 10pt");
-  ASSERT_TRUE(rule.font_size.has_value());
-  EXPECT_EQ(*rule.font_size, 80);
+  ASSERT_TRUE(rule.font_size_pct.has_value());
+  EXPECT_EQ(*rule.font_size_pct, 80);
 }
 
 TEST(CssParserTest, FontSizePt12IsNormal) {
   // 12pt / 12pt base = 1.0, within normal band
   auto rule = CssRule::parse("font-size: 12pt");
-  ASSERT_TRUE(rule.font_size.has_value());
-  EXPECT_EQ(*rule.font_size, 100);
+  ASSERT_TRUE(rule.font_size_pct.has_value());
+  EXPECT_EQ(*rule.font_size_pct, 100);
 }
 
 TEST(CssParserTest, FontSizePt16IsXXLarge) {
   // 16pt / 12pt base = 1.333, above 1.30 threshold
   auto rule = CssRule::parse("font-size: 16pt");
-  ASSERT_TRUE(rule.font_size.has_value());
-  EXPECT_EQ(*rule.font_size, 160);
+  ASSERT_TRUE(rule.font_size_pct.has_value());
+  EXPECT_EQ(*rule.font_size_pct, 160);
 }
 
 TEST(CssParserTest, FontSizeRem09IsNormal) {
   auto rule = CssRule::parse("font-size: 0.9rem");
-  ASSERT_TRUE(rule.font_size.has_value());
-  EXPECT_EQ(*rule.font_size, 100);
+  ASSERT_TRUE(rule.font_size_pct.has_value());
+  EXPECT_EQ(*rule.font_size_pct, 100);
 }
 
 TEST(CssParserTest, FontSizeRem075IsSmall) {
   auto rule = CssRule::parse("font-size: 0.75rem");
-  ASSERT_TRUE(rule.font_size.has_value());
-  EXPECT_EQ(*rule.font_size, 80);
+  ASSERT_TRUE(rule.font_size_pct.has_value());
+  EXPECT_EQ(*rule.font_size_pct, 80);
 }
 
 TEST(CssParserTest, FontSizeRem15IsXXLarge) {
   auto rule = CssRule::parse("font-size: 1.5rem");
-  ASSERT_TRUE(rule.font_size.has_value());
-  EXPECT_EQ(*rule.font_size, 160);
+  ASSERT_TRUE(rule.font_size_pct.has_value());
+  EXPECT_EQ(*rule.font_size_pct, 160);
 }
 
 // ---------------------------------------------------------------------------
@@ -786,20 +786,20 @@ TEST(CssParserTest, FontVariantSmallCapsDoesNotOverrideExplicitTransform) {
 
 TEST(CssParserTest, VerticalAlignSuperSmall) {
   auto rule = CssRule::parse("vertical-align: super");
-  ASSERT_TRUE(rule.font_size.has_value());
-  EXPECT_EQ(*rule.font_size, 80);
+  ASSERT_TRUE(rule.font_size_pct.has_value());
+  EXPECT_EQ(*rule.font_size_pct, 80);
 }
 
 TEST(CssParserTest, VerticalAlignSubSmall) {
   auto rule = CssRule::parse("vertical-align: sub");
-  ASSERT_TRUE(rule.font_size.has_value());
-  EXPECT_EQ(*rule.font_size, 80);
+  ASSERT_TRUE(rule.font_size_pct.has_value());
+  EXPECT_EQ(*rule.font_size_pct, 80);
 }
 
 TEST(CssParserTest, VerticalAlignDoesNotOverrideFontSize) {
   auto rule = CssRule::parse("font-size: large; vertical-align: super");
-  ASSERT_TRUE(rule.font_size.has_value());
-  EXPECT_EQ(*rule.font_size, 120);
+  ASSERT_TRUE(rule.font_size_pct.has_value());
+  EXPECT_EQ(*rule.font_size_pct, 120);
 }
 
 // ---------------------------------------------------------------------------

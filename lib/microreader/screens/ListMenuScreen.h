@@ -22,7 +22,7 @@ class ListMenuScreen : public IScreen {
  public:
   void start(DrawBuffer& buf, IRuntime& runtime) override;
   void stop() override {}
-  bool update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& runtime) override;
+  void update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& runtime) override;
 
  protected:
   const char* title_ = nullptr;
@@ -64,14 +64,10 @@ class ListMenuScreen : public IScreen {
   virtual void on_start() = 0;
 
   // Called when user presses select on an item.
-  // Return true to stay on this screen (e.g. action performed inline).
-  // Return false to exit (set chosen_ to navigate to a sub-screen).
-  virtual bool on_select(int index) = 0;
+  virtual void on_select(int index) = 0;
 
-  // Called when user presses back. Return false to exit (default), true to stay.
-  virtual bool on_back() {
-    return false;
-  }
+  // Called when user presses back.
+  virtual void on_back();
 
  private:
   std::vector<std::string> labels_;

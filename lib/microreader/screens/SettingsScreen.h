@@ -18,14 +18,14 @@ class SettingsScreen final : public ListMenuScreen {
     return "Settings";
   }
 
-  bool update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& runtime) override {
+  void update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& runtime) override {
     buf_ = &buf;
-    return ListMenuScreen::update(buttons, buf, runtime);
+    ListMenuScreen::update(buttons, buf, runtime);
   }
 
  protected:
   void on_start() override;
-  bool on_select(int index) override;
+  void on_select(int index) override;
 
  private:
   const char* data_dir_ = nullptr;

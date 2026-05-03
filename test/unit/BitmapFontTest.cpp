@@ -43,14 +43,14 @@ TEST(BitmapFontSyntheticTest, TruncatedHeaderIsInvalid) {
 #ifndef SMOKE_TESTS_ONLY
 
 static constexpr struct {
-  microreader::FontSize size;
+  uint8_t size_pct;
   const char* suffix;
 } kRealSizes[] = {
-    {microreader::80,  "0" },
-    {microreader::100, "1" },
-    {microreader::120, "2" },
-    {microreader::140, "3" },
-    {microreader::160, "4" },
+    {80,  "0" },
+    {100, "1" },
+    {120, "2" },
+    {140, "3" },
+    {160, "4" },
 };
 
 // Each generated .mbf file must be valid and have sensible header metrics.
@@ -149,8 +149,8 @@ TEST(BitmapFontRealFileTest, BitmapFontSetLoadsAllSizes) {
 
   EXPECT_TRUE(font_set.valid());
   for (const auto& s : kRealSizes) {
-    EXPECT_GT(font_set.char_width('A', microreader::FontStyle::Regular, s.size), 0) << s.suffix;
-    EXPECT_GT(font_set.y_advance(s.size), 0) << s.suffix;
+    EXPECT_GT(font_set.char_width('A', microreader::FontStyle::Regular, s.size_pct), 0) << s.suffix;
+    EXPECT_GT(font_set.y_advance(s.size_pct), 0) << s.suffix;
   }
 }
 

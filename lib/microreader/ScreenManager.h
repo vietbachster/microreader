@@ -25,16 +25,24 @@ class ScreenManager {
     screen->start(buf, runtime);
   }
 
-  // Pop the top screen. Stops it, then restarts the one below.
-  void pop(DrawBuffer& buf, IRuntime& runtime) {
-    if (depth_ == 0)
+  // Pop the top screen(s). Stops the current top, then restarts the new one below.
+  void pop(int count, DrawBuffer& buf, IRuntime& runtime) {
+    if (count <= 0 || depth_ == 0)
       return;
-    stack_[--depth_]->stop();
+    if (count > depth_)
+      count = depth_;
+
+    stack_[depth_ - 1]->stop();
     HEAP_LOG("pop: after stop");
+    depth_ -= count;
     if (depth_ > 0) {
       stack_[depth_ - 1]->start(buf, runtime);
       HEAP_LOG("pop: after prev start");
     }
+  }
+
+  void pop(DrawBuffer& buf, IRuntime& runtime) {
+    pop(1, buf, runtime);
   }
 
   // Restart the top screen (stop + start).

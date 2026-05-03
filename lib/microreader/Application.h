@@ -94,12 +94,25 @@ class Application {
 
   // Navigate to a screen: push on top of the current screen (current stays on stack).
   // Or replace the current screen (pop it first, then push the new one).
-  // Safe to call from within a screen's update(); the transition happens after update() returns.
+  // safe to call from within a screen's update(); the transition happens after update() returns.
   void push_screen(ScreenId id) {
     pending_push_ = id;
+    pending_replace_ = ScreenId::None;
+    pending_pop_count_ = 0;
   }
   void replace_screen(ScreenId id) {
+    pending_push_ = ScreenId::None;
     pending_replace_ = id;
+    pending_pop_count_ = 0;
+  }
+  void pop_screen(int count = 1) {
+    pending_push_ = ScreenId::None;
+    pending_replace_ = ScreenId::None;
+    pending_pop_count_ = count;
+  }
+
+  bool has_pending_transition() const {
+    return pending_push_ != ScreenId::None || pending_replace_ != ScreenId::None || pending_pop_count_ > 0;
   }
 
   void start(DrawBuffer& buf, IRuntime& runtime);
@@ -127,6 +140,7 @@ class Application {
   ChapterSelectScreen chapter_select_;
   ScreenId pending_push_ = ScreenId::None;
   ScreenId pending_replace_ = ScreenId::None;
+  int pending_pop_count_ = 0;
   const BitmapFontSet* reader_font_ = nullptr;
   FontManager* font_manager_ = nullptr;
   std::function<void()> invalidate_font_fn_;

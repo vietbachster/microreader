@@ -61,7 +61,7 @@ class ReaderScreen final : public IScreen {
 
   void start(DrawBuffer& buf, IRuntime& runtime) override;
   void stop() override;
-  bool update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& runtime) override;
+  void update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& runtime) override;
 
   // Layout constants â€” exposed so tests and tools can build matching PageOptions.
   static constexpr int kScale = 2;

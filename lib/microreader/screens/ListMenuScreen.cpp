@@ -2,6 +2,7 @@
 
 #include <cstring>
 
+#include "../Application.h"
 #include "../display/ui_font_header.h"
 #include "../display/ui_font_small.h"
 
@@ -249,7 +250,7 @@ void ListMenuScreen::draw_button_hints_(DrawBuffer& buf) const {
   }
 }
 
-bool ListMenuScreen::update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& runtime) {
+void ListMenuScreen::update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& runtime) {
   const int n = count();
 
   // Helper lambdas for selection movement (skip separators).
@@ -280,14 +281,16 @@ bool ListMenuScreen::update(const ButtonState& buttons, DrawBuffer& buf, IRuntim
     switch (btn) {
       case Button::Button0:
         // Flush any pending move before back so the screen redraws correctly
-        // if on_back() decides to stay (returns true).
+        // if on_back() decides to stay.
         if (moved) {
           draw_all_(buf, runtime.battery_percentage());
           buf.refresh();
           moved = false;
         }
-        if (!on_back())
-          return false;
+        on_back();
+        if (app_ && app_->has_pending_transition()) {
+          return;
+        }
         break;
 
       case Button::Button3:  // up
@@ -308,11 +311,11 @@ bool ListMenuScreen::update(const ButtonState& buttons, DrawBuffer& buf, IRuntim
 
       case Button::Button1:  // select
         if (n > 0 && selected_ < n) {
-          if (on_select(selected_)) {
-            needs_draw = true;
-          } else {
-            return false;
+          on_select(selected_);
+          if (app_ && app_->has_pending_transition()) {
+            return;
           }
+          needs_draw = true;
         }
         break;
 
@@ -352,8 +355,11 @@ bool ListMenuScreen::update(const ButtonState& buttons, DrawBuffer& buf, IRuntim
     draw_all_(buf, runtime.battery_percentage());
     buf.refresh();
   }
+}
 
-  return true;
+void ListMenuScreen::on_back() {
+  if (app_)
+    app_->pop_screen();
 }
 
 }  // namespace microreader

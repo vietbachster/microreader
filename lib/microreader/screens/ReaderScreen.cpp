@@ -275,15 +275,17 @@ void ReaderScreen::stop() {
   buf_ = nullptr;
 }
 
-bool ReaderScreen::update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& /*runtime*/) {
+void ReaderScreen::update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& /*runtime*/) {
   if (!open_ok_) {
     // Still drain the history so stale events don't bleed into the next frame.
     Button btn;
     while (buttons.next_press(btn)) {
-      if (btn == Button::Button0)
-        return false;
+      if (btn == Button::Button0) {
+        app_->pop_screen();
+        return;
+      }
     }
-    return true;
+    return;
   }
 
   // Process press events in the order they arrived.
@@ -294,14 +296,15 @@ bool ReaderScreen::update(const ButtonState& buttons, DrawBuffer& buf, IRuntime&
   while (buttons.next_press(btn)) {
     switch (btn) {
       case Button::Button0:
-        return false;
+        app_->pop_screen();
+        return;
       case Button::Button1:
         saved_chapter_idx_ = chapter_idx_;
         saved_page_pos_ = page_pos_;
         app_->reader_options()->set_settings(&reader_settings_);
         app_->reader_options()->populate(mrb_.toc(), static_cast<uint16_t>(chapter_idx_), page_pos_.paragraph);
         app_->push_screen(ScreenId::ReaderOptions);
-        return true;
+        return;
       case Button::Button2:
       case Button::Up:
         ++page_delta;
@@ -351,8 +354,6 @@ bool ReaderScreen::update(const ButtonState& buttons, DrawBuffer& buf, IRuntime&
     apply_grayscale_(buf);
     grayscale_active_ = true;
   }
-
-  return true;
 }
 
 void ReaderScreen::load_chapter_(size_t idx) {
@@ -393,7 +394,8 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
 
   page_ = layout_engine_.layout();
 
-  // â”€â”€ Collect image positions from layout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â”€â”€ Collect image positions from layout
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   struct ImageToDraw {
     int x, y, w, h;
     uint32_t offset;
@@ -434,7 +436,8 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
   // Track whether grayscale pass is needed (deferred to update()).
   grayscale_pending_ = fset && fset->has_grayscale();
 
-  // â”€â”€ BW rendering â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â”€â”€ BW rendering
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   buf.fill(true);
 
   if (fset) {
@@ -500,7 +503,8 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
     }
   }
 
-  // â”€â”€ Timing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â”€â”€ Timing
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   int n_words = 0;
   for (const auto& ci : page_.items)
     if (const PageTextItem* ti = std::get_if<PageTextItem>(&ci))
@@ -563,7 +567,8 @@ void ReaderScreen::render_text_(DrawBuffer& buf, const BitmapFontSet& fset, Gray
         tlen = 63;
       std::memcpy(text, w.text, tlen);
       text[tlen] = '\0';
-      buf.draw_text_plane(render, x, baseline_y, text, static_cast<size_t>(tlen), fset, plane, white, w.style, w.size_pct);
+      buf.draw_text_plane(render, x, baseline_y, text, static_cast<size_t>(tlen), fset, plane, white, w.style,
+                          w.size_pct);
     }
   }
 }

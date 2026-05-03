@@ -30,9 +30,9 @@ class IScreen {
   // Called once when leaving this screen.
   virtual void stop() = 0;
 
-  // Per-frame update. Return true to stay on this screen, false to exit.
+  // Per-frame update. Call app_->pop_screen() to exit.
   // Call buf.refresh() internally when the display needs updating.
-  virtual bool update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& runtime) = 0;
+  virtual void update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& runtime) = 0;
 
  protected:
   Application* app_ = nullptr;

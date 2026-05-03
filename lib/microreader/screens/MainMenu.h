@@ -56,8 +56,8 @@ class MainMenu final : public ListMenuScreen {
 
  protected:
   void on_start() override;
-  bool on_select(int index) override;
-  bool on_back() override;
+  void on_select(int index) override;
+  void on_back() override;
 
  private:
   const char* books_dir_ = nullptr;

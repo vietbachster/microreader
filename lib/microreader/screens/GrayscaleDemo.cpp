@@ -3,6 +3,7 @@
 #include <cstring>
 
 #include "../../../resources/test_image_grayscale.h"
+#include "../Application.h"
 
 namespace microreader {
 
@@ -90,9 +91,11 @@ void GrayscaleDemo::start(DrawBuffer& buf, IRuntime& runtime) {
 
 void GrayscaleDemo::stop() {}
 
-bool GrayscaleDemo::update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& /*runtime*/) {
-  if (buttons.is_pressed(Button::Button0))
-    return false;
+void GrayscaleDemo::update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& /*runtime*/) {
+  if (buttons.is_pressed(Button::Button0)) {
+    app_->pop_screen();
+    return;
+  }
 
   bool is_gray = buf.display().in_grayscale_mode();
 
@@ -101,7 +104,7 @@ bool GrayscaleDemo::update(const ButtonState& buttons, DrawBuffer& buf, IRuntime
       buf.revert_grayscale();
     else
       apply_grayscale_(buf);
-    return true;
+    return;
   }
 
   bool changed = false;
@@ -121,8 +124,6 @@ bool GrayscaleDemo::update(const ButtonState& buttons, DrawBuffer& buf, IRuntime
     draw_bw_(buf);
     buf.refresh();  // partial BW refresh (auto-reverts grayscale if active)
   }
-
-  return true;
 }
 
 }  // namespace microreader
