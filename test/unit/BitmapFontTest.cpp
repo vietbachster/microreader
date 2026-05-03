@@ -46,11 +46,10 @@ static constexpr struct {
   uint8_t size_pct;
   const char* suffix;
 } kRealSizes[] = {
-    {80,  "0" },
-    {100, "1" },
-    {120, "2" },
-    {140, "3" },
-    {160, "4" },
+    {80,  "0"},
+    {100, "1"},
+    {120, "2"},
+    {140, "3"},
 };
 
 // Each generated .mbf file must be valid and have sensible header metrics.
@@ -69,16 +68,16 @@ TEST(BitmapFontRealFileTest, AllSizesLoadAndAreValid) {
 
 // Larger pixel-size files should have greater or equal y_advance than smaller ones.
 TEST(BitmapFontRealFileTest, MetricsScaleWithSize) {
-  std::vector<std::vector<uint8_t>> data(microreader::kMaxFonts);
-  std::vector<microreader::BitmapFont> fonts(microreader::kMaxFonts);
-  for (size_t i = 0; i < microreader::kMaxFonts; ++i) {
+  std::vector<std::vector<uint8_t>> data(std::size(kRealSizes));
+  std::vector<microreader::BitmapFont> fonts(std::size(kRealSizes));
+  for (size_t i = 0; i < std::size(kRealSizes); ++i) {
     data[i] = load_mbf(kRealSizes[i].suffix);
     ASSERT_FALSE(data[i].empty()) << kRealSizes[i].suffix;
     fonts[i].init(data[i].data(), data[i].size());
     ASSERT_TRUE(fonts[i].valid()) << kRealSizes[i].suffix;
   }
   // Small ≤ Normal ≤ Large ≤ XLarge ≤ XXLarge
-  for (size_t i = 1; i < microreader::kMaxFonts; ++i) {
+  for (size_t i = 1; i < std::size(kRealSizes); ++i) {
     EXPECT_LE(fonts[i - 1].y_advance(), fonts[i].y_advance())
         << kRealSizes[i - 1].suffix << " should not be taller than " << kRealSizes[i].suffix;
   }
@@ -86,7 +85,7 @@ TEST(BitmapFontRealFileTest, MetricsScaleWithSize) {
 
 // Common printable ASCII characters must be present with non-zero advance widths.
 TEST(BitmapFontRealFileTest, CommonAsciiGlyphsPresent) {
-  auto data = load_mbf("normal");
+  auto data = load_mbf("1");
   ASSERT_FALSE(data.empty());
   microreader::BitmapFont font(data.data(), data.size());
   ASSERT_TRUE(font.valid());
@@ -98,7 +97,7 @@ TEST(BitmapFontRealFileTest, CommonAsciiGlyphsPresent) {
 
 // Bold, italic, and bold-italic styles must be present (generated with --with-styles).
 TEST(BitmapFontRealFileTest, AllStyleVariantsPresent) {
-  auto data = load_mbf("normal");
+  auto data = load_mbf("1");
   ASSERT_FALSE(data.empty());
   microreader::BitmapFont font(data.data(), data.size());
   ASSERT_TRUE(font.valid());
@@ -112,7 +111,7 @@ TEST(BitmapFontRealFileTest, AllStyleVariantsPresent) {
 // Bold glyphs should have non-zero advance widths for common letters.
 // (Bold is not guaranteed to be wider than Regular for all typefaces.)
 TEST(BitmapFontRealFileTest, BoldGlyphsHaveNonZeroWidth) {
-  auto data = load_mbf("normal");
+  auto data = load_mbf("1");
   ASSERT_FALSE(data.empty());
   microreader::BitmapFont font(data.data(), data.size());
   ASSERT_TRUE(font.valid());
@@ -126,7 +125,7 @@ TEST(BitmapFontRealFileTest, BoldGlyphsHaveNonZeroWidth) {
 
 // Grayscale planes must be present (generated with --with-styles which includes gray data).
 TEST(BitmapFontRealFileTest, GrayscalePlanesPresent) {
-  auto data = load_mbf("normal");
+  auto data = load_mbf("1");
   ASSERT_FALSE(data.empty());
   microreader::BitmapFont font(data.data(), data.size());
   ASSERT_TRUE(font.valid());
@@ -135,11 +134,11 @@ TEST(BitmapFontRealFileTest, GrayscalePlanesPresent) {
 
 // BitmapFontSet loaded with all 5 sizes must be valid and dispatch correctly.
 TEST(BitmapFontRealFileTest, BitmapFontSetLoadsAllSizes) {
-  std::vector<std::vector<uint8_t>> data(microreader::kMaxFonts);
-  std::vector<microreader::BitmapFont> fonts(microreader::kMaxFonts);
+  std::vector<std::vector<uint8_t>> data(std::size(kRealSizes));
+  std::vector<microreader::BitmapFont> fonts(std::size(kRealSizes));
   microreader::BitmapFontSet font_set;
 
-  for (size_t i = 0; i < microreader::kMaxFonts; ++i) {
+  for (size_t i = 0; i < std::size(kRealSizes); ++i) {
     data[i] = load_mbf(kRealSizes[i].suffix);
     ASSERT_FALSE(data[i].empty()) << kRealSizes[i].suffix;
     fonts[i].init(data[i].data(), data[i].size());

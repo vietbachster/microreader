@@ -12,7 +12,7 @@ class FontManager {
  public:
   // Init one font slot. The data pointer must outlive this object.
   void load_font(const uint8_t* data, size_t sz) {
-    if (num_fonts_ >= kMaxFonts)
+    if (num_fonts_ >= kMaxFontSizes)
       return;
     int idx = num_fonts_++;
     prop_fonts_[idx].init(data, sz);
@@ -32,7 +32,7 @@ class FontManager {
   virtual void ensure_ready(DrawBuffer&) {}
 
  protected:
-  BitmapFont prop_fonts_[kMaxFonts];
+  BitmapFont prop_fonts_[kMaxFontSizes];
   BitmapFontSet font_set_;
   int num_fonts_ = 0;
 };

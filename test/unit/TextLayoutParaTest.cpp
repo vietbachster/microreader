@@ -536,34 +536,30 @@ TEST(TextLayout, MixedSizesLineHeight) {
 
 TEST(TextLayout, FixedFontSizeScaling) {
   // Width is constant regardless of FontSize (bitmap font can't resize glyphs).
-  EXPECT_EQ(font8.char_width('A', FontStyle::Regular, 100),
-            font8.char_width('A', FontStyle::Regular, 100));
-  EXPECT_EQ(font8.char_width('A', FontStyle::Regular, 100),
-            font8.char_width('A', FontStyle::Regular, 100));
-  EXPECT_EQ(font8.char_width('A', FontStyle::Regular, 100),
-            font8.char_width('A', FontStyle::Regular, 100));
-  EXPECT_EQ(font8.char_width('A', FontStyle::Regular, 100),
-            font8.char_width('A', FontStyle::Regular, 100));
+  EXPECT_EQ(font8.char_width('A', FontStyle::Regular, 80), font8.char_width('A', FontStyle::Regular, 100));
+  EXPECT_EQ(font8.char_width('A', FontStyle::Regular, 120), font8.char_width('A', FontStyle::Regular, 100));
+  EXPECT_EQ(font8.char_width('A', FontStyle::Regular, 140), font8.char_width('A', FontStyle::Regular, 100));
+  EXPECT_EQ(font8.char_width('A', FontStyle::Regular, 160), font8.char_width('A', FontStyle::Regular, 100));
 
   // y_advance still scales (line heights can vary without causing overlap).
-  EXPECT_LT(font8.y_advance(100), font8.y_advance(100));
-  EXPECT_GT(font8.y_advance(100), font8.y_advance(100));
-  EXPECT_GT(font8.y_advance(100), font8.y_advance(100));
-  EXPECT_GT(font8.y_advance(100), font8.y_advance(100));
+  EXPECT_LT(font8.y_advance(80), font8.y_advance(100));
+  EXPECT_GT(font8.y_advance(120), font8.y_advance(100));
+  EXPECT_GT(font8.y_advance(140), font8.y_advance(100));
+  EXPECT_GT(font8.y_advance(160), font8.y_advance(100));
 
   // Width: always 8 regardless of size
-  EXPECT_EQ(font8.char_width('A', FontStyle::Regular, 100), 8);
+  EXPECT_EQ(font8.char_width('A', FontStyle::Regular, 80), 8);
   EXPECT_EQ(font8.char_width('A', FontStyle::Regular, 100), 8);
   EXPECT_EQ(font8.char_width('A', FontStyle::Regular, 100), 8);
   EXPECT_EQ(font8.char_width('A', FontStyle::Regular, 100), 8);
   EXPECT_EQ(font8.char_width('A', FontStyle::Regular, 100), 8);
 
   // Line heights: 16*90%=14, 16, 16*110%=17, 16*120%=19, 16*130%=20
-  EXPECT_EQ(font8.y_advance(100), 14);
+  EXPECT_EQ(font8.y_advance(90), 14);
   EXPECT_EQ(font8.y_advance(100), 16);
-  EXPECT_EQ(font8.y_advance(100), 17);
-  EXPECT_EQ(font8.y_advance(100), 19);
-  EXPECT_EQ(font8.y_advance(100), 20);
+  EXPECT_EQ(font8.y_advance(110), 17);
+  EXPECT_EQ(font8.y_advance(120), 19);
+  EXPECT_EQ(font8.y_advance(130), 20);
 }
 
 // ---------------------------------------------------------------------------

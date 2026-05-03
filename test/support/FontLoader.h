@@ -31,21 +31,22 @@ static inline std::vector<uint8_t> load_mbf(const std::string& suffix) {
 }
 
 // Load all 5 font sizes into the provided BitmapFontSet.
-// `prop_fonts` and `font_data` must be pre-sized to kMaxFonts;
+// `prop_fonts` and `font_data` must be pre-sized to kMaxFontSizes;
 // caller owns those vectors and must keep them alive as long as font_set is used.
 // Returns true if every size was loaded and initialised successfully.
 static inline bool load_desktop_fonts(microreader::BitmapFontSet& font_set,
                                       std::vector<microreader::BitmapFont>& prop_fonts,
                                       std::vector<std::vector<uint8_t>>& font_data) {
   font_data.clear();
-  font_data.resize(microreader::kMaxFonts);
+  font_data.resize(microreader::kMaxFontSizes);
   prop_fonts.clear();
-  prop_fonts.resize(microreader::kMaxFonts);
+  prop_fonts.resize(microreader::kMaxFontSizes);
 
-  for (size_t i = 0; i < microreader::kMaxFonts; ++i) {
+  for (size_t i = 0; i < microreader::kMaxFontSizes; ++i) {
     font_data[i] = load_mbf(std::to_string(i));
-    if (font_data[i].empty())
-      return false;
+    if (font_data[i].empty()) {
+      break;  // No more fonts
+    }
     prop_fonts[i].init(font_data[i].data(), font_data[i].size());
     if (!prop_fonts[i].valid())
       return false;

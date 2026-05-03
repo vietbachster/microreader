@@ -33,10 +33,10 @@ struct ReaderSettings {
   static constexpr const char* kHPaddingNames[] = {"Narrow", "Normal", "Wide", "Wider"};
   static constexpr const char* kVPaddingNames[] = {"Tight", "Normal", "Loose", "Looser"};
   static constexpr const char* kSpacingNames[] = {"Tighter", "Tight", "Normal", "Loose", "Looser"};
-  static constexpr const char* kFontSizeNames[] = {"20", "24", "26", "28", "30"};
+  static constexpr const char* kFontSizeNames[] = {"20", "24", "28", "32"};
   static constexpr uint8_t kNumPresets = 4;
   static constexpr uint8_t kNumSpacingPresets = 5;
-  static constexpr uint8_t kNumFontSizePresets = 5;
+  static constexpr uint8_t kNumFontSizePresets = 4;
 
   uint16_t h_padding() const {
     return kHPaddingPresets[padding_h_idx];

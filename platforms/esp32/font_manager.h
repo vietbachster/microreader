@@ -28,7 +28,7 @@ class FontManager : public microreader::FontManager {
       load_fonts_();
       if (font_set_.valid()) {
         static const char* names[] = {"Small", "Normal", "Large", "XLarge", "XXLarge"};
-        for (int i = 0; i < microreader::kMaxFonts; i++) {
+        for (int i = 0; i < microreader::kMaxFontSizes; i++) {
           if (prop_fonts_[i].valid())
             ESP_LOGI("font", "%s: %u glyphs, height=%u baseline=%u", names[i], (unsigned)prop_fonts_[i].num_glyphs(),
                      (unsigned)prop_fonts_[i].glyph_height(), (unsigned)prop_fonts_[i].baseline());
@@ -91,8 +91,8 @@ class FontManager : public microreader::FontManager {
 
     // FNTS v1: [FNTS:4][num:1][version:1][res:2][name:32][num×size:4][data...]
     uint8_t num = d[4];
-    if (num > microreader::kMaxFonts)
-      num = microreader::kMaxFonts;
+    if (num > microreader::kMaxFontSizes)
+      num = microreader::kMaxFontSizes;
 
     char font_name[33] = {};
     memcpy(font_name, d + 8, 32);
@@ -100,7 +100,7 @@ class FontManager : public microreader::FontManager {
     ESP_LOGI("font", "Bundle font: \"%s\" (v%u, %u sizes)", font_name, d[5], num);
 
     constexpr size_t kSizeTableOff = 8 + 32;
-    uint32_t sizes[microreader::kMaxFonts] = {};
+    uint32_t sizes[microreader::kMaxFontSizes] = {};
     for (int i = 0; i < num; i++) {
       const uint8_t* p = d + kSizeTableOff + i * 4;
       sizes[i] = p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24);

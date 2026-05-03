@@ -22,7 +22,8 @@ enum class FontStyle : uint8_t {
 // Font size limit
 // ---------------------------------------------------------------------------
 
-static constexpr int kMaxFonts = 5;
+// The maximum number of dynamically scaled fonts we keep loaded simultaneously.
+static constexpr int kMaxFontSizes = 8;
 
 // ---------------------------------------------------------------------------
 // Text alignment

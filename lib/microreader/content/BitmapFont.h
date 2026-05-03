@@ -278,7 +278,7 @@ class BitmapFontSet : public IFont {
   BitmapFontSet() = default;
 
   void add(const BitmapFont* font) {
-    if (num_fonts_ < kMaxFonts && font && font->valid()) {
+    if (num_fonts_ < kMaxFontSizes && font && font->valid()) {
       fonts_[num_fonts_++] = font;
     }
   }
@@ -346,7 +346,7 @@ class BitmapFontSet : public IFont {
   }
 
  private:
-  const BitmapFont* fonts_[kMaxFonts] = {};
+  const BitmapFont* fonts_[kMaxFontSizes] = {};
   int num_fonts_ = 0;
   int base_idx_ = 0;  // Index of 100% font
 
