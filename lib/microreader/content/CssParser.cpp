@@ -130,150 +130,150 @@ CssRule CssRule::parse(const char* decl, size_t length, const CssConfig& config)
 
       if (key == "text-align") {
         if (value == "start" || value == "left")
-          rule.alignment = Alignment::Start;
+          rule.set_alignment(Alignment::Start);
         else if (value == "end" || value == "right")
-          rule.alignment = Alignment::End;
+          rule.set_alignment(Alignment::End);
         else if (value == "center")
-          rule.alignment = Alignment::Center;
+          rule.set_alignment(Alignment::Center);
         else if (value == "justify")
-          rule.alignment = Alignment::Justify;
+          rule.set_alignment(Alignment::Justify);
       } else if (key == "font-style") {
         if (value == "normal")
-          rule.italic = false;
+          rule.set_italic(false);
         else if (value == "italic")
-          rule.italic = true;
+          rule.set_italic(true);
       } else if (key == "font-weight") {
         if (value == "normal")
-          rule.bold = false;
+          rule.set_bold(false);
         else if (value == "bold")
-          rule.bold = true;
+          rule.set_bold(true);
       } else if (key == "text-indent") {
         auto len = parse_css_length(value, config.glyph_width, config.content_width);
         if (len.has_value())
-          rule.indent = static_cast<int16_t>(*len);
+          rule.set_indent(static_cast<int16_t>(*len));
       } else if (key == "margin-left") {
         auto len = parse_css_length(value, config.glyph_width, config.content_width);
         if (len.has_value() && *len > 0)
-          rule.margin_left = static_cast<uint16_t>(*len);
+          rule.set_margin_left(static_cast<uint16_t>(*len));
       } else if (key == "margin-right") {
         auto len = parse_css_length(value, config.glyph_width, config.content_width);
         if (len.has_value() && *len > 0)
-          rule.margin_right = static_cast<uint16_t>(*len);
+          rule.set_margin_right(static_cast<uint16_t>(*len));
       } else if (key == "margin-top") {
         auto len = parse_css_length(value, config.glyph_width, config.content_width);
         if (len.has_value())
-          rule.margin_top = static_cast<uint16_t>(std::max(0, *len));
+          rule.set_margin_top(static_cast<uint16_t>(std::max(0, *len)));
       } else if (key == "margin-bottom") {
         auto len = parse_css_length(value, config.glyph_width, config.content_width);
         if (len.has_value())
-          rule.margin_bottom = static_cast<uint16_t>(std::max(0, *len));
+          rule.set_margin_bottom(static_cast<uint16_t>(std::max(0, *len)));
       } else if (key == "margin") {
         auto parts = split_css_values(value);
         auto s = parse_shorthand_sides(parts, config.glyph_width, config.content_width);
         if (s.left > 0)
-          rule.margin_left = static_cast<uint16_t>(s.left);
+          rule.set_margin_left(static_cast<uint16_t>(s.left));
         if (s.right > 0)
-          rule.margin_right = static_cast<uint16_t>(s.right);
+          rule.set_margin_right(static_cast<uint16_t>(s.right));
         if (!parts.empty()) {
-          rule.margin_top = static_cast<uint16_t>(std::max(0, s.top));
-          rule.margin_bottom = static_cast<uint16_t>(std::max(0, s.bottom));
+          rule.set_margin_top(static_cast<uint16_t>(std::max(0, s.top)));
+          rule.set_margin_bottom(static_cast<uint16_t>(std::max(0, s.bottom)));
         }
       } else if (key == "padding-left") {
         auto len = parse_css_length(value, config.glyph_width, config.content_width);
         if (len.has_value()) {
           uint16_t val = *len > 0 ? static_cast<uint16_t>(*len) : 0;
-          rule.margin_left = rule.margin_left.has_value() ? rule.margin_left.value() + val : val;
+          rule.set_margin_left(rule.has_margin_left_ ? rule.margin_left + val : val);
         }
       } else if (key == "padding-right") {
         auto len = parse_css_length(value, config.glyph_width, config.content_width);
         if (len.has_value() && *len > 0) {
           uint16_t val = static_cast<uint16_t>(*len);
-          rule.margin_right = rule.margin_right.value_or(0) + val;
+          rule.set_margin_right(rule.margin_right_opt().value_or(0) + val);
         }
       } else if (key == "padding-top") {
         auto len = parse_css_length(value, config.glyph_width, config.content_width);
         if (len.has_value() && *len >= 0) {
           uint16_t val = static_cast<uint16_t>(std::max(0, *len));
-          rule.margin_top = std::max(rule.margin_top.value_or(0), val);
+          rule.set_margin_top(std::max(rule.margin_top_opt().value_or(0), val));
         }
       } else if (key == "padding-bottom") {
         auto len = parse_css_length(value, config.glyph_width, config.content_width);
         if (len.has_value() && *len >= 0) {
           uint16_t val = static_cast<uint16_t>(std::max(0, *len));
-          rule.margin_bottom = std::max(rule.margin_bottom.value_or(0), val);
+          rule.set_margin_bottom(std::max(rule.margin_bottom_opt().value_or(0), val));
         }
       } else if (key == "padding") {
         auto parts = split_css_values(value);
         auto s = parse_shorthand_sides(parts, config.glyph_width, config.content_width);
         if (!parts.empty()) {
           uint16_t lv = s.left > 0 ? static_cast<uint16_t>(s.left) : 0;
-          rule.margin_left = rule.margin_left.has_value() ? rule.margin_left.value() + lv : lv;
+          rule.set_margin_left(rule.has_margin_left_ ? rule.margin_left + lv : lv);
         }
         if (s.right > 0)
-          rule.margin_right = rule.margin_right.value_or(0) + static_cast<uint16_t>(s.right);
+          rule.set_margin_right(rule.margin_right_opt().value_or(0) + static_cast<uint16_t>(s.right));
         if (s.top > 0)
-          rule.margin_top = std::max(rule.margin_top.value_or(0), static_cast<uint16_t>(s.top));
+          rule.set_margin_top(std::max(rule.margin_top_opt().value_or(0), static_cast<uint16_t>(s.top)));
         if (s.bottom > 0)
-          rule.margin_bottom = std::max(rule.margin_bottom.value_or(0), static_cast<uint16_t>(s.bottom));
+          rule.set_margin_bottom(std::max(rule.margin_bottom_opt().value_or(0), static_cast<uint16_t>(s.bottom)));
       } else if (key == "float") {
         if (value == "left" || value == "right")
-          rule.is_float = true;
+          rule.set_is_float(true);
         else if (value == "none")
-          rule.is_float = false;
+          rule.set_is_float(false);
       } else if (key == "display") {
         if (value == "none")
-          rule.is_hidden = true;
+          rule.set_is_hidden(true);
       } else if (key == "border-top-style") {
         if (value != "none" && value != "hidden")
-          rule.border_top = true;
+          rule.set_border_top(true);
         else
-          rule.border_top = false;
+          rule.set_border_top(false);
       } else if (key == "border-top") {
         // e.g. "1px solid black" — any non-none value means a visible border
         if (value == "none" || value == "0" || value == "hidden")
-          rule.border_top = false;
+          rule.set_border_top(false);
         else if (value.find("solid") != std::string::npos || value.find("dashed") != std::string::npos ||
                  value.find("dotted") != std::string::npos || value.find("double") != std::string::npos)
-          rule.border_top = true;
+          rule.set_border_top(true);
       } else if (key == "page-break-before") {
         if (value == "always" || value == "left" || value == "right")
-          rule.page_break_before = true;
+          rule.set_page_break_before(true);
         else if (value == "auto" || value == "avoid")
-          rule.page_break_before = false;
+          rule.set_page_break_before(false);
       } else if (key == "page-break-after") {
         if (value == "always" || value == "left" || value == "right")
-          rule.page_break_after = true;
+          rule.set_page_break_after(true);
         else if (value == "auto" || value == "avoid")
-          rule.page_break_after = false;
+          rule.set_page_break_after(false);
       } else if (key == "text-transform") {
         if (value == "uppercase")
-          rule.text_transform = TextTransform::Uppercase;
+          rule.set_text_transform(TextTransform::Uppercase);
         else if (value == "lowercase")
-          rule.text_transform = TextTransform::Lowercase;
+          rule.set_text_transform(TextTransform::Lowercase);
         else if (value == "capitalize")
-          rule.text_transform = TextTransform::Capitalize;
+          rule.set_text_transform(TextTransform::Capitalize);
         else if (value == "none")
-          rule.text_transform = TextTransform::None;
+          rule.set_text_transform(TextTransform::None);
       } else if (key == "font-variant") {
         if (value == "small-caps") {
-          rule.font_variant_small_caps = true;
+          rule.set_font_variant_small_caps(true);
           // Approximate as uppercase when no explicit text-transform is set
-          if (!rule.text_transform.has_value())
-            rule.text_transform = TextTransform::Uppercase;
+          if (!rule.has_text_transform_)
+            rule.set_text_transform(TextTransform::Uppercase);
         }
       } else if (key == "vertical-align") {
         // CSS super/sub -> font_size_pct: 75% + VerticalAlign
         if (value == "super") {
-          if (!rule.font_size_pct.has_value())
-            rule.font_size_pct = 75;
-          rule.vertical_align = VerticalAlign::Super;
+          if (!rule.has_font_size_pct_)
+            rule.set_font_size_pct(75);
+          rule.set_vertical_align(VerticalAlign::Super);
         } else if (value == "sub") {
-          if (!rule.font_size_pct.has_value())
-            rule.font_size_pct = 75;
-          rule.vertical_align = VerticalAlign::Sub;
+          if (!rule.has_font_size_pct_)
+            rule.set_font_size_pct(75);
+          rule.set_vertical_align(VerticalAlign::Sub);
         } else if (value == "top" || value == "bottom") {
-          if (!rule.font_size_pct.has_value())
-            rule.font_size_pct = 75;
+          if (!rule.has_font_size_pct_)
+            rule.set_font_size_pct(75);
         }
       } else if (key == "line-height") {
         // Parse line-height as percentage of our natural y_advance.
@@ -283,70 +283,70 @@ CssRule CssRule::parse(const char* decl, size_t length, const CssConfig& config)
         static constexpr float kNormFactor = 1.5f;
         char* end = nullptr;
         if (value == "normal" || value == "inherit") {
-          rule.line_height_pct = 100;
+          rule.set_line_height_pct(100);
         } else if (value.size() > 1 && value.back() == '%') {
           float pct = std::strtof(value.c_str(), &end);
           if (end != value.c_str()) {
             uint8_t val = static_cast<uint8_t>(std::clamp(pct / kNormFactor, 70.0f, 200.0f));
-            rule.line_height_pct = val;
+            rule.set_line_height_pct(val);
           }
         } else if (value.size() > 2 && value.substr(value.size() - 2) == "em") {
           float em = std::strtof(value.c_str(), &end);
           if (end != value.c_str()) {
             uint8_t val = static_cast<uint8_t>(std::clamp(em * 100.0f / kNormFactor, 70.0f, 200.0f));
-            rule.line_height_pct = val;
+            rule.set_line_height_pct(val);
           }
         } else {
           // Unitless number (e.g. "1.5")
           float num = std::strtof(value.c_str(), &end);
           if (end != value.c_str()) {
             uint8_t val = static_cast<uint8_t>(std::clamp(num * 100.0f / kNormFactor, 70.0f, 200.0f));
-            rule.line_height_pct = val;
+            rule.set_line_height_pct(val);
           }
         }
       } else if (key == "list-style-type" || key == "list-style") {
         if (value == "none")
-          rule.list_style_none = true;
+          rule.set_list_style_none(true);
       } else if (key == "font-size") {
         if (value == "small" || value == "x-small" || value == "xx-small" || value == "smaller")
-          rule.font_size_pct = 80;
+          rule.set_font_size_pct(80);
         else if (value == "large" || value == "larger")
-          rule.font_size_pct = 120;
+          rule.set_font_size_pct(120);
         else if (value == "x-large")
-          rule.font_size_pct = 140;
+          rule.set_font_size_pct(140);
         else if (value == "xx-large")
-          rule.font_size_pct = 160;
+          rule.set_font_size_pct(160);
         else if (value == "medium" || value == "normal")
-          rule.font_size_pct = 100;
+          rule.set_font_size_pct(100);
         else {
           // Try parsing numeric values: percentages (90%) and em (0.9em)
           char* end = nullptr;
           if (value.size() > 1 && value.back() == '%') {
             float pct = std::strtof(value.c_str(), &end);
             if (end != value.c_str()) {
-              rule.font_size_pct = static_cast<uint8_t>(std::clamp(pct, 30.0f, 250.0f));
+              rule.set_font_size_pct(static_cast<uint8_t>(std::clamp(pct, 30.0f, 250.0f)));
             }
           } else if (value.size() > 2 && value.substr(value.size() - 2) == "em") {
             float em = std::strtof(value.c_str(), &end);
             if (end != value.c_str()) {
-              rule.font_size_pct = static_cast<uint8_t>(std::clamp(em * 100.0f, 30.0f, 250.0f));
+              rule.set_font_size_pct(static_cast<uint8_t>(std::clamp(em * 100.0f, 30.0f, 250.0f)));
             }
           } else if (value.size() > 3 && value.substr(value.size() - 3) == "rem") {
             float rem = std::strtof(value.c_str(), &end);
             if (end != value.c_str()) {
-              rule.font_size_pct = static_cast<uint8_t>(std::clamp(rem * 100.0f, 30.0f, 250.0f));
+              rule.set_font_size_pct(static_cast<uint8_t>(std::clamp(rem * 100.0f, 30.0f, 250.0f)));
             }
           } else if (value.size() > 2 && value.substr(value.size() - 2) == "pt") {
             float pt = std::strtof(value.c_str(), &end);
             if (end != value.c_str()) {
               float ratio = pt / 12.0f;
-              rule.font_size_pct = static_cast<uint8_t>(std::clamp(ratio * 100.0f, 30.0f, 250.0f));
+              rule.set_font_size_pct(static_cast<uint8_t>(std::clamp(ratio * 100.0f, 30.0f, 250.0f)));
             }
           } else if (value.size() > 2 && value.substr(value.size() - 2) == "px") {
             float px = std::strtof(value.c_str(), &end);
             if (end != value.c_str()) {
               float ratio = px / 24.0f;
-              rule.font_size_pct = static_cast<uint8_t>(std::clamp(ratio * 100.0f, 30.0f, 250.0f));
+              rule.set_font_size_pct(static_cast<uint8_t>(std::clamp(ratio * 100.0f, 30.0f, 250.0f)));
             }
           }
         }
@@ -357,13 +357,13 @@ CssRule CssRule::parse(const char* decl, size_t length, const CssConfig& config)
 
   // If both margins are set in the same rule, clamp their total to
   // max_margin_pct% of content_width, scaling proportionally.
-  if (rule.margin_left.has_value() && rule.margin_right.has_value()) {
-    uint16_t total = *rule.margin_left + *rule.margin_right;
+  if (rule.has_margin_left_ && rule.has_margin_right_) {
+    uint16_t total = rule.margin_left + rule.margin_right;
     uint16_t max_total = config.max_margin_pct * config.content_width / 100;
     if (total > max_total && total > 0) {
       float scale = static_cast<float>(max_total) / total;
-      rule.margin_left = static_cast<uint16_t>(*rule.margin_left * scale);
-      rule.margin_right = static_cast<uint16_t>(*rule.margin_right * scale);
+      rule.set_margin_left(static_cast<uint16_t>(rule.margin_left * scale));
+      rule.set_margin_right(static_cast<uint16_t>(rule.margin_right * scale));
     }
   }
 
@@ -372,26 +372,84 @@ CssRule CssRule::parse(const char* decl, size_t length, const CssConfig& config)
 
 CssRule CssRule::operator+(const CssRule& rhs) const {
   CssRule result;
-  result.alignment = rhs.alignment.has_value() ? rhs.alignment : alignment;
-  result.italic = rhs.italic.has_value() ? rhs.italic : italic;
-  result.bold = rhs.bold.has_value() ? rhs.bold : bold;
-  result.indent = rhs.indent.has_value() ? rhs.indent : indent;
-  result.font_size_pct = rhs.font_size_pct.has_value() ? rhs.font_size_pct : font_size_pct;
-  result.margin_left = rhs.margin_left.has_value() ? rhs.margin_left : margin_left;
-  result.margin_right = rhs.margin_right.has_value() ? rhs.margin_right : margin_right;
-  result.margin_top = rhs.margin_top.has_value() ? rhs.margin_top : margin_top;
-  result.margin_bottom = rhs.margin_bottom.has_value() ? rhs.margin_bottom : margin_bottom;
-  result.is_float = rhs.is_float.has_value() ? rhs.is_float : is_float;
-  result.is_hidden = rhs.is_hidden.has_value() ? rhs.is_hidden : is_hidden;
-  result.page_break_before = rhs.page_break_before.has_value() ? rhs.page_break_before : page_break_before;
-  result.page_break_after = rhs.page_break_after.has_value() ? rhs.page_break_after : page_break_after;
-  result.text_transform = rhs.text_transform.has_value() ? rhs.text_transform : text_transform;
-  result.vertical_align = rhs.vertical_align.has_value() ? rhs.vertical_align : vertical_align;
-  result.line_height_pct = rhs.line_height_pct.has_value() ? rhs.line_height_pct : line_height_pct;
-  result.list_style_none = rhs.list_style_none.has_value() ? rhs.list_style_none : list_style_none;
-  result.font_variant_small_caps =
-      rhs.font_variant_small_caps.has_value() ? rhs.font_variant_small_caps : font_variant_small_caps;
-  result.border_top = rhs.border_top.has_value() ? rhs.border_top : border_top;
+
+  if (rhs.has_alignment_)
+    result.set_alignment(rhs.alignment);
+  else if (has_alignment_)
+    result.set_alignment(alignment);
+  if (rhs.has_italic_)
+    result.set_italic(rhs.italic);
+  else if (has_italic_)
+    result.set_italic(italic);
+  if (rhs.has_bold_)
+    result.set_bold(rhs.bold);
+  else if (has_bold_)
+    result.set_bold(bold);
+  if (rhs.has_indent_)
+    result.set_indent(rhs.indent);
+  else if (has_indent_)
+    result.set_indent(indent);
+  if (rhs.has_font_size_pct_)
+    result.set_font_size_pct(rhs.font_size_pct);
+  else if (has_font_size_pct_)
+    result.set_font_size_pct(font_size_pct);
+  if (rhs.has_margin_left_)
+    result.set_margin_left(rhs.margin_left);
+  else if (has_margin_left_)
+    result.set_margin_left(margin_left);
+  if (rhs.has_margin_right_)
+    result.set_margin_right(rhs.margin_right);
+  else if (has_margin_right_)
+    result.set_margin_right(margin_right);
+  if (rhs.has_margin_top_)
+    result.set_margin_top(rhs.margin_top);
+  else if (has_margin_top_)
+    result.set_margin_top(margin_top);
+  if (rhs.has_margin_bottom_)
+    result.set_margin_bottom(rhs.margin_bottom);
+  else if (has_margin_bottom_)
+    result.set_margin_bottom(margin_bottom);
+  if (rhs.has_is_float_)
+    result.set_is_float(rhs.is_float);
+  else if (has_is_float_)
+    result.set_is_float(is_float);
+  if (rhs.has_is_hidden_)
+    result.set_is_hidden(rhs.is_hidden);
+  else if (has_is_hidden_)
+    result.set_is_hidden(is_hidden);
+  if (rhs.has_page_break_before_)
+    result.set_page_break_before(rhs.page_break_before);
+  else if (has_page_break_before_)
+    result.set_page_break_before(page_break_before);
+  if (rhs.has_page_break_after_)
+    result.set_page_break_after(rhs.page_break_after);
+  else if (has_page_break_after_)
+    result.set_page_break_after(page_break_after);
+  if (rhs.has_text_transform_)
+    result.set_text_transform(rhs.text_transform);
+  else if (has_text_transform_)
+    result.set_text_transform(text_transform);
+  if (rhs.has_vertical_align_)
+    result.set_vertical_align(rhs.vertical_align);
+  else if (has_vertical_align_)
+    result.set_vertical_align(vertical_align);
+  if (rhs.has_line_height_pct_)
+    result.set_line_height_pct(rhs.line_height_pct);
+  else if (has_line_height_pct_)
+    result.set_line_height_pct(line_height_pct);
+  if (rhs.has_list_style_none_)
+    result.set_list_style_none(rhs.list_style_none);
+  else if (has_list_style_none_)
+    result.set_list_style_none(list_style_none);
+  if (rhs.has_font_variant_small_caps_)
+    result.set_font_variant_small_caps(rhs.font_variant_small_caps);
+  else if (has_font_variant_small_caps_)
+    result.set_font_variant_small_caps(font_variant_small_caps);
+  if (rhs.has_border_top_)
+    result.set_border_top(rhs.border_top);
+  else if (has_border_top_)
+    result.set_border_top(border_top);
+
   return result;
 }
 

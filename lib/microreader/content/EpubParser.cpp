@@ -1448,35 +1448,35 @@ static EpubError parse_xhtml_events(XmlReader& reader, const CssStylesheet* inli
 
       // Apply browser-default margins for elements that usually have them.
       // Only apply if no explicit margin-left was set by CSS.
-      if (!style.margin_left.has_value()) {
+      if (!style.has_margin_left_) {
         if (sv_eq(ev.name, "blockquote")) {
-          style.margin_left = 36;  // ~3em default indent for blockquotes
+          style.set_margin_left(36);  // ~3em default indent for blockquotes
         } else if (sv_eq(ev.name, "dd")) {
-          style.margin_left = 24;  // ~2em default indent for definition descriptions
+          style.set_margin_left(24);  // ~2em default indent for definition descriptions
         } else if (sv_eq(ev.name, "ul") || sv_eq(ev.name, "ol")) {
           // Only indent nested lists (level 2+); top-level lists are flush left
           if (!parser.list_stack_.empty())
-            style.margin_left = 16;  // ~1.3em default indent for nested lists
+            style.set_margin_left(16);  // ~1.3em default indent for nested lists
         }
       }
 
       // figcaption defaults: small italic centered
       if (sv_eq(ev.name, "figcaption")) {
-        if (!style.font_size_pct.has_value())
-          style.font_size_pct = 80;
-        if (!style.italic.has_value())
-          style.italic = true;
-        if (!style.alignment.has_value())
-          style.alignment = Alignment::Center;
+        if (!style.has_font_size_pct_)
+          style.set_font_size_pct(80);
+        if (!style.has_italic_)
+          style.set_italic(true);
+        if (!style.has_alignment_)
+          style.set_alignment(Alignment::Center);
       }
       // figure defaults: centered
       if (sv_eq(ev.name, "figure")) {
-        if (!style.alignment.has_value())
-          style.alignment = Alignment::Center;
+        if (!style.has_alignment_)
+          style.set_alignment(Alignment::Center);
       }
 
-      bool is_floated = style.is_float.has_value() && *style.is_float;
-      bool is_hidden = style.is_hidden.has_value() && *style.is_hidden;
+      bool is_floated = style.has_is_float_ && style.is_float;
+      bool is_hidden = style.has_is_hidden_ && style.is_hidden;
 
       // Skip hidden elements entirely
       if (is_hidden) {
@@ -1504,7 +1504,7 @@ static EpubError parse_xhtml_events(XmlReader& reader, const CssStylesheet* inli
       }
 
       // page-break-before: always
-      if (style.page_break_before.has_value() && *style.page_break_before) {
+      if (style.has_page_break_before_ && style.page_break_before) {
         parser.push_page_break();
       }
 
@@ -1524,22 +1524,22 @@ static EpubError parse_xhtml_events(XmlReader& reader, const CssStylesheet* inli
       }
 
       // A block element with border-top acts as a decorative rule (like <hr>).
-      if (style.border_top.has_value() && *style.border_top && is_block_element(ev.name) &&
-          !parser.cell_depth.has_value()) {
+      if (style.has_border_top_ && style.border_top && is_block_element(ev.name) && !parser.cell_depth.has_value()) {
         parser.push_hr(style.margin_top);
-        style.margin_top.reset();  // consumed by Hr spacing_before; don't re-apply to pending_margin_top_
+        style.has_margin_top_ = false;
+        ;  // consumed by Hr spacing_before; don't re-apply to pending_margin_top_
       }
 
       parser.depth++;
 
       // page-break-after: track depth to emit on close
-      if (style.page_break_after.has_value() && *style.page_break_after) {
+      if (style.has_page_break_after_ && style.page_break_after) {
         parser.page_break_after_depths_.push_back(parser.depth);
       }
 
       // Track list context for bullet/number prefixes
       if (sv_eq(ev.name, "ul")) {
-        bool no_pfx = style.list_style_none.has_value() && *style.list_style_none;
+        bool no_pfx = style.has_list_style_none_ && style.list_style_none;
         parser.list_stack_.push_back({false, 0, parser.depth, no_pfx});
       } else if (sv_eq(ev.name, "ol")) {
         uint16_t start_val = 1;
@@ -1548,12 +1548,12 @@ static EpubError parse_xhtml_events(XmlReader& reader, const CssStylesheet* inli
           start_val =
               static_cast<uint16_t>(std::max(1, std::atoi(std::string(start_sv.data, start_sv.length).c_str())));
         }
-        bool no_pfx = style.list_style_none.has_value() && *style.list_style_none;
+        bool no_pfx = style.has_list_style_none_ && style.list_style_none;
         parser.list_stack_.push_back({true, start_val, parser.depth, no_pfx});
       } else if (sv_eq(ev.name, "li") && !parser.list_stack_.empty()) {
         auto& ctx = parser.list_stack_.back();
         // Per-<li> CSS can also suppress via list-style-type: none
-        bool no_pfx = ctx.no_prefix || (style.list_style_none.has_value() && *style.list_style_none);
+        bool no_pfx = ctx.no_prefix || (style.has_list_style_none_ && style.list_style_none);
         if (!no_pfx) {
           if (ctx.ordered) {
             parser.pending_list_prefix_ = std::to_string(ctx.counter) + ". ";
@@ -1566,7 +1566,7 @@ static EpubError parse_xhtml_events(XmlReader& reader, const CssStylesheet* inli
       }
 
       if (is_bold(ev.name)) {
-        if (!style.bold.has_value()) {
+        if (!style.has_bold_) {
           parser.bold_stack_.push_back({parser.bold_, parser.depth});
           parser.set_bold(true);
         }
@@ -1576,7 +1576,7 @@ static EpubError parse_xhtml_events(XmlReader& reader, const CssStylesheet* inli
           parser.set_size_pct(hs_pct);
         }
       } else if (is_italic(ev.name)) {
-        if (!style.italic.has_value()) {
+        if (!style.has_italic_) {
           parser.italic_stack_.push_back({parser.italic_, parser.depth});
           parser.set_italic(true);
         }
@@ -1599,61 +1599,61 @@ static EpubError parse_xhtml_events(XmlReader& reader, const CssStylesheet* inli
         parser.pre_depth_ = parser.depth;
       }
 
-      if (style.italic.has_value()) {
+      if (style.has_italic_) {
         parser.italic_stack_.push_back({parser.italic_, parser.depth});
-        parser.set_italic(*style.italic);
+        parser.set_italic(style.italic);
       }
-      if (style.bold.has_value()) {
+      if (style.has_bold_) {
         parser.bold_stack_.push_back({parser.bold_, parser.depth});
-        parser.set_bold(*style.bold);
+        parser.set_bold(style.bold);
       }
-      if (style.font_size_pct.has_value()) {
+      if (style.has_font_size_pct_) {
         parser.size_stack_.push_back({parser.font_size_pct_, parser.depth});
-        parser.set_size_pct(*style.font_size_pct);
+        parser.set_size_pct(style.font_size_pct);
       }
-      if (style.alignment.has_value() && !parser.cell_depth.has_value()) {
+      if (style.has_alignment_ && !parser.cell_depth.has_value()) {
         parser.alignment_stack_.push_back({parser.alignment_, parser.depth});
-        parser.alignment_ = style.alignment;
+        parser.alignment_ = static_cast<Alignment>(style.alignment);
       }
-      if (style.indent.has_value() && !parser.cell_depth.has_value()) {
+      if (style.has_indent_ && !parser.cell_depth.has_value()) {
         parser.indent_ = style.indent;
       }
-      if (style.margin_left.has_value() && !parser.cell_depth.has_value()) {
+      if (style.has_margin_left_ && !parser.cell_depth.has_value()) {
         parser.margin_left_stack_.push_back({parser.margin_left_, parser.depth});
-        parser.set_margin_left(parser.margin_left_ + *style.margin_left);
+        parser.set_margin_left(parser.margin_left_ + style.margin_left);
       }
-      if (style.margin_right.has_value() && !parser.cell_depth.has_value()) {
+      if (style.has_margin_right_ && !parser.cell_depth.has_value()) {
         parser.margin_right_stack_.push_back({parser.margin_right_, parser.depth});
-        parser.set_margin_right(parser.margin_right_ + *style.margin_right);
+        parser.set_margin_right(parser.margin_right_ + style.margin_right);
       }
-      if (style.margin_top.has_value() && !parser.cell_depth.has_value()) {
-        uint16_t mt = *style.margin_top;
+      if (style.has_margin_top_ && !parser.cell_depth.has_value()) {
+        uint16_t mt = style.margin_top;
         // Collapse with any pending top margin (take max)
         if (parser.pending_margin_top_.has_value())
           parser.pending_margin_top_ = std::max(*parser.pending_margin_top_, mt);
         else
           parser.pending_margin_top_ = mt;
       }
-      if (style.margin_bottom.has_value() && !parser.cell_depth.has_value()) {
-        parser.margin_bottom_stack_.push_back({*style.margin_bottom, parser.depth});
+      if (style.has_margin_bottom_ && !parser.cell_depth.has_value()) {
+        parser.margin_bottom_stack_.push_back({style.margin_bottom, parser.depth});
       }
-      if (style.font_variant_small_caps.has_value()) {
+      if (style.has_font_variant_small_caps_) {
         parser.small_caps_stack_.push_back({parser.small_caps_, parser.depth});
-        parser.small_caps_ = *style.font_variant_small_caps;
+        parser.small_caps_ = style.font_variant_small_caps;
       }
-      if (style.text_transform.has_value()) {
+      if (style.has_text_transform_) {
         parser.transform_stack_.push_back({parser.text_transform_, parser.depth});
-        parser.text_transform_ = *style.text_transform;
+        parser.text_transform_ = style.text_transform;
       }
-      if (style.line_height_pct.has_value()) {
+      if (style.has_line_height_pct_) {
         parser.line_height_stack_.push_back({parser.line_height_pct_, parser.depth});
-        parser.line_height_pct_ = *style.line_height_pct;
+        parser.line_height_pct_ = style.line_height_pct;
       }
-      if (style.vertical_align.has_value()) {
+      if (style.has_vertical_align_) {
         parser.vertical_align_stack_.push_back({parser.vertical_align_, parser.depth});
-        parser.set_vertical_align(*style.vertical_align);
+        parser.set_vertical_align(style.vertical_align);
       }
-      if (style.is_float.has_value() && *style.is_float) {
+      if (style.has_is_float_ && style.is_float) {
         // If we're already in merge-after-float mode (from a previous float),
         // flush pending content before starting a new float.
         // This prevents e.g. sidenote text from merging into a subsequent float's context.
