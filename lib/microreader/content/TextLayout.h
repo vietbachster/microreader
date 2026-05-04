@@ -31,7 +31,8 @@ struct LayoutWord {
 
 struct LayoutLine {
   std::vector<LayoutWord> words;
-  bool hyphenated = false;  // true if line ends with a hyphen
+  bool hyphenated = false;   // true if line ends with a hyphen
+  uint32_t text_offset = 0;  // byte offset of the first character from the start of the paragraph's text
 };
 
 // ---------------------------------------------------------------------------
@@ -55,18 +56,23 @@ struct LayoutOptions {
 struct PagePosition {
   uint16_t paragraph = 0;  // index into chapter.paragraphs
   uint16_t offset = 0;     // line index within a text paragraph; pixel row offset within an image paragraph (0 for hrs)
+  uint32_t text_offset = 0;  // byte offset of the first character from the start of the paragraph's text
 
   PagePosition() = default;
-  PagePosition(uint16_t p, uint16_t l) : paragraph(p), offset(l) {}
+  PagePosition(uint16_t p, uint16_t l, uint32_t to = 0) : paragraph(p), offset(l), text_offset(to) {}
 
   bool operator==(const PagePosition& o) const {
-    return paragraph == o.paragraph && offset == o.offset;
+    return paragraph == o.paragraph && offset == o.offset && text_offset == o.text_offset;
   }
   bool operator!=(const PagePosition& o) const {
     return !(*this == o);
   }
   bool operator<(const PagePosition& o) const {
-    return paragraph < o.paragraph || (paragraph == o.paragraph && offset < o.offset);
+    if (paragraph != o.paragraph)
+      return paragraph < o.paragraph;
+    if (offset != o.offset)
+      return offset < o.offset;
+    return text_offset < o.text_offset;
   }
   bool operator<=(const PagePosition& o) const {
     return *this == o || *this < o;
@@ -224,6 +230,10 @@ class TextLayout {
   // Used by navigation to snap to the start of the paragraph so the full image
   // is shown on the next page.
   bool is_mid_promoted_image(PagePosition pos) const;
+
+  // Uses the layout cache (with the currently configured font/options)
+  // to sync `offset` (line index) based on the absolute `text_offset` of the page position.
+  PagePosition resolve_stable_position(PagePosition pos) const;
 
   // Implementation-internal types. Declared public so that .cpp-scope helper
   // functions (which are not class members) can reference them without

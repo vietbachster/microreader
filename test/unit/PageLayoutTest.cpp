@@ -198,6 +198,33 @@ TEST(PageLayout, SpreadNoOpWhenTooMuchSlack) {
   EXPECT_EQ(page.text_items()[0].y_offset, 0u) << "No spreading when too much slack";
 }
 
+TEST(PageLayout, ResolveStablePosition) {
+  // Test resolving stable position based on text_offset
+  Chapter ch;
+  TextParagraph tp;
+  // Make a long line. Each word is 4 chars + 1 space = 5 chars = 40px. 
+  // Let's say words: "aaaa bbbb cccc dddd eeee ffff"
+  // width: 29 chars = 232px
+  tp.runs.push_back(microreader::Run("aaaa bbbb cccc dddd eeee ffff", FontStyle::Regular, false));
+  ch.paragraphs.push_back(Paragraph::make_text(std::move(tp)));
+
+  TestChapterSource src(ch);
+  // page width = 80px -> 10 chars per line
+  // line 0: "aaaa bbbb " (length 10) starts at text_offset=0
+  // line 1: "cccc dddd " (length 10) starts at text_offset=10
+  // line 2: "eeee ffff" (length 9) starts at text_offset=20
+  PageOptions opts(80, 200, 0, 0); 
+  TextLayout layout(font8, opts, src, PagePosition(0, 0));
+
+  // Should snap to the line that contains the cursor
+  EXPECT_EQ(layout.resolve_stable_position(PagePosition(0, 99, 0)), PagePosition(0, 0, 0));
+  EXPECT_EQ(layout.resolve_stable_position(PagePosition(0, 99, 5)), PagePosition(0, 0, 0));
+  EXPECT_EQ(layout.resolve_stable_position(PagePosition(0, 99, 10)), PagePosition(0, 1, 10));
+  EXPECT_EQ(layout.resolve_stable_position(PagePosition(0, 99, 15)), PagePosition(0, 1, 10));
+  EXPECT_EQ(layout.resolve_stable_position(PagePosition(0, 99, 22)), PagePosition(0, 2, 20));
+  EXPECT_EQ(layout.resolve_stable_position(PagePosition(0, 99, 29)), PagePosition(0, 2, 20)); // past end
+}
+
 TEST(PageLayout, SpreadDisabledWhenCenterTextFalse) {
   // When center_text=false, spreading never fires even if page is nearly full.
   Chapter ch;

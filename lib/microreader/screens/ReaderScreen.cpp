@@ -215,8 +215,6 @@ void ReaderScreen::start(DrawBuffer& buf, IRuntime& runtime) {
   open_ok_ = true;
   chapter_idx_ = 0;
   page_pos_ = PagePosition{0, 0};
-  saved_chapter_idx_ = 0;
-  saved_page_pos_ = PagePosition{0, 0};
   image_size_fn_ = make_image_size_query(mrb_, path_, static_cast<uint16_t>(DrawBuffer::kWidth));
   // Restore position: if the user selected a chapter from the TOC, jump there;
   // otherwise load saved bookmark from disk (defaults to 0/{0,0} on first open).
@@ -224,8 +222,10 @@ void ReaderScreen::start(DrawBuffer& buf, IRuntime& runtime) {
     saved_chapter_idx_ = app_->chapter_select()->pending_chapter();
     saved_page_pos_ = PagePosition{app_->chapter_select()->pending_para_index(), 0};
     app_->chapter_select()->clear_pending();
-  } else {
+  } else if (saved_chapter_idx_ == 0 && saved_page_pos_.paragraph == 0 && saved_page_pos_.offset == 0) {
     load_position_();
+  } else {
+    // Retain saved_chapter_idx_ and saved_page_pos_ that were set when pausing
   }
   load_chapter_(saved_chapter_idx_);
   if (!chapter_src_) {
@@ -401,6 +401,7 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
   opts.center_text = true;
   layout_engine_.set_font(font);
   layout_engine_.set_options(opts);
+  page_pos_ = layout_engine_.resolve_stable_position(page_pos_);
   layout_engine_.set_position(page_pos_);
 
   page_ = layout_engine_.layout();

@@ -171,6 +171,7 @@ static std::vector<LayoutLine> layout_para_lines(const IFont& font, const Layout
   uint16_t x = opts.first_line_extra_indent + ((indent > 0) ? static_cast<uint16_t>(indent) : 0);
   uint16_t cur_line_width = max_width;
   bool first_line = true, prev_run_ended_space = true;
+  uint32_t para_byte_offset = 0;
 
   // For Center/End alignment, words start at margin_left (not 0), which would
   // otherwise skew the centering. This helper normalises word x to [0..text_width]
@@ -227,6 +228,11 @@ static std::vector<LayoutLine> layout_para_lines(const IFont& font, const Layout
       while (true) {
         uint16_t word_w = font.word_width(word_ptr, word_len, run.style, run.size_pct);
         uint16_t needed = word_w + (needs_space ? space_width : 0);
+        
+        if (current.words.empty()) {
+          current.text_offset = para_byte_offset + static_cast<uint32_t>(word_ptr - text);
+        }
+
         if (x + needed <= line_width) {
           // Fits normally.
           if (needs_space)
@@ -302,6 +308,8 @@ static std::vector<LayoutLine> layout_para_lines(const IFont& font, const Layout
       first_line = false;
       prev_run_ended_space = true;
     }
+    
+    para_byte_offset += static_cast<uint32_t>(text_len);
   }
 
   if (!current.words.empty()) {
@@ -989,10 +997,11 @@ static size_t collect_para_items(const LaidOut& lp, size_t start_idx, uint16_t s
       auto probe = lp.collect(idx, ph);
       if (probe) {
         if (probe->item.kind == PageItem::PageBreak) {
-          boundary = {static_cast<uint16_t>(lp.para_idx + 1), 0};
+          boundary = {static_cast<uint16_t>(lp.para_idx + 1), 0, 0};
           pending_page_break = has_content;
         } else {
-          boundary = {lp.para_idx, static_cast<uint16_t>(idx)};
+          uint32_t to = (lp.type == ParagraphType::Text && idx < lp.lines.size()) ? lp.lines[idx].text_offset : 0;
+          boundary = {lp.para_idx, static_cast<uint16_t>(idx), to};
           page_full = true;
         }
       }
@@ -1051,13 +1060,14 @@ TextLayout::CollectResult TextLayout::collect_page_items(PagePosition pos) const
     if (!page_full && !items.empty()) {
       auto probe = lp.collect(break_idx, ph);
       if (probe && probe->item.kind != PageItem::PageBreak) {
-        boundary = {static_cast<uint16_t>(pi), static_cast<uint16_t>(break_idx)};
+        uint32_t to = (lp.type == ParagraphType::Text && break_idx < lp.lines.size()) ? lp.lines[break_idx].text_offset : 0;
+        boundary = {static_cast<uint16_t>(pi), static_cast<uint16_t>(break_idx), to};
         page_full = true;
       }
     }
 
     if (!page_full)
-      boundary = {static_cast<uint16_t>(pi + 1), 0};
+      boundary = {static_cast<uint16_t>(pi + 1), 0, 0};
   }
 
   return {std::move(items), boundary, !page_full};
@@ -1166,7 +1176,7 @@ TextLayout::CollectResult TextLayout::collect_page_items_backward(PagePosition e
   if (pcnt == 0 || (end_pos.paragraph == 0 && end_pos.offset == 0))
     return {
         {},
-        {0, 0},
+        {0, 0, 0},
         false
     };
 
@@ -1174,7 +1184,7 @@ TextLayout::CollectResult TextLayout::collect_page_items_backward(PagePosition e
   uint16_t used = 0;
   bool page_full = false;
   bool stopped_at_page_break = false;
-  PagePosition start = {0, 0};
+  PagePosition start = {0, 0, 0};
 
   // Clamp paragraph index to valid range.
   const size_t end_pi = std::min((size_t)end_pos.paragraph, pcnt);
@@ -1189,7 +1199,7 @@ TextLayout::CollectResult TextLayout::collect_page_items_backward(PagePosition e
     if (end_pi == 0)
       return {
           {},
-          {0, 0},
+          {0, 0, 0},
           false
       };
     pi = end_pi - 1;
@@ -1202,7 +1212,7 @@ TextLayout::CollectResult TextLayout::collect_page_items_backward(PagePosition e
       if (!rev_items.empty()) {
         // Content before a PageBreak belongs to the previous logical page.
         // Stop here; the start of this page is right after the break.
-        start = {static_cast<uint16_t>(pi + 1), 0};
+        start = {static_cast<uint16_t>(pi + 1), 0, 0};
         stopped_at_page_break = true;
       }
       // If rev_items is empty, skip the PageBreak (mirrors forward behaviour:
@@ -1231,8 +1241,10 @@ TextLayout::CollectResult TextLayout::collect_page_items_backward(PagePosition e
     size_t remaining = collect_para_items_bwd(lp, para_end_idx, spc, ph, desc, used, page_full, rev_items);
 
     // Update start only when at least one item was collected from this paragraph.
-    if (!rev_items.empty() && remaining < para_end_idx)
-      start = {static_cast<uint16_t>(pi), static_cast<uint16_t>(remaining)};
+    if (!rev_items.empty() && remaining < para_end_idx) {
+      uint32_t to = (lp.type == ParagraphType::Text && remaining < lp.lines.size()) ? lp.lines[remaining].text_offset : 0;
+      start = {static_cast<uint16_t>(pi), static_cast<uint16_t>(remaining), to};
+    }
 
     if (pi == 0)
       break;
@@ -1262,6 +1274,32 @@ bool TextLayout::is_mid_promoted_image(PagePosition pos) const {
     return false;
   const LaidOutParagraph& lp = get_laid_out_(pos.paragraph);
   return lp.inline_img.promoted && lp.promoted_h > 0 && (size_t)pos.offset < (size_t)lp.promoted_h;
+}
+
+PagePosition TextLayout::resolve_stable_position(PagePosition pos) const {
+  if (!source_)
+    return pos;
+
+  const size_t pcnt = source_->paragraph_count();
+  if ((size_t)pos.paragraph >= pcnt)
+    return pos;
+
+  const LaidOutParagraph& lp = get_laid_out_((size_t)pos.paragraph);
+  // Only adjust text paragraphs
+  if (lp.type != ParagraphType::Text || lp.lines.empty())
+    return pos;
+
+  // Find the last line that starts at or before the recorded offset.
+  uint16_t found_idx = 0;
+  for (uint16_t i = 0; i < lp.lines.size(); ++i) {
+    if (lp.lines[i].text_offset <= pos.text_offset) {
+      found_idx = i;
+    } else {
+      break;
+    }
+  }
+
+  return {pos.paragraph, found_idx, lp.lines[found_idx].text_offset};
 }
 
 }  // namespace microreader
