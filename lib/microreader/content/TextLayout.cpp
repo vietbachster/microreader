@@ -228,7 +228,7 @@ static std::vector<LayoutLine> layout_para_lines(const IFont& font, const Layout
       while (true) {
         uint16_t word_w = font.word_width(word_ptr, word_len, run.style, run.size_pct);
         uint16_t needed = word_w + (needs_space ? space_width : 0);
-        
+
         if (current.words.empty()) {
           current.text_offset = para_byte_offset + static_cast<uint32_t>(word_ptr - text);
         }
@@ -308,7 +308,7 @@ static std::vector<LayoutLine> layout_para_lines(const IFont& font, const Layout
       first_line = false;
       prev_run_ended_space = true;
     }
-    
+
     para_byte_offset += static_cast<uint32_t>(text_len);
   }
 
@@ -1060,7 +1060,8 @@ TextLayout::CollectResult TextLayout::collect_page_items(PagePosition pos) const
     if (!page_full && !items.empty()) {
       auto probe = lp.collect(break_idx, ph);
       if (probe && probe->item.kind != PageItem::PageBreak) {
-        uint32_t to = (lp.type == ParagraphType::Text && break_idx < lp.lines.size()) ? lp.lines[break_idx].text_offset : 0;
+        uint32_t to =
+            (lp.type == ParagraphType::Text && break_idx < lp.lines.size()) ? lp.lines[break_idx].text_offset : 0;
         boundary = {static_cast<uint16_t>(pi), static_cast<uint16_t>(break_idx), to};
         page_full = true;
       }
@@ -1242,7 +1243,8 @@ TextLayout::CollectResult TextLayout::collect_page_items_backward(PagePosition e
 
     // Update start only when at least one item was collected from this paragraph.
     if (!rev_items.empty() && remaining < para_end_idx) {
-      uint32_t to = (lp.type == ParagraphType::Text && remaining < lp.lines.size()) ? lp.lines[remaining].text_offset : 0;
+      uint32_t to =
+          (lp.type == ParagraphType::Text && remaining < lp.lines.size()) ? lp.lines[remaining].text_offset : 0;
       start = {static_cast<uint16_t>(pi), static_cast<uint16_t>(remaining), to};
     }
 
