@@ -280,15 +280,13 @@ void ReaderScreen::start(DrawBuffer& buf, IRuntime& runtime) {
   page_pos_ = PagePosition{0, 0};
   image_size_fn_ = make_image_size_query(mrb_, path_, static_cast<uint16_t>(DrawBuffer::kWidth));
   // Restore position: if the user selected a chapter from the TOC, jump there;
-  // otherwise load saved bookmark from disk (defaults to 0/{0,0} on first open).
+  // otherwise load saved bookmark from disk.
   if (app_ && app_->chapter_select()->has_pending()) {
     saved_chapter_idx_ = app_->chapter_select()->pending_chapter();
-    saved_page_pos_ = PagePosition{app_->chapter_select()->pending_para_index(), 0};
+    saved_page_pos_ = PagePosition{app_->chapter_select()->pending_para_index(), 0, 0};
     app_->chapter_select()->clear_pending();
-  } else if (saved_chapter_idx_ == 0 && saved_page_pos_.paragraph == 0 && saved_page_pos_.offset == 0) {
-    load_position_();
   } else {
-    // Retain saved_chapter_idx_ and saved_page_pos_ that were set when pausing
+    load_position_();
   }
   load_chapter_(saved_chapter_idx_);
   if (!chapter_src_) {
@@ -321,12 +319,12 @@ show_error:
 }
 
 void ReaderScreen::stop() {
-  if (open_ok_)
-    save_position_();
   image_size_fn_ = {};
   chapter_src_.reset();
   mrb_.close();
   book_.close();
+  if (open_ok_)
+    save_position_();
   page_ = PageContent{};
   mrb_path_.clear();
   mrb_path_.shrink_to_fit();
@@ -335,6 +333,8 @@ void ReaderScreen::stop() {
   book_key_.clear();
   book_key_.shrink_to_fit();
   open_ok_ = false;
+  saved_chapter_idx_ = 0;
+  saved_page_pos_ = PagePosition{0, 0, 0};
   buf_ = nullptr;
 }
 
@@ -407,6 +407,7 @@ void ReaderScreen::update(const ButtonState& buttons, DrawBuffer& buf, IRuntime&
     }
     render_page_(buf);
     buf.refresh();
+    save_position_();
   }
 
   // Deferred grayscale: only apply when no nav buttons are held, so rapid
@@ -731,8 +732,8 @@ void ReaderScreen::save_position_() {
   FILE* f = std::fopen(path.c_str(), "w");
   if (!f)
     return;
-  std::fprintf(f, "%u %u %u\n", static_cast<unsigned>(chapter_idx_), static_cast<unsigned>(page_pos_.paragraph),
-               static_cast<unsigned>(page_pos_.offset));
+  std::fprintf(f, "%u %u %u %u\n", static_cast<unsigned>(chapter_idx_), static_cast<unsigned>(page_pos_.paragraph),
+               static_cast<unsigned>(page_pos_.offset), static_cast<unsigned>(page_pos_.text_offset));
   std::fclose(f);
 }
 
@@ -743,10 +744,12 @@ void ReaderScreen::load_position_() {
   FILE* f = std::fopen(path.c_str(), "r");
   if (!f)
     return;
-  unsigned ch = 0, para = 0, line = 0;
-  if (std::fscanf(f, "%u %u %u", &ch, &para, &line) == 3) {
+  unsigned ch = 0, para = 0, line = 0, to = 0;
+  int scanned = std::fscanf(f, "%u %u %u %u", &ch, &para, &line, &to);
+  if (scanned >= 3) {
     saved_chapter_idx_ = ch;
-    saved_page_pos_ = PagePosition{static_cast<uint16_t>(para), static_cast<uint16_t>(line)};
+    saved_page_pos_ = PagePosition{static_cast<uint16_t>(para), static_cast<uint16_t>(line), static_cast<uint32_t>(to)};
+    MR_LOGI("reader", "Loaded pos ch=%u para=%u line=%u to=%u (scanned=%d)", ch, para, line, to, scanned);
   }
   std::fclose(f);
 }
