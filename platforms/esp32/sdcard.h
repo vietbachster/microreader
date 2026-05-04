@@ -25,7 +25,7 @@ static wl_handle_t s_wl_handle = WL_INVALID_HANDLE;
 inline bool sd_init() {
   esp_vfs_fat_mount_config_t mnt{};
   mnt.format_if_mount_failed = true;  // format on first boot (blank flash)
-  mnt.max_files = 5;
+  mnt.max_files = 3;
   mnt.allocation_unit_size = 0;  // let the driver choose
 
   esp_err_t err = esp_vfs_fat_spiflash_mount_rw_wl(SD_MOUNT, "fat", &mnt, &s_wl_handle);
@@ -74,7 +74,7 @@ inline bool sd_init() {
 
   esp_vfs_fat_mount_config_t mnt{};
   mnt.format_if_mount_failed = false;
-  mnt.max_files = 5;
+  mnt.max_files = 3;
   mnt.allocation_unit_size = 16 * 1024;
 
   err = esp_vfs_fat_sdspi_mount(SD_MOUNT, &host, &dev_cfg, &mnt, &sd_card_);
