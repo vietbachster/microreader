@@ -26,8 +26,36 @@ namespace microreader {
 // resolve_image_size_ removed â€” image size resolution is now handled by
 // make_image_size_query() (MrbReader.h), stored in image_size_fn_.
 
-bool ReaderScreen::decode_image_to_buffer_(uint32_t offset, DrawBuffer& buf, int dest_x, int dest_y, uint16_t max_w,
-                                           uint16_t max_h, uint16_t src_y, uint16_t clip_h) {
+bool ReaderScreen::decode_image_to_buffer_(uint16_t img_key, uint32_t offset, DrawBuffer& buf, int dest_x, int dest_y,
+                                           uint16_t max_w, uint16_t max_h, uint16_t src_y, uint16_t clip_h) {
+  char cache_path[256];
+  snprintf(cache_path, sizeof(cache_path), "%s/img_%u_%ux%u.bin", book_cache_dir_.c_str(),
+           static_cast<unsigned>(img_key), static_cast<unsigned>(max_w), static_cast<unsigned>(max_h));
+
+  FILE* cache_f = std::fopen(cache_path, "rb");
+  if (cache_f) {
+    uint16_t header[2] = {0, 0};
+    if (std::fread(header, 2, 2, cache_f) == 2) {
+      uint16_t cached_w = header[0];
+      uint16_t cached_h = header[1];
+      uint16_t row_bytes = (cached_w + 7) / 8;
+      std::vector<uint8_t> row_buf(row_bytes);
+      for (uint16_t r = 0; r < cached_h; ++r) {
+        if (std::fread(row_buf.data(), 1, row_bytes, cache_f) != row_bytes)
+          break;
+        if (r < src_y)
+          continue;
+        uint16_t dest_row = static_cast<uint16_t>(r - src_y);
+        if (clip_h > 0 && dest_row >= clip_h)
+          break;
+        buf.blit_1bit_row(dest_x, dest_y + dest_row, row_buf.data(), cached_w);
+      }
+      std::fclose(cache_f);
+      return true;
+    }
+    std::fclose(cache_f);
+  }
+
   StdioZipFile file;
   if (!file.open(path_.c_str()))
     return false;
@@ -35,18 +63,36 @@ bool ReaderScreen::decode_image_to_buffer_(uint32_t offset, DrawBuffer& buf, int
   if (ZipReader::read_local_entry(file, offset, entry) != ZipError::Ok)
     return false;
 
+  FILE* cache_w = std::fopen(cache_path, "wb");
+  if (cache_w) {
+    uint16_t dummy[2] = {0, 0};
+    std::fwrite(dummy, 2, 2, cache_w);
+  }
+
   // Set up a sink that blits each dithered row directly to the DrawBuffer.
   struct BlitCtx {
     DrawBuffer* buf;
     int x, y;
     uint16_t src_y;
     uint16_t clip_h;  // max rows to render (0 = no clip)
+    FILE* cache_w;
+    uint16_t out_w;
+    uint16_t out_h;
   };
-  BlitCtx ctx{&buf, dest_x, dest_y, src_y, clip_h};
+  BlitCtx ctx{&buf, dest_x, dest_y, src_y, clip_h, cache_w, 0, 0};
   ImageRowSink sink;
   sink.ctx = &ctx;
   sink.emit_row = [](void* c, uint16_t row, const uint8_t* data, uint16_t width) {
     auto* bc = static_cast<BlitCtx*>(c);
+    bc->out_w = width;
+    if (row >= bc->out_h)
+      bc->out_h = static_cast<uint16_t>(row + 1);
+
+    if (bc->cache_w) {
+      uint16_t row_bytes = static_cast<uint16_t>((width + 7) / 8);
+      std::fwrite(data, 1, row_bytes, bc->cache_w);
+    }
+
     if (row < bc->src_y)
       return;
     uint16_t dest_row = static_cast<uint16_t>(row - bc->src_y);
@@ -61,6 +107,23 @@ bool ReaderScreen::decode_image_to_buffer_(uint32_t offset, DrawBuffer& buf, int
   DecodedImage dims;  // only width/height will be set; data stays empty
   auto err = decode_image_from_entry(file, entry, max_w, max_h, dims, buf.scratch_buf2(), DrawBuffer::kBufSize,
                                      /*scale_to_fill=*/true, &sink);
+
+  if (cache_w) {
+    if (err == ImageError::Ok && ctx.out_w > 0 && ctx.out_h > 0) {
+      std::fseek(cache_w, 0, SEEK_SET);
+      uint16_t header[2] = {ctx.out_w, ctx.out_h};
+      std::fwrite(header, 2, 2, cache_w);
+    }
+    std::fclose(cache_w);
+    if (err != ImageError::Ok) {
+#ifdef ESP_PLATFORM
+      unlink(cache_path);
+#else
+      std::remove(cache_path);
+#endif
+    }
+  }
+
   return err == ImageError::Ok;
 }
 
@@ -148,13 +211,13 @@ void ReaderScreen::start(DrawBuffer& buf, IRuntime& runtime) {
       name = sep + 1;
     const char* dot = std::strrchr(name, '.');
     size_t name_len = dot ? static_cast<size_t>(dot - name) : std::strlen(name);
-    std::string book_cache_dir = std::string(data_dir_) + "/cache/" + std::string(name, name_len);
+    book_cache_dir_ = std::string(data_dir_) + "/cache/" + std::string(name, name_len);
 #ifdef ESP_PLATFORM
-    mkdir(book_cache_dir.c_str(), 0775);
+    mkdir(book_cache_dir_.c_str(), 0775);
 #else
-    std::filesystem::create_directories(book_cache_dir);
+    std::filesystem::create_directories(book_cache_dir_);
 #endif
-    mrb_path_ = book_cache_dir + "/book.mrb";
+    mrb_path_ = book_cache_dir_ + "/book.mrb";
   }
 
   bool mrb_ok = mrb_.open(mrb_path_.c_str());
@@ -409,6 +472,7 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
   // â”€â”€ Collect image positions from layout
   // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   struct ImageToDraw {
+    uint16_t key;
     int x, y, w, h;
     uint32_t offset;
     uint16_t src_y = 0;
@@ -423,6 +487,7 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
     if (img_item.key >= mrb_.image_count())
       return;
     ImageToDraw itd;
+    itd.key = img_item.key;
     itd.x = static_cast<int>(img_item.x_offset);
     itd.y = static_cast<int>(img_item.y_offset);  // y_offset is absolute (vertical centering baked in)
     itd.w = img_w;
@@ -474,16 +539,16 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
     }
   }
 
-  for (const auto& ci : page_.items) {
-    const PageHrItem* hr = std::get_if<PageHrItem>(&ci);
-    if (!hr)
+  for (const auto& hr : page_.items) {
+    const PageHrItem* h = std::get_if<PageHrItem>(&hr);
+    if (!h)
       continue;
-    const int hr_y = static_cast<int>(hr->y_offset) + static_cast<int>(hr->height) / 2;
-    buf.fill_rect(static_cast<int>(hr->x_offset), hr_y, static_cast<int>(hr->width), 1, false);
+    const int hr_y = static_cast<int>(h->y_offset) + static_cast<int>(h->height) / 2;
+    buf.fill_rect(static_cast<int>(h->x_offset), hr_y, static_cast<int>(h->width), 1, false);
   }
 
   for (const auto& itd : images) {
-    if (!decode_image_to_buffer_(itd.offset, buf, itd.x, itd.y, static_cast<uint16_t>(itd.w),
+    if (!decode_image_to_buffer_(itd.key, itd.offset, buf, itd.x, itd.y, static_cast<uint16_t>(itd.w),
                                  static_cast<uint16_t>(itd.h), itd.src_y, itd.clip_h)) {
       buf.fill_rect(itd.x, itd.y, itd.w, itd.h, false);
     }

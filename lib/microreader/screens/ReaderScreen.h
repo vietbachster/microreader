@@ -41,8 +41,7 @@ class ReaderScreen final : public IScreen {
   // Set the proportional bitmap font for rendering. If null, falls back to
   // the builtin 8Ã—8 bitmap font at 2Ã— scale. The font data must outlive
   // this screen.
-  void set_font(const BitmapFont* font) {
-  }
+  void set_font(const BitmapFont* font) {}
 
   // Set the full font set (Small/Normal/Large). Font data must outlive this screen.
   void set_fonts(const BitmapFontSet* fonts) {
@@ -95,6 +94,7 @@ class ReaderScreen final : public IScreen {
   const BitmapFontSet* ext_font_set_ = nullptr;  // external set (from set_fonts())
   std::string path_;
   std::string data_dir_;
+  std::string book_cache_dir_;
   std::string mrb_path_;
   std::string pos_path_;       // path to .pos bookmark: <data_dir>/data/<book_key>.pos
   std::string book_key_;       // sanitized title (content-derived), drives .pos filename
@@ -120,8 +120,8 @@ class ReaderScreen final : public IScreen {
   bool grayscale_pending_ = false;
   bool grayscale_active_ = false;
 
-  bool decode_image_to_buffer_(uint32_t offset, DrawBuffer& buf, int dest_x, int dest_y, uint16_t max_w, uint16_t max_h,
-                               uint16_t src_y = 0, uint16_t clip_h = 0);
+  bool decode_image_to_buffer_(uint16_t img_key, uint32_t offset, DrawBuffer& buf, int dest_x, int dest_y,
+                               uint16_t max_w, uint16_t max_h, uint16_t src_y = 0, uint16_t clip_h = 0);
   // Render page content (BW only). Sets grayscale_pending_ if font has grayscale.
   void render_page_(DrawBuffer& buf);
   // Deferred grayscale pass: writes LSB/MSB planes to BW/RED RAM and triggers
