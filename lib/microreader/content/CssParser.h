@@ -317,6 +317,7 @@ class CssStylesheet {
 
   // Parse and add rules from a CSS string (contents of a <style> block or .css file).
   void extend_from_sheet(const char* css, size_t length);
+  void extend_from_mut_sheet(char* css, size_t length);
   void extend_from_sheet(const std::string& s) {
     extend_from_sheet(s.c_str(), s.size());
   }

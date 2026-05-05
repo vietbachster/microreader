@@ -194,8 +194,9 @@ extern "C" void app_main(void) {
           uint8_t* work_buf = buf.scratch_buf1();
           uint8_t* xml_buf = buf.scratch_buf2();
           int64_t t_open = esp_timer_get_time();
-          book.open(cmd_path, work_buf, xml_buf);
+          microreader::EpubError err = book.open(cmd_path, work_buf, xml_buf);
           long open_ms = (long)((esp_timer_get_time() - t_open) / 1000);
+          ESP_LOGI("bench", "open() returned err %d", (int)err);
           microreader::benchmark_epub_conversion(book, "/sdcard/bench_tmp.mrb", open_ms, work_buf, xml_buf);
           buf.reset_after_scratch();
           break;

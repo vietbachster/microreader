@@ -386,9 +386,13 @@ EpubError Epub::parse_opf(IZipFile& file, const std::string& opf_path, uint8_t* 
     std::vector<uint8_t> css_data;
     for (size_t ci = 0; ci < css_idxs.size(); ++ci) {
       auto& css_entry = zip_.entry(css_idxs[ci]);
+      ESP_LOGI("parse_opf", "extracting CSS %u/%u: uncompressed=%lu", (unsigned)(ci + 1), (unsigned)css_idxs.size(),
+               (unsigned long)css_entry.uncompressed_size);
+
       css_data.clear();
       if (zip_.extract(file, css_entry, css_data, work_buf, kWorkBufSize) == ZipError::Ok) {
-        stylesheet_.extend_from_sheet(reinterpret_cast<const char*>(css_data.data()), css_data.size());
+        ESP_LOGI("parse_opf", "parsing CSS: %lu bytes", (unsigned long)css_data.size());
+        stylesheet_.extend_from_mut_sheet(reinterpret_cast<char*>(css_data.data()), css_data.size());
       }
       HEAP_LOG("parse_opf: after CSS extract+parse");
     }

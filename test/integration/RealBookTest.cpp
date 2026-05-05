@@ -1,5 +1,5 @@
-﻿// Integration tests using REAL EPUB files.
-// These tests verify the full pipeline: ZIP â†’ XML â†’ CSS â†’ EPUB â†’ Chapters â†’ Images
+// Integration tests using REAL EPUB files.
+// These tests verify the full pipeline: ZIP → XML → CSS → EPUB → Chapters → Images
 //
 // Test books are sourced from the microreader/resources/books and TrustyReader/sd dirs.
 // Tests are written defensively: if a book file doesn't exist, test is skipped.
@@ -167,7 +167,7 @@ class RealBookTest : public ::testing::Test {
 };
 
 // ===========================================================================
-// Bobiverse â€” English fiction, multi-chapter, no images expected
+// Bobiverse — English fiction, multi-chapter, no images expected
 // ===========================================================================
 
 TEST_F(RealBookTest, Bobiverse_Open) {
@@ -203,6 +203,15 @@ TEST_F(RealBookTest, Bobiverse_FirstChapterHasText) {
   FAIL() << "No chapter with text found in first 5 chapters";
 }
 
+#include "microreader/content/mrb/MrbConverter.h"
+
+TEST_F(RealBookTest, SnowCrash) {
+  OPEN_BOOK_OR_SKIP("microreader2/sd/books/snow crash ger.epub");
+  verify_all_chapters();
+  bool ok = convert_epub_to_mrb_streaming(book_, "snow_crash_ger_test.mrb");
+  EXPECT_TRUE(ok);
+}
+
 TEST_F(RealBookTest, Bobiverse_TOC) {
   OPEN_BOOK_OR_SKIP("microreader/resources/books/bobiverse one.epub");
 
@@ -215,7 +224,7 @@ TEST_F(RealBookTest, Bobiverse_TOC) {
 }
 
 // ===========================================================================
-// Snow Crash â€” English fiction, may have cover image
+// Snow Crash — English fiction, may have cover image
 // ===========================================================================
 
 TEST_F(RealBookTest, SnowCrash_Open) {
@@ -258,7 +267,7 @@ TEST_F(RealBookTest, SnowCrash_ImageDecoding) {
 }
 
 // ===========================================================================
-// Bible (Luther 1912) â€” German, very large, many chapters
+// Bible (Luther 1912) — German, very large, many chapters
 // ===========================================================================
 
 TEST_F(RealBookTest, Bible_Open) {
@@ -304,7 +313,7 @@ TEST_F(RealBookTest, Bible_AllChapters) {
 }
 
 // ===========================================================================
-// Mabuse â€” German fiction (from TrustyReader SD)
+// Mabuse — German fiction (from TrustyReader SD)
 // ===========================================================================
 
 TEST_F(RealBookTest, Mabuse_Open) {
@@ -320,7 +329,7 @@ TEST_F(RealBookTest, Mabuse_AllChapters) {
 }
 
 // ===========================================================================
-// Ohler â€” German non-fiction
+// Ohler — German non-fiction
 // ===========================================================================
 
 TEST_F(RealBookTest, Ohler_Open) {
@@ -336,7 +345,7 @@ TEST_F(RealBookTest, Ohler_AllChapters) {
 }
 
 // ===========================================================================
-// Eyes of the Void â€” English sci-fi, likely has cover
+// Eyes of the Void — English sci-fi, likely has cover
 // ===========================================================================
 
 TEST_F(RealBookTest, EyesOfTheVoid_Open) {
@@ -379,7 +388,7 @@ TEST_F(RealBookTest, EyesOfTheVoid_ImageDecoding) {
 }
 
 // ===========================================================================
-// Dictator's Handbook â€” English non-fiction
+// Dictator's Handbook — English non-fiction
 // ===========================================================================
 
 TEST_F(RealBookTest, DictatorsHandbook_Open) {
@@ -395,7 +404,7 @@ TEST_F(RealBookTest, DictatorsHandbook_AllChapters) {
 }
 
 // ===========================================================================
-// Latin-style footnotes test â€” EPUB with footnotes
+// Latin-style footnotes test — EPUB with footnotes
 // ===========================================================================
 
 TEST_F(RealBookTest, LatinFootnotes_Open) {
@@ -411,7 +420,7 @@ TEST_F(RealBookTest, LatinFootnotes_AllChapters) {
 }
 
 // ===========================================================================
-// Bobiverse German (Z-Library) â€” German translation, potentially different encoding
+// Bobiverse German (Z-Library) — German translation, potentially different encoding
 // ===========================================================================
 
 TEST_F(RealBookTest, BobiverseGerman_Open) {
@@ -524,7 +533,7 @@ TEST_F(RealBookTest, StressTest_AllBooks) {
 }
 
 // ===========================================================================
-// Image format + size validation — alice-illustrated (many illustrations)
+// Image format + size validation � alice-illustrated (many illustrations)
 // ===========================================================================
 
 TEST_F(RealBookTest, AliceIllustrated_ImageSizes) {
@@ -589,7 +598,7 @@ TEST_F(RealBookTest, AliceIllustrated_ImageSizes) {
 }
 
 // ===========================================================================
-// Bulk image size resolution — all curated test books
+// Bulk image size resolution � all curated test books
 // ===========================================================================
 
 TEST_F(RealBookTest, BulkImageSizeResolution) {
@@ -640,7 +649,7 @@ TEST_F(RealBookTest, BulkImageSizeResolution) {
 }
 
 // ===========================================================================
-// MRB image decode via read_local_entry + sink — mirrors ReaderScreen pipeline
+// MRB image decode via read_local_entry + sink � mirrors ReaderScreen pipeline
 // ===========================================================================
 
 #include "microreader/content/mrb/MrbConverter.h"
@@ -648,7 +657,7 @@ TEST_F(RealBookTest, BulkImageSizeResolution) {
 
 TEST_F(RealBookTest, AliceIllustrated_MrbImageDecode_SinkPath) {
   // This test exercises the exact path ReaderScreen uses to decode images:
-  // MRB open → get image_ref → read_local_entry from EPUB → decode with sink.
+  // MRB open ? get image_ref ? read_local_entry from EPUB ? decode with sink.
   OPEN_BOOK_OR_SKIP("microreader2/test/books/gutenberg/alice-illustrated.epub");
 
   // Convert to MRB if needed.
@@ -675,7 +684,7 @@ TEST_F(RealBookTest, AliceIllustrated_MrbImageDecode_SinkPath) {
   for (uint16_t key = 0; key < mrb.image_count(); ++key) {
     const auto& ref = mrb.image_ref(key);
 
-    // Open the EPUB and read the local entry (no filename — mimics ReaderScreen)
+    // Open the EPUB and read the local entry (no filename � mimics ReaderScreen)
     StdioZipFile file;
     ASSERT_TRUE(file.open(path_.c_str()));
     ZipEntry local_entry;
@@ -736,7 +745,7 @@ TEST_F(RealBookTest, AliceIllustrated_MrbImageDecode_SinkPath) {
     printf("    image %u: %ux%u  white=%.1f%%\n", key, dims.width, dims.height, white_pct);
 
     // A natural image should not be 100% black (that's the bug symptom).
-    EXPECT_GT(white, 0u) << "image " << key << " is completely black — black squares bug!";
+    EXPECT_GT(white, 0u) << "image " << key << " is completely black � black squares bug!";
   }
 
   printf("\n  Decoded: %zu ok, %zu failed\n", decoded_ok, decoded_fail);
@@ -746,9 +755,20 @@ TEST_F(RealBookTest, AliceIllustrated_MrbImageDecode_SinkPath) {
   // Overall: the book's illustrations should have meaningful white content.
   float overall_white = (total_white + total_black) > 0 ? 100.0f * total_white / (total_white + total_black) : 0;
   printf("  Overall white pixel ratio: %.1f%%\n", overall_white);
-  EXPECT_GT(overall_white, 10.0f) << "Images are too dark — possible black squares bug";
+  EXPECT_GT(overall_white, 10.0f) << "Images are too dark � possible black squares bug";
 
   // Clean up test MRB
   std::remove(mrb_path.c_str());
   mrb.close();
+}
+
+TEST(RegressionTest, SnowCrash) {
+  microreader::Book book;
+  auto err = book.open("C:/Users/Patrick/Desktop/microreader/microreader2/sd/books/snow crash ger.epub", nullptr,
+                       nullptr, false);
+  ASSERT_EQ(err, microreader::EpubError::Ok);
+
+  std::printf("Spine size: %zu\n", book.epub().spine().size());
+  bool success = microreader::convert_epub_to_mrb_streaming(book, "test_out_snow.mrb");
+  EXPECT_TRUE(success);
 }

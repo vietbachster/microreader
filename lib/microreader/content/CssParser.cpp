@@ -566,7 +566,28 @@ std::string CssStylesheet::filter_comments(const char* css, size_t length) {
 }
 
 void CssStylesheet::extend_from_sheet(const char* css, size_t length) {
-  std::string sheet = filter_comments(css, length);
+  std::string sheet_copy(css, length);
+  extend_from_mut_sheet(sheet_copy.data(), sheet_copy.size());
+}
+
+void CssStylesheet::extend_from_mut_sheet(char* css, size_t length) {
+  size_t rd = 0, wr = 0;
+  while (rd < length) {
+    if (rd + 1 < length && css[rd] == '/' && css[rd + 1] == '*') {
+      rd += 2;
+      while (rd + 1 < length) {
+        if (css[rd] == '*' && css[rd + 1] == '/') {
+          rd += 2;
+          break;
+        }
+        ++rd;
+      }
+    } else {
+      css[wr++] = css[rd++];
+    }
+  }
+
+  std::string_view sheet(css, wr);
 
   size_t pos = 0;
   while (pos < sheet.size()) {
@@ -625,13 +646,13 @@ void CssStylesheet::extend_from_sheet(const char* css, size_t length) {
       break;
     --end_pos;  // point at '}'
 
-    std::string declarations = sheet.substr(brace + 1, end_pos - brace - 1);
+    std::string declarations(sheet.substr(brace + 1, end_pos - brace - 1));
 
     // Skip nested blocks
     if (declarations.find('{') == std::string::npos) {
       CssRule rule = CssRule::parse(declarations.c_str(), declarations.size(), config_);
       if (rule.has_any()) {
-        std::string selectors = sheet.substr(pos, brace - pos);
+        std::string selectors(sheet.substr(pos, brace - pos));
         // Split by comma
         size_t sp = 0;
         while (sp < selectors.size()) {
