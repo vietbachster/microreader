@@ -90,9 +90,9 @@ void SettingsScreen::on_select(int index) {
     return;  // stay on screen
   }
   if (index == idx_rebuild_index_) {
-    if (app_->main_menu() && app_->main_menu()->has_books_dir()) {
+    if (app_->main_menu() && app_->main_menu()->has_books_dir() && app_->data_dir_) {
       std::string root_dir = app_->main_menu()->books_dir();
-      std::string index_path = root_dir + "/book_index.dat";
+      std::string index_path = std::string(app_->data_dir_) + "/book_index.dat";
 
       buf_->sync_bw_ram();
       BookIndex::instance().build_index(root_dir, *buf_);

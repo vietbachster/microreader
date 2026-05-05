@@ -19,8 +19,12 @@ namespace microreader {
 void MainMenu::on_start() {
   title_ = "Microreader";
 
-  std::string root_dir = books_dir_;
-  const std::string index_path = root_dir + "/book_index.dat";
+  if (!app_->data_dir_) {
+    needs_scan_ = false;
+    return;
+  }
+
+  std::string index_path = std::string(app_->data_dir_) + "/book_index.dat";
 
   if (BookIndex::instance().load(index_path)) {
     populate_list_();
@@ -56,11 +60,11 @@ void MainMenu::on_back() {
 }
 
 void MainMenu::scan_directory_(DrawBuffer& buf) {
-  if (!books_dir_)
+  if (!books_dir_ || !app_->data_dir_)
     return;
 
   std::string root_dir = books_dir_;
-  const std::string index_path = root_dir + "/book_index.dat";
+  const std::string index_path = std::string(app_->data_dir_) + "/book_index.dat";
 
   buf.sync_bw_ram();
 
