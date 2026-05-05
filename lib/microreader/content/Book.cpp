@@ -4,7 +4,7 @@
 
 namespace microreader {
 
-EpubError Book::open(const char* path, uint8_t* work_buf, uint8_t* xml_buf) {
+EpubError Book::open(const char* path, uint8_t* work_buf, uint8_t* xml_buf, bool parse_css_ncx) {
   close();  // release previous resources
   if (!file_.open(path))
     return EpubError::ZipError;
@@ -28,7 +28,7 @@ EpubError Book::open(const char* path, uint8_t* work_buf, uint8_t* xml_buf) {
     xml_buf = owned_xml.get();
   }
 
-  auto err = epub_.open(file_, work_buf, xml_buf);
+  auto err = epub_.open(file_, work_buf, xml_buf, parse_css_ncx);
   HEAP_LOG("book.open: done");
   return err;
 }

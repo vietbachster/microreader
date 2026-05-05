@@ -91,6 +91,9 @@ class Application {
   ChapterSelectScreen* chapter_select() {
     return &chapter_select_;
   }
+  MainMenu* main_menu() {
+    return &menu_;
+  }
 
   // Navigate to a screen: push on top of the current screen (current stays on stack).
   // Or replace the current screen (pop it first, then push the new one).

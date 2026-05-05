@@ -223,7 +223,8 @@ static EpubError parse_ncx(IZipFile& file, const ZipReader& zip, const ZipEntry&
   return EpubError::Ok;
 }
 
-EpubError Epub::parse_opf(IZipFile& file, const std::string& opf_path, uint8_t* work_buf, uint8_t* xml_buf) {
+EpubError Epub::parse_opf(IZipFile& file, const std::string& opf_path, uint8_t* work_buf, uint8_t* xml_buf,
+                          bool parse_css_ncx) {
   auto* entry = zip_.find(opf_path);
   if (!entry)
     return EpubError::ContentOpfMissing;
@@ -373,6 +374,10 @@ EpubError Epub::parse_opf(IZipFile& file, const std::string& opf_path, uint8_t* 
   manifest.clear();
   manifest.shrink_to_fit();
 
+  if (!parse_css_ncx) {
+    return EpubError::Ok;
+  }
+
   HEAP_LOG("parse_opf: after OPF parse, before CSS");
 
   // --- Phase 2: Extract CSS ---
@@ -416,7 +421,7 @@ void Epub::close() {
   cover_idx_ = -1;
 }
 
-EpubError Epub::open(IZipFile& file, uint8_t* work_buf, uint8_t* xml_buf) {
+EpubError Epub::open(IZipFile& file, uint8_t* work_buf, uint8_t* xml_buf, bool parse_css_ncx) {
   close();  // release previous data
   if (zip_.open(file) != ZipError::Ok)
     return EpubError::ZipError;
@@ -436,7 +441,12 @@ EpubError Epub::open(IZipFile& file, uint8_t* work_buf, uint8_t* xml_buf) {
     root_dir_.clear();
   }
 
-  return parse_opf(file, rootfile_path, work_buf, xml_buf);
+  err = parse_opf(file, rootfile_path, work_buf, xml_buf, parse_css_ncx);
+  if (err != EpubError::Ok) {
+    return err;
+  }
+
+  return EpubError::Ok;
 }
 
 EpubError Epub::open_zip_only(IZipFile& file) {

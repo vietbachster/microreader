@@ -22,6 +22,7 @@ set(lib_sources
     ${LIB}/content/TextLayout.cpp
     ${LIB}/content/hyphenation/Hyphenation.cpp
     ${LIB}/content/Book.cpp
+    ${LIB}/content/BookIndex.cpp
     ${LIB}/content/mrb/MrbWriter.cpp
     ${LIB}/content/mrb/MrbReader.cpp
     ${LIB}/content/mrb/MrbConverter.cpp

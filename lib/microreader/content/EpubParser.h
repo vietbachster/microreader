@@ -44,7 +44,8 @@ class Epub {
 
   // Open an EPUB file. work_buf (~45KB) and xml_buf (~4KB) are used during
   // OPF/NCX parsing. Caller must provide both; allocate them before calling.
-  EpubError open(IZipFile& file, uint8_t* work_buf, uint8_t* xml_buf);
+  // If parse_css_ncx is false, skips extracting CSS and parsing NCX (fast for indexing).
+  EpubError open(IZipFile& file, uint8_t* work_buf, uint8_t* xml_buf, bool parse_css_ncx = true);
 
   // Lightweight open: only parses the ZIP central directory.
   // No OPF/NCX/CSS parsing — only zip().entry() is available afterwards.
@@ -109,7 +110,8 @@ class Epub {
 
   // Internal parsing steps
   EpubError parse_container(IZipFile& file, std::string& rootfile_path);
-  EpubError parse_opf(IZipFile& file, const std::string& opf_path, uint8_t* work_buf, uint8_t* xml_buf);
+  EpubError parse_opf(IZipFile& file, const std::string& opf_path, uint8_t* work_buf, uint8_t* xml_buf,
+                      bool parse_css_ncx);
 };
 
 // Parse XHTML body into paragraphs (used by Epub::parse_chapter, also

@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include "../Application.h"
+#include "../content/BookIndex.h"
 
 #ifdef ESP_PLATFORM
 #include <dirent.h>
@@ -34,6 +35,20 @@ void SettingsScreen::on_start() {
   if (data_dir_) {
     idx_clear_converted_ = count();
     add_item("Clear Converted");
+
+    idx_rebuild_index_ = count();
+    add_item("Rebuild Book Index");
+
+    idx_list_format_ = count();
+    std::string format_label = "Book List Format: Title & Author";
+    if (app_ && app_->main_menu()) {
+      auto fmt = app_->main_menu()->list_format();
+      if (fmt == BookListFormat::TitleOnly)
+        format_label = "Book List Format: Title Only";
+      else if (fmt == BookListFormat::Filename)
+        format_label = "Book List Format: Filename";
+    }
+    add_item(format_label);
   }
 
 #ifdef ESP_PLATFORM
@@ -62,6 +77,38 @@ void SettingsScreen::on_select(int index) {
   if (index == idx_clear_converted_) {
     clear_converted_();
     return;  // stay on screen
+  }
+  if (index == idx_rebuild_index_) {
+    if (app_->main_menu() && app_->main_menu()->has_books_dir()) {
+      std::string root_dir = app_->main_menu()->books_dir();
+      std::string index_path = root_dir + "/book_index.dat";
+
+      buf_->sync_bw_ram();
+      BookIndex::instance().build_index(root_dir, *buf_);
+      BookIndex::instance().save(index_path);
+      buf_->reset_after_scratch(true);
+      app_->pop_screen();  // go back to main menu
+    }
+    return;
+  }
+  if (index == idx_list_format_) {
+    if (app_->main_menu()) {
+      auto fmt = app_->main_menu()->list_format();
+      std::string new_label;
+      if (fmt == BookListFormat::TitleAndAuthor) {
+        fmt = BookListFormat::TitleOnly;
+        new_label = "Book List Format: Title Only";
+      } else if (fmt == BookListFormat::TitleOnly) {
+        fmt = BookListFormat::Filename;
+        new_label = "Book List Format: Filename";
+      } else {
+        fmt = BookListFormat::TitleAndAuthor;
+        new_label = "Book List Format: Title & Author";
+      }
+      app_->main_menu()->set_list_format(fmt);
+      set_item_label(idx_list_format_, new_label);
+    }
+    return;
   }
 #ifdef ESP_PLATFORM
   if (index == idx_switch_ota_) {

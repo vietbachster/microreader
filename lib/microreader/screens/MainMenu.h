@@ -8,6 +8,8 @@
 
 namespace microreader {
 
+enum class BookListFormat { TitleOnly, TitleAndAuthor, Filename };
+
 // Main screen — lists EPUB books from a directory.
 // Button1 = open book, Button0 = settings.
 class MainMenu final : public ListMenuScreen {
@@ -50,9 +52,23 @@ class MainMenu final : public ListMenuScreen {
     return "Books";
   }
 
+  BookListFormat list_format() const {
+    return list_format_;
+  }
+  void set_list_format(BookListFormat format) {
+    list_format_ = format;
+  }
+
   void set_app(Application* app) {
     app_ = app;
   }
+
+  void start(DrawBuffer& buf, IRuntime& runtime) override {
+    buf_ = &buf;
+    ListMenuScreen::start(buf, runtime);
+  }
+
+  void update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& runtime) override;
 
  protected:
   void on_start() override;
@@ -63,6 +79,9 @@ class MainMenu final : public ListMenuScreen {
   const char* books_dir_ = nullptr;
   std::string initial_selection_;   // path to pre-select after scan
   std::string last_selected_path_;  // path of the most recently opened book
+  DrawBuffer* buf_ = nullptr;
+  BookListFormat list_format_ = BookListFormat::TitleOnly;
+  bool needs_scan_ = false;
 
   struct BookEntry {
     std::string path;
@@ -70,7 +89,8 @@ class MainMenu final : public ListMenuScreen {
   };
   std::vector<BookEntry> entries_;
 
-  void scan_directory_();
+  void scan_directory_(DrawBuffer& buf);
+  void populate_list_();
 };
 
 }  // namespace microreader

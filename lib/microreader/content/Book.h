@@ -27,7 +27,7 @@ class Book {
   // Open an EPUB file. work_buf (~45KB) and xml_buf (~4KB) are forwarded to
   // the EPUB open/parse pipeline. On ESP32 pass DisplayQueue scratch buffers;
   // on desktop/tests pass nullptr to have Book::open allocate them.
-  EpubError open(const char* path, uint8_t* work_buf = nullptr, uint8_t* xml_buf = nullptr);
+  EpubError open(const char* path, uint8_t* work_buf = nullptr, uint8_t* xml_buf = nullptr, bool parse_css_ncx = true);
 
   // Lightweight open: only parses the ZIP central directory (no OPF/NCX/CSS).
   // Sufficient for image decode operations that only need zip entry access.

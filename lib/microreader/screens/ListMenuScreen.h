@@ -42,6 +42,11 @@ class ListMenuScreen : public IScreen {
     separators_.push_back(true);
     indents_.push_back(0);
   }
+  void set_item_label(int index, const std::string& label) {
+    if (index >= 0 && index < static_cast<int>(labels_.size())) {
+      labels_[index] = label;
+    }
+  }
   void clear_items() {
     labels_.clear();
     separators_.clear();
@@ -84,9 +89,12 @@ class ListMenuScreen : public IScreen {
   BitmapFont ui_font_;
   BitmapFont header_font_;
 
+ protected:
   void draw_all_(DrawBuffer& buf, std::optional<uint8_t> battery_pct = std::nullopt) const;
   void ensure_visible_();
   void center_on_selected_();
+
+ private:
   void draw_button_hints_(DrawBuffer& buf) const;
 };
 

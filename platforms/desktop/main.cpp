@@ -39,8 +39,8 @@ int main() {
     microreader::Application app;
     microreader::DrawBuffer buf(display);
 
-    // Mount sd/books as the virtual SD card books directory.
-    static std::string books_path = std::filesystem::absolute("sd/books").string();
+    // Mount sd/ as the virtual SD card books directory.
+    static std::string books_path = std::filesystem::absolute("sd").string();
     std::filesystem::create_directories(books_path);
     app.set_books_dir(books_path.c_str());
 

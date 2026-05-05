@@ -128,7 +128,7 @@ extern "C" void app_main(void) {
     mkdir("/sdcard/.microreader/data", 0775);
 
     // Register the books directory for the selection screen.
-    app.set_books_dir("/sdcard/books");
+    app.set_books_dir("/sdcard");
     app.set_data_dir("/sdcard/.microreader");
   } else {
     MR_LOGI("app", "SD card not available");

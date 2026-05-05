@@ -34,6 +34,8 @@ class SettingsScreen final : public ListMenuScreen {
   int idx_bouncing_ball_ = -1;
   int idx_grayscale_demo_ = -1;
   int idx_clear_converted_ = -1;
+  int idx_rebuild_index_ = -1;
+  int idx_list_format_ = -1;
   int idx_switch_ota_ = -1;
   int idx_invalidate_font_ = -1;
   int idx_spiffs_ = -1;

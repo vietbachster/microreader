@@ -5,6 +5,7 @@
 
 #include "../Application.h"
 #include "../HeapLog.h"
+#include "../content/BookIndex.h"
 
 #ifdef ESP_PLATFORM
 #include <dirent.h>
@@ -17,19 +18,31 @@ namespace microreader {
 
 void MainMenu::on_start() {
   title_ = "Microreader";
-  HEAP_LOG("MainMenu: start enter");
-  scan_directory_();
-  HEAP_LOG("MainMenu: after scan");
-  // Restore previously selected book position — only on first visit.
-  if (!initial_selection_.empty()) {
-    for (int i = 0; i < static_cast<int>(entries_.size()); ++i) {
-      if (entries_[i].path == initial_selection_) {
-        set_selected(i);
-        break;
-      }
-    }
-    initial_selection_.clear();
+
+  std::string root_dir = books_dir_;
+  const std::string index_path = root_dir + "/book_index.dat";
+
+  if (BookIndex::instance().load(index_path)) {
+    populate_list_();
+    needs_scan_ = false;
+  } else {
+    // We defer heavy scanning to update() so we don't trip hardware watchdog.
+    needs_scan_ = true;
   }
+}
+
+void MainMenu::update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& runtime) {
+  if (needs_scan_) {
+    needs_scan_ = false;
+    scan_directory_(buf);
+    populate_list_();
+
+    // Force a redraw and full refresh since the list contents completely changed
+    draw_all_(buf, runtime.battery_percentage());
+    buf.full_refresh();
+  }
+
+  ListMenuScreen::update(buttons, buf, runtime);
 }
 
 void MainMenu::on_select(int index) {
@@ -42,47 +55,67 @@ void MainMenu::on_back() {
   app_->push_screen(ScreenId::Settings);
 }
 
-void MainMenu::scan_directory_() {
+void MainMenu::scan_directory_(DrawBuffer& buf) {
   if (!books_dir_)
     return;
 
+  std::string root_dir = books_dir_;
+  const std::string index_path = root_dir + "/book_index.dat";
+
+  buf.sync_bw_ram();
+
+  BookIndex::instance().build_index(root_dir, buf);
+  BookIndex::instance().save(index_path);
+
+  // Refresh to clean up the loading bar
+  buf.reset_after_scratch(true);
+}
+
+void MainMenu::populate_list_() {
   clear_items();
   entries_.clear();
 
-  auto add_book = [this](std::string path, std::string label) {
+  for (const auto& index_entry : BookIndex::instance().entries()) {
     BookEntry e;
-    e.path = std::move(path);
-    e.label = std::move(label);
+    e.path = index_entry.path;
+
+    if (list_format_ == BookListFormat::TitleOnly) {
+      e.label = index_entry.title.empty() ? index_entry.label : index_entry.title;
+    } else if (list_format_ == BookListFormat::Filename) {
+      const char* name = index_entry.path.c_str();
+      const char* sep = std::strrchr(name, '/');
+#ifdef _WIN32
+      const char* bsep = std::strrchr(name, '\\');
+      if (bsep && (!sep || bsep > sep))
+        sep = bsep;
+#endif
+      if (sep)
+        name = sep + 1;
+
+      const char* dot = std::strrchr(name, '.');
+      if (dot) {
+        e.label = std::string(name, dot - name);
+      } else {
+        e.label = name;
+      }
+    } else {
+      e.label = index_entry.label;  // Title & Author
+    }
+
     entries_.push_back(std::move(e));
     add_item(entries_.back().label);
-  };
-
-#ifdef ESP_PLATFORM
-  DIR* dir = opendir(books_dir_);
-  if (!dir)
-    return;
-  struct dirent* ent;
-  while ((ent = readdir(dir)) != nullptr) {
-    size_t len = std::strlen(ent->d_name);
-    if (len > 5 && len < 220 && std::strcmp(ent->d_name + len - 5, ".epub") == 0) {
-      char fullpath[512];
-      std::snprintf(fullpath, sizeof(fullpath), "%s/%s", books_dir_, ent->d_name);
-      add_book(fullpath, std::string(ent->d_name, len - 5));
-    }
   }
-  closedir(dir);
-#else
-  try {
-    for (const auto& entry : fs::directory_iterator(books_dir_)) {
-      if (!entry.is_regular_file())
-        continue;
-      auto ext = entry.path().extension().string();
-      if (ext != ".epub")
-        continue;
-      add_book(entry.path().string(), entry.path().stem().string());
+
+  // Restore previously selected book position — only on first visit.
+  if (!initial_selection_.empty()) {
+    for (int i = 0; i < static_cast<int>(entries_.size()); ++i) {
+      if (entries_[i].path == initial_selection_) {
+        set_selected(i);
+        break;
+      }
     }
-  } catch (...) {}
-#endif
+    initial_selection_.clear();
+  }
 }
 
 }  // namespace microreader
