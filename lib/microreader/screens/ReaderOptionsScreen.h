@@ -106,7 +106,8 @@ class ReaderOptionsScreen final : public ListMenuScreen {
   }
 
   // Populate before pushing. Pass toc (may be empty — "Chapters" hidden when empty).
-  void populate(const TableOfContents& toc, uint16_t current_chapter, uint16_t current_para);
+  void populate(const TableOfContents& toc, uint16_t current_chapter, uint16_t current_para,
+                const std::string& fallback_title, int progress_pct);
 
  protected:
   void on_start() override;
@@ -126,6 +127,9 @@ class ReaderOptionsScreen final : public ListMenuScreen {
 
   // Re-populate item labels after an inline setting change, restoring selection.
   void refresh_items_(int restore_selection);
+
+  std::string chapter_title_;
+  int progress_pct_ = 0;
 };
 
 }  // namespace microreader

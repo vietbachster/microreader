@@ -19,7 +19,21 @@ constexpr const char* ReaderSettings::kFontSizeNames[];
 
 // ---------------------------------------------------------------------------
 
-void ReaderOptionsScreen::populate(const TableOfContents& toc, uint16_t current_chapter, uint16_t current_para) {
+void ReaderOptionsScreen::populate(const TableOfContents& toc, uint16_t current_chapter, uint16_t current_para,
+                                   const std::string& fallback_title, int progress_pct) {
+  chapter_title_ = fallback_title;
+  int best_match = -1;
+  for (size_t i = 0; i < toc.entries.size(); ++i) {
+    if (toc.entries[i].file_idx < current_chapter ||
+        (toc.entries[i].file_idx == current_chapter && toc.entries[i].para_index <= current_para)) {
+      best_match = static_cast<int>(i);
+    }
+  }
+  if (best_match >= 0) {
+    chapter_title_ = toc.entries[best_match].label;
+  }
+
+  progress_pct_ = progress_pct;
   if (!toc.entries.empty() && app_) {
     app_->chapter_select()->populate(toc, current_chapter, current_para);
     app_->chapter_select()->clear_pending();
@@ -34,6 +48,16 @@ static const char* fmt_setting(char* buf, size_t bufsz, const char* label, const
 
 void ReaderOptionsScreen::on_start() {
   title_ = "Options";
+
+  subtitle_ = chapter_title_;
+  if (subtitle_.length() > 42) {
+    subtitle_ = subtitle_.substr(0, 39) + "...";
+  }
+
+  char pct_str[32];
+  snprintf(pct_str, sizeof(pct_str), "%d%%", progress_pct_);
+  subtitle2_ = pct_str;
+
   clear_items();
   idx_justify_ = idx_padding_h_ = idx_padding_v_ = idx_line_spacing_ = idx_progress_ = idx_chapters_ = -1;
 

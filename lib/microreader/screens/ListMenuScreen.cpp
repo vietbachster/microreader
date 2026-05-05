@@ -36,7 +36,10 @@ void ListMenuScreen::ensure_visible_() {
   if (!ui_font_.valid() || count() == 0)
     return;
   const int line_h = ui_font_.y_advance() + 8;
-  const int header_h = kHeaderY + (header_font_.valid() ? header_font_.y_advance() : 0) + 8;
+  int subtitle_h = subtitle_.empty() ? 0 : ui_font_.y_advance() + 8;
+  if (!subtitle2_.empty() && ui_font_.valid())
+    subtitle_h += ui_font_.y_advance() + 8;
+  const int header_h = kHeaderY + (header_font_.valid() ? header_font_.y_advance() : 0) + subtitle_h + 8;
   const int visible = (DrawBuffer::kHeight - header_h - kBottomPadding) / line_h;
   if (visible <= 0)
     return;
@@ -59,7 +62,10 @@ void ListMenuScreen::center_on_selected_() {
   if (!ui_font_.valid() || count() == 0)
     return;
   const int line_h = ui_font_.y_advance() + 8;
-  const int header_h = kHeaderY + (header_font_.valid() ? header_font_.y_advance() : 0) + 8;
+  int subtitle_h = subtitle_.empty() ? 0 : ui_font_.y_advance() + 8;
+  if (!subtitle2_.empty() && ui_font_.valid())
+    subtitle_h += ui_font_.y_advance() + 8;
+  const int header_h = kHeaderY + (header_font_.valid() ? header_font_.y_advance() : 0) + subtitle_h + 8;
   const int visible = (DrawBuffer::kHeight - header_h - kBottomPadding) / line_h;
   if (visible <= 0)
     return;
@@ -112,6 +118,24 @@ void ListMenuScreen::draw_all_(DrawBuffer& buf, std::optional<uint8_t> battery_p
     }
   }
 
+  int subtitle_h = 0;
+  if (!subtitle_.empty() && ui_font_.valid()) {
+    const size_t sub_len = subtitle_.size();
+    const int sw = ui_font_.word_width(subtitle_.c_str(), sub_len, FontStyle::Regular);
+    const int title_bottom = kHeaderY + (header_font_.valid() ? header_font_.y_advance() : 0);
+    buf.draw_text_proportional((W - sw) / 2, title_bottom + ui_font_.baseline(), subtitle_.c_str(), sub_len, ui_font_,
+                               false);
+    subtitle_h += ui_font_.y_advance() + 8;
+  }
+  if (!subtitle2_.empty() && ui_font_.valid()) {
+    const size_t sub2_len = subtitle2_.size();
+    const int sw2 = ui_font_.word_width(subtitle2_.c_str(), sub2_len, FontStyle::Regular);
+    const int title_bottom = kHeaderY + (header_font_.valid() ? header_font_.y_advance() : 0);
+    buf.draw_text_proportional((W - sw2) / 2, title_bottom + subtitle_h + ui_font_.baseline() - 4, subtitle2_.c_str(),
+                               sub2_len, ui_font_, false);
+    subtitle_h += ui_font_.y_advance() + 8;
+  }
+
   if (!ui_font_.valid() || n == 0) {
     if (n == 0 && ui_font_.valid()) {
       static const char* kEmpty = "No items";
@@ -124,7 +148,7 @@ void ListMenuScreen::draw_all_(DrawBuffer& buf, std::optional<uint8_t> battery_p
   const int line_h = ui_font_.y_advance() + 8;
   const int baseline = ui_font_.baseline();
   // Provide padding below the header
-  const int header_h = kHeaderY + (header_font_.valid() ? header_font_.y_advance() : 0) + 8;
+  const int header_h = kHeaderY + (header_font_.valid() ? header_font_.y_advance() : 0) + subtitle_h + 8;
   const int visible = (H - header_h - kBottomPadding) / line_h;
 
   const int end = scroll_offset_ + visible < n ? scroll_offset_ + visible : n;
@@ -135,7 +159,7 @@ void ListMenuScreen::draw_all_(DrawBuffer& buf, std::optional<uint8_t> battery_p
   for (int i = scroll_offset_; i < end; ++i)
     total_h += (i < (int)separators_.size() && separators_[i]) ? line_h / 2 : line_h;
 
-  const int items_y = n <= visible ? header_h + (H - header_h - total_h) / 2 : header_h;
+  const int items_y = n <= visible ? header_h + (H - kBottomPadding - header_h - total_h) / 2 : header_h;
 
   static const char kEllipsis[] = "...";
   const int ellipsis_w = ui_font_.word_width(kEllipsis, 3, FontStyle::Regular);

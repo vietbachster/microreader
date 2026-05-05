@@ -365,7 +365,8 @@ void ReaderScreen::update(const ButtonState& buttons, DrawBuffer& buf, IRuntime&
         saved_chapter_idx_ = chapter_idx_;
         saved_page_pos_ = page_pos_;
         app_->reader_options()->set_settings(&reader_settings_);
-        app_->reader_options()->populate(mrb_.toc(), static_cast<uint16_t>(chapter_idx_), page_pos_.paragraph);
+        app_->reader_options()->populate(mrb_.toc(), static_cast<uint16_t>(chapter_idx_), page_pos_.paragraph,
+                                         mrb_.metadata().title, progress_pct());
         app_->push_screen(ScreenId::ReaderOptions);
         return;
       case Button::Button2:
@@ -556,18 +557,7 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
   }
 
   if (mrb_.paragraph_count() > 0 && reader_settings_.progress_style != ProgressStyle::None) {
-    const bool is_last_chapter = chapter_idx_ + 1 >= mrb_.chapter_count();
-    int pct = 0;
-    if (page_.at_chapter_end && is_last_chapter) {
-      pct = 100;
-    } else {
-      const uint64_t total_chars = mrb_.total_char_count();
-      uint64_t chars_before = 0;
-      for (size_t i = 0; i < chapter_idx_; ++i)
-        chars_before += mrb_.chapter_char_count(static_cast<uint16_t>(i));
-      const uint64_t cur = chars_before + (chapter_src_ ? chapter_src_->char_before_para(page_pos_.paragraph) : 0);
-      pct = total_chars > 0 ? static_cast<int>(cur * 100u / total_chars) : 0;
-    }
+    int pct = progress_pct();
     if (reader_settings_.progress_style == ProgressStyle::Percentage) {
       char pct_str[8];
       snprintf(pct_str, sizeof(pct_str), "%d%%", pct);

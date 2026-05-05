@@ -5,6 +5,9 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Auto-generate version.h
+execute_process(COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/../tools/generate_version.py)
+
 # Fix MSVC parallel PDB writes
 if(MSVC)
   add_compile_options(/FS)

@@ -142,6 +142,21 @@ class ReaderScreen final : public IScreen {
   const ReaderSettings& reader_settings() const {
     return reader_settings_;
   }
+
+  // Returns progress percentage 0-100 based on read characters
+  int progress_pct() const {
+    if (mrb_.paragraph_count() == 0)
+      return 0;
+    const bool is_last_chapter = chapter_idx_ + 1 >= mrb_.chapter_count();
+    if (page_.at_chapter_end && is_last_chapter)
+      return 100;
+    const uint64_t total_chars = mrb_.total_char_count();
+    uint64_t chars_before = 0;
+    for (size_t i = 0; i < chapter_idx_; ++i)
+      chars_before += mrb_.chapter_char_count(static_cast<uint16_t>(i));
+    const uint64_t cur = chars_before + (chapter_src_ ? chapter_src_->char_before_para(page_pos_.paragraph) : 0);
+    return total_chars > 0 ? static_cast<int>(cur * 100u / total_chars) : 0;
+  }
 };
 
 }  // namespace microreader

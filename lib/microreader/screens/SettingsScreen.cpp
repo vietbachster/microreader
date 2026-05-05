@@ -2,9 +2,11 @@
 
 #include <cstdio>
 #include <cstring>
+#include <string>
 
 #include "../Application.h"
 #include "../content/BookIndex.h"
+#include "../version.h"
 
 #ifdef ESP_PLATFORM
 #include <dirent.h>
@@ -25,12 +27,30 @@ namespace microreader {
 
 void SettingsScreen::on_start() {
   title_ = "Settings";
+  subtitle_ = MICROREADER_VERSION;
 
+  idx_list_format_ = count();
+  std::string format_label = "Book List: Title & Author";
+  if (app_ && app_->main_menu()) {
+    auto fmt = app_->main_menu()->list_format();
+    if (fmt == BookListFormat::TitleOnly)
+      format_label = "Book List: Title";
+    else if (fmt == BookListFormat::Filename)
+      format_label = "Book List: Filename";
+  }
+  add_item(format_label);
+
+  add_separator();
+
+#ifdef MICROREADER_ENABLE_DEMOS
   idx_bouncing_ball_ = count();
   add_item("Bouncing Ball");
 
   idx_grayscale_demo_ = count();
   add_item("Grayscale Demo");
+
+  add_separator();
+#endif
 
   if (data_dir_) {
     idx_clear_converted_ = count();
@@ -38,23 +58,9 @@ void SettingsScreen::on_start() {
 
     idx_rebuild_index_ = count();
     add_item("Rebuild Book Index");
-
-    idx_list_format_ = count();
-    std::string format_label = "Book List Format: Title & Author";
-    if (app_ && app_->main_menu()) {
-      auto fmt = app_->main_menu()->list_format();
-      if (fmt == BookListFormat::TitleOnly)
-        format_label = "Book List Format: Title Only";
-      else if (fmt == BookListFormat::Filename)
-        format_label = "Book List Format: Filename";
-    }
-    add_item(format_label);
   }
 
 #ifdef ESP_PLATFORM
-  idx_switch_ota_ = count();
-  add_item("Switch OTA");
-
   if (app_ && app_->has_invalidate_font_fn()) {
     idx_invalidate_font_ = count();
     add_item("Invalidate Font");
@@ -62,10 +68,14 @@ void SettingsScreen::on_start() {
 
   idx_spiffs_ = count();
   add_item("Rebuild SPIFFS");
+
+  idx_switch_ota_ = count();
+  add_item("Switch OTA");
 #endif
 }
 
 void SettingsScreen::on_select(int index) {
+#ifdef MICROREADER_ENABLE_DEMOS
   if (index == idx_bouncing_ball_) {
     app_->push_screen(ScreenId::BouncingBall);
     return;
@@ -74,6 +84,7 @@ void SettingsScreen::on_select(int index) {
     app_->push_screen(ScreenId::GrayscaleDemo);
     return;
   }
+#endif
   if (index == idx_clear_converted_) {
     clear_converted_();
     return;  // stay on screen
@@ -97,13 +108,13 @@ void SettingsScreen::on_select(int index) {
       std::string new_label;
       if (fmt == BookListFormat::TitleAndAuthor) {
         fmt = BookListFormat::TitleOnly;
-        new_label = "Book List Format: Title Only";
+        new_label = "Book List: Title";
       } else if (fmt == BookListFormat::TitleOnly) {
         fmt = BookListFormat::Filename;
-        new_label = "Book List Format: Filename";
+        new_label = "Book List: Filename";
       } else {
         fmt = BookListFormat::TitleAndAuthor;
-        new_label = "Book List Format: Title & Author";
+        new_label = "Book List: Title & Author";
       }
       app_->main_menu()->set_list_format(fmt);
       set_item_label(idx_list_format_, new_label);
