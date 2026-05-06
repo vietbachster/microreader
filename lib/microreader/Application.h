@@ -95,6 +95,20 @@ class Application {
     return &menu_;
   }
 
+  bool invert_menu_buttons() const {
+    return invert_menu_buttons_;
+  }
+  void set_invert_menu_buttons(bool v) {
+    invert_menu_buttons_ = v;
+  }
+
+  bool invert_side_buttons() const {
+    return invert_side_buttons_;
+  }
+  void set_invert_side_buttons(bool v) {
+    invert_side_buttons_ = v;
+  }
+
   // Navigate to a screen: push on top of the current screen (current stays on stack).
   // Or replace the current screen (pop it first, then push the new one).
   // safe to call from within a screen's update(); the transition happens after update() returns.
@@ -132,6 +146,9 @@ class Application {
   uint32_t uptime_ms_ = 0;
   bool started_ = false;
   bool running_ = true;
+
+  bool invert_menu_buttons_ = false;
+  bool invert_side_buttons_ = false;
 
   ScreenManager screen_mgr_;
   MainMenu menu_;

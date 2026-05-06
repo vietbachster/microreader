@@ -261,7 +261,10 @@ void ListMenuScreen::draw_button_hints_(DrawBuffer& buf) const {
   // Four labels: back=◀, select=▶, down=▼, up=▲
   // ◀ = U+25C0 (E2 97 80), ▶ = U+25B6 (E2 96 B6)
   // ▼ = U+25BC (E2 96 BC), ▲ = U+25B2 (E2 96 B2)
-  static const char* kLabels[4] = {"\xe2\x97\x80", "\xe2\x96\xb6", "\xe2\x96\xbc", "\xe2\x96\xb2"};
+  bool inv_menu = app_ && app_->invert_menu_buttons();
+  const char* lbl_down = "\xe2\x96\xbc";
+  const char* lbl_up = "\xe2\x96\xb2";
+  const char* kLabels[4] = {"\xe2\x97\x80", "\xe2\x96\xb6", inv_menu ? lbl_up : lbl_down, inv_menu ? lbl_down : lbl_up};
   static const size_t kLens[4] = {3, 3, 3, 3};
 
   const int pair0 = W * 163 / 550;
@@ -300,51 +303,69 @@ void ListMenuScreen::update(const ButtonState& buttons, DrawBuffer& buf, IRuntim
   bool had_up_press = false;
   bool had_down_press = false;
 
+  bool inv_menu = app_ && app_->invert_menu_buttons();
+  Button logical_up = inv_menu ? Button::Button2 : Button::Button3;
+  Button logical_down = inv_menu ? Button::Button3 : Button::Button2;
+
   Button btn;
   while (buttons.next_press(btn)) {
-    switch (btn) {
-      case Button::Button0:
-        // Flush any pending move before back so the screen redraws correctly
-        // if on_back() decides to stay.
-        if (moved) {
-          draw_all_(buf, runtime.battery_percentage());
-          buf.refresh();
-          moved = false;
-        }
-        on_back();
-        if (app_ && app_->has_pending_transition()) {
-          return;
-        }
-        break;
-
-      case Button::Button3:  // up
-        if (n > 0) {
-          move_up();
-          moved = true;
-          had_up_press = true;
-        }
-        break;
-
-      case Button::Button2:  // down
-        if (n > 0) {
-          move_down();
-          moved = true;
-          had_down_press = true;
-        }
-        break;
-
-      case Button::Button1:  // select
-        if (n > 0 && selected_ < n) {
-          on_select(selected_);
+    if (btn == logical_up) {
+      if (n > 0) {
+        move_up();
+        moved = true;
+        had_up_press = true;
+      }
+    } else if (btn == logical_down) {
+      if (n > 0) {
+        move_down();
+        moved = true;
+        had_down_press = true;
+      }
+    } else {
+      switch (btn) {
+        case Button::Button0:
+          // Flush any pending move before back so the screen redraws correctly
+          // if on_back() decides to stay.
+          if (moved) {
+            draw_all_(buf, runtime.battery_percentage());
+            buf.refresh();
+            moved = false;
+          }
+          on_back();
           if (app_ && app_->has_pending_transition()) {
             return;
           }
-          needs_draw = true;
-        }
-        break;
+          break;
 
-      default:
-        break;
+        case Button::Button1:  // select
+          if (n > 0 && selected_ < n) {
+            on_select(selected_);
+            if (app_ && app_->has_pending_transition()) {
+              return;
+            }
+            needs_draw = true;
+          }
+          break;
+
+        case Button::Up:  // physical up
+          if (n > 0) {
+            move_up();
+            moved = true;
+            had_up_press = true;
+          }
+          break;
+
+        case Button::Down:  // physical down
+          if (n > 0) {
+            move_down();
+            moved = true;
+            had_down_press = true;
+          }
+          break;
+
+        default:
+          break;
+      }
     }
   }
 
@@ -352,8 +373,8 @@ void ListMenuScreen::update(const ButtonState& buttons, DrawBuffer& buf, IRuntim
   // step size grows by 1 each frame: frame 0 = 1, frame 1 = 2, frame 2 = 3, …
   auto hold_step = [](int frames) -> int { return frames + 1; };
 
-  const bool up_held = !had_up_press && (buttons.is_down(Button::Button3));
-  const bool down_held = !had_down_press && (buttons.is_down(Button::Button2));
+  const bool up_held = !had_up_press && (buttons.is_down(logical_up) || buttons.is_down(Button::Up));
+  const bool down_held = !had_down_press && (buttons.is_down(logical_down) || buttons.is_down(Button::Down));
 
   if (up_held && n > 0) {
     const int step = hold_step(hold_frames_up_);

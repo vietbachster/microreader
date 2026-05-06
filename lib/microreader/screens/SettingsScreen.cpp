@@ -25,20 +25,38 @@
 
 namespace microreader {
 
+static std::string get_list_format_label(BookListFormat fmt) {
+  if (fmt == BookListFormat::TitleOnly)
+    return "Book List: Title";
+  if (fmt == BookListFormat::Filename)
+    return "Book List: Filename";
+  return "Book List: Title & Author";
+}
+
+static std::string get_menu_nav_label(bool inverted) {
+  return std::string("Menu Nav: ") + (inverted ? "Left=Up" : "Left=Down");
+}
+
+static std::string get_side_paging_label(bool inverted) {
+  return std::string("Side Paging: ") + (inverted ? "Top=Prev" : "Top=Next");
+}
+
 void SettingsScreen::on_start() {
   title_ = "Settings";
   subtitle_ = MICROREADER_VERSION;
 
   idx_list_format_ = count();
-  std::string format_label = "Book List: Title & Author";
+  BookListFormat fmt = BookListFormat::TitleAndAuthor;
   if (app_ && app_->main_menu()) {
-    auto fmt = app_->main_menu()->list_format();
-    if (fmt == BookListFormat::TitleOnly)
-      format_label = "Book List: Title";
-    else if (fmt == BookListFormat::Filename)
-      format_label = "Book List: Filename";
+    fmt = app_->main_menu()->list_format();
   }
-  add_item(format_label);
+  add_item(get_list_format_label(fmt));
+
+  idx_invert_menu_ = count();
+  add_item(get_menu_nav_label(app_ && app_->invert_menu_buttons()));
+
+  idx_invert_side_ = count();
+  add_item(get_side_paging_label(app_ && app_->invert_side_buttons()));
 
   add_separator();
 
@@ -105,19 +123,31 @@ void SettingsScreen::on_select(int index) {
   if (index == idx_list_format_) {
     if (app_->main_menu()) {
       auto fmt = app_->main_menu()->list_format();
-      std::string new_label;
       if (fmt == BookListFormat::TitleAndAuthor) {
         fmt = BookListFormat::TitleOnly;
-        new_label = "Book List: Title";
       } else if (fmt == BookListFormat::TitleOnly) {
         fmt = BookListFormat::Filename;
-        new_label = "Book List: Filename";
       } else {
         fmt = BookListFormat::TitleAndAuthor;
-        new_label = "Book List: Title & Author";
       }
       app_->main_menu()->set_list_format(fmt);
-      set_item_label(idx_list_format_, new_label);
+      set_item_label(idx_list_format_, get_list_format_label(fmt));
+    }
+    return;
+  }
+  if (index == idx_invert_menu_) {
+    if (app_) {
+      bool v = !app_->invert_menu_buttons();
+      app_->set_invert_menu_buttons(v);
+      set_item_label(idx_invert_menu_, get_menu_nav_label(v));
+    }
+    return;
+  }
+  if (index == idx_invert_side_) {
+    if (app_) {
+      bool v = !app_->invert_side_buttons();
+      app_->set_invert_side_buttons(v);
+      set_item_label(idx_invert_side_, get_side_paging_label(v));
     }
     return;
   }

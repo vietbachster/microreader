@@ -192,6 +192,8 @@ void microreader::Application::save_settings_() {
 
   // Menu list format
   std::fprintf(f, "list_format=%u\n", static_cast<unsigned>(menu_.list_format()));
+  std::fprintf(f, "inv_menu=%u\n", invert_menu_buttons_ ? 1u : 0u);
+  std::fprintf(f, "inv_side=%u\n", invert_side_buttons_ ? 1u : 0u);
 
   std::fclose(f);
 }
@@ -239,6 +241,10 @@ void microreader::Application::load_settings_() {
       rs.progress_style = uval <= 2 ? static_cast<ProgressStyle>(uval) : ProgressStyle::Bar;
     else if (std::sscanf(line, "list_format=%u", &uval) == 1)
       menu_.set_list_format(uval <= 2 ? static_cast<BookListFormat>(uval) : BookListFormat::TitleAndAuthor);
+      else if (std::sscanf(line, "inv_menu=%u", &uval) == 1)
+        invert_menu_buttons_ = (uval != 0);
+      else if (std::sscanf(line, "inv_side=%u", &uval) == 1)
+        invert_side_buttons_ = (uval != 0);
   }
   std::fclose(f);
   MR_LOGI("app", "Loaded settings: align=%u ph=%u pv=%u ls=%u prog=%u sel=%s", static_cast<unsigned>(rs.align_override),

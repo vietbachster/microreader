@@ -355,41 +355,48 @@ void ReaderScreen::update(const ButtonState& buttons, DrawBuffer& buf, IRuntime&
   int page_delta = 0;
   bool had_next_press = false;
   bool had_prev_press = false;
+
+  bool inv_side = app_ && app_->invert_side_buttons();
+  bool inv_menu = app_ && app_->invert_menu_buttons();
+
+  Button logical_next_menu = inv_menu ? Button::Button3 : Button::Button2;
+  Button logical_prev_menu = inv_menu ? Button::Button2 : Button::Button3;
+  Button logical_next_side = inv_side ? Button::Down : Button::Up;
+  Button logical_prev_side = inv_side ? Button::Up : Button::Down;
+
   Button btn;
   while (buttons.next_press(btn)) {
-    switch (btn) {
-      case Button::Button0:
-        app_->pop_screen();
-        return;
-      case Button::Button1:
-        saved_chapter_idx_ = chapter_idx_;
-        saved_page_pos_ = page_pos_;
-        app_->reader_options()->set_settings(&reader_settings_);
-        app_->reader_options()->populate(mrb_.toc(), static_cast<uint16_t>(chapter_idx_), page_pos_.paragraph,
-                                         mrb_.metadata().title, progress_pct());
-        app_->push_screen(ScreenId::ReaderOptions);
-        return;
-      case Button::Button2:
-      case Button::Up:
-        ++page_delta;
-        had_next_press = true;
-        break;
-      case Button::Button3:
-      case Button::Down:
-        --page_delta;
-        had_prev_press = true;
-        break;
-      default:
-        break;
+    if (btn == logical_next_menu || btn == logical_next_side) {
+      ++page_delta;
+      had_next_press = true;
+    } else if (btn == logical_prev_menu || btn == logical_prev_side) {
+      --page_delta;
+      had_prev_press = true;
+    } else {
+      switch (btn) {
+        case Button::Button0:
+          app_->pop_screen();
+          return;
+        case Button::Button1:
+          saved_chapter_idx_ = chapter_idx_;
+          saved_page_pos_ = page_pos_;
+          app_->reader_options()->set_settings(&reader_settings_);
+          app_->reader_options()->populate(mrb_.toc(), static_cast<uint16_t>(chapter_idx_), page_pos_.paragraph,
+                                           mrb_.metadata().title, progress_pct());
+          app_->push_screen(ScreenId::ReaderOptions);
+          return;
+        default:
+          break;
+      }
     }
   }
 
   // Hold-down: advance one page per frame while a nav button is held,
   // but only if no fresh press event arrived this frame (avoids double-counting
   // the initial press).
-  if (!had_next_press && (buttons.is_down(Button::Button2) || buttons.is_down(Button::Up)))
+  if (!had_next_press && (buttons.is_down(logical_next_menu) || buttons.is_down(logical_next_side)))
     ++page_delta;
-  if (!had_prev_press && (buttons.is_down(Button::Button3) || buttons.is_down(Button::Down)))
+  if (!had_prev_press && (buttons.is_down(logical_prev_menu) || buttons.is_down(logical_prev_side)))
     --page_delta;
 
   bool changed = false;
@@ -749,4 +756,3 @@ void ReaderScreen::load_position_() {
 }
 
 }  // namespace microreader
-
