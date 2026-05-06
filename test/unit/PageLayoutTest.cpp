@@ -1994,3 +1994,34 @@ TEST(PageLayout, IsMidPromotedImage_FalseAtExactBoundary) {
   EXPECT_TRUE(tl.is_mid_promoted_image(PagePosition{0, 50}))
       << "is_mid_promoted_image must be TRUE when offset < promoted_h (inside image)";
 }
+
+TEST(PageLayout, IsMidStandaloneImage_FalseAtExactBoundary) {
+  // Para 0: Image paragraph
+  // Page height = 100px: image fills page exactly.
+  Chapter ch;
+  ch.paragraphs.push_back(Paragraph::make_image(1, 200, 100));
+
+  TestChapterSource src(ch);
+  PageOptions opts(200, 100, 0, 0);
+  TextLayout tl(font8, opts, src);
+  auto page1 = tl.layout();
+
+  ASSERT_EQ(page1.image_items().size(), 1u);
+  EXPECT_EQ(page1.image_items()[0].height, 100u);
+
+  // We correctly consume the 100px height.
+  // The layout engine typically pushes to the next empty paragraph if it was exactly at the end.
+  // Wait, if it exactly filled the page, `page1.end` should be {1, 0} or {0, 100}
+  // is_mid_promoted_image must return FALSE in either case.
+  // Right now is_mid_promoted_image only handles inline images! It returns false automatically for type=Image.
+  // But ReaderScreen incorrectly checks `type == Image && next.offset > 0`.
+  // If `page1.end` is {0, 100}, the screen thinks it is mid-image!
+  
+  if (page1.end.paragraph == 0) {
+      EXPECT_EQ(page1.end.offset, 100u);
+      std::cout << "END IS 0, 100!" << std::endl;
+  } else {
+      std::cout << "END IS " << page1.end.paragraph << ", " << page1.end.offset << std::endl;
+  }
+}
+

@@ -1,4 +1,4 @@
-﻿#include "ReaderScreen.h"
+#include "ReaderScreen.h"
 
 #include <cstdio>
 #include <cstring>
@@ -20,10 +20,10 @@
 namespace microreader {
 
 // ---------------------------------------------------------------------------
-// ReaderScreen â€” image size resolution
+// ReaderScreen — image size resolution
 // ---------------------------------------------------------------------------
 
-// resolve_image_size_ removed â€” image size resolution is now handled by
+// resolve_image_size_ removed — image size resolution is now handled by
 // make_image_size_query() (MrbReader.h), stored in image_size_fn_.
 
 bool ReaderScreen::decode_image_to_buffer_(uint16_t img_key, uint32_t offset, DrawBuffer& buf, int dest_x, int dest_y,
@@ -471,8 +471,8 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
 
   page_ = layout_engine_.layout();
 
-  // â”€â”€ Collect image positions from layout
-  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Collect image positions from layout
+  // ─────────────────────────────────
   struct ImageToDraw {
     uint16_t key;
     int x, y, w, h;
@@ -515,8 +515,8 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
   // Track whether grayscale pass is needed (deferred to update()).
   grayscale_pending_ = fset && fset->has_grayscale();
 
-  // â”€â”€ BW rendering
-  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── BW rendering
+  // ────────────────────────────────────────────────────────
   buf.fill(true);
 
   if (fset) {
@@ -571,8 +571,8 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
     }
   }
 
-  // â”€â”€ Timing
-  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Timing
+  // ──────────────────────────────────────────────────────────────
   int n_words = 0;
   for (const auto& ci : page_.items)
     if (const PageTextItem* ti = std::get_if<PageTextItem>(&ci))
@@ -646,12 +646,12 @@ void ReaderScreen::apply_grayscale_(DrawBuffer& buf) {
   if (!fset || !fset->has_grayscale())
     return;
 
-  // LSB plane â†’ BW RAM (no refresh)
+  // LSB plane → BW RAM (no refresh)
   buf.fill(false);
   render_text_(buf, *fset, GrayPlane::LSB, true, reader_settings_.h_padding());
   buf.write_ram_bw();
 
-  // MSB plane â†’ RED RAM (no refresh)
+  // MSB plane → RED RAM (no refresh)
   buf.fill(false);
   render_text_(buf, *fset, GrayPlane::MSB, true, reader_settings_.h_padding());
   buf.write_ram_red();
@@ -673,10 +673,14 @@ bool ReaderScreen::next_page_() {
   // If the page ended mid-image (offset > 0 into an image paragraph or
   // mid-promoted-inline-image), snap back to the start of that paragraph
   // so the next page shows the full image.
+  // We only do this if the image wasn't the first thing on the current page,
+  // to avoid infinite loops on images taller than the screen.
   if (next.offset > 0 && chapter_src_ && next.paragraph < chapter_src_->paragraph_count()) {
-    if (chapter_src_->paragraph(next.paragraph).type == ParagraphType::Image ||
-        layout_engine_.is_mid_promoted_image(next))
-      next.offset = 0;
+    if (page_pos_.paragraph != next.paragraph) {
+      if (chapter_src_->paragraph(next.paragraph).type == ParagraphType::Image ||
+          layout_engine_.is_mid_promoted_image(next))
+        next.offset = 0;
+    }
   }
   page_pos_ = next;
   return true;
@@ -745,3 +749,4 @@ void ReaderScreen::load_position_() {
 }
 
 }  // namespace microreader
+

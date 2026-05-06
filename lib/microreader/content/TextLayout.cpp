@@ -1291,6 +1291,10 @@ PagePosition TextLayout::resolve_stable_position(PagePosition pos) const {
   if (lp.type != ParagraphType::Text || lp.lines.empty())
     return pos;
 
+  // If we are mid-promoted-image, the pixel offset is stable enough.
+  if (lp.inline_img.promoted && lp.promoted_h > 0 && pos.offset < lp.promoted_h)
+    return pos;
+
   // Find the last line that starts at or before the recorded offset.
   uint16_t found_idx = 0;
   for (uint16_t i = 0; i < lp.lines.size(); ++i) {
@@ -1301,7 +1305,11 @@ PagePosition TextLayout::resolve_stable_position(PagePosition pos) const {
     }
   }
 
-  return {pos.paragraph, found_idx, lp.lines[found_idx].text_offset};
+  uint16_t new_offset = found_idx;
+  if (lp.inline_img.promoted && lp.promoted_h > 0)
+    new_offset += lp.promoted_h;
+
+  return {pos.paragraph, new_offset, lp.lines[found_idx].text_offset};
 }
 
 }  // namespace microreader
