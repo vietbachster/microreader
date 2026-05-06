@@ -38,8 +38,8 @@
 
 namespace microreader {
 
-static constexpr uint32_t kMbfMagic = 0x3246424D;  // "MBF2" little-endian
-static constexpr uint8_t kMbfVersion = 2;
+static constexpr uint32_t kMbfMagic = 0x3346424D;  // "MBF3" little-endian
+static constexpr uint8_t kMbfVersion = 3;
 
 #pragma pack(push, 1)
 
@@ -55,22 +55,25 @@ struct MbfHeader {
   uint16_t num_ranges;          // 10: number of MbfRange entries (Regular style)
   uint16_t num_glyphs;          // 12: total glyph count (Regular style)
   uint16_t nominal_size;        // 14: nominal pixel size requested at generation
-  uint32_t bitmap_data_offset;  // 16: byte offset from file start to BW bitmap data (shared by all styles)
-  uint32_t bold_offset;         // 20: file offset to Bold MbfStyleSection (0 = absent)
-  uint32_t italic_offset;       // 24: file offset to Italic MbfStyleSection (0 = absent)
-  uint32_t bold_italic_offset;  // 28: file offset to BoldItalic MbfStyleSection (0 = absent)
-  uint32_t gray_lsb_offset;     // 32: file offset to grayscale LSB bitmap data (0 = absent)
-  uint32_t gray_msb_offset;     // 36: file offset to grayscale MSB bitmap data (0 = absent)
+  uint32_t kerning_length;      // 16: byte length of kerning data (Regular style)
+  uint32_t bitmap_data_offset;  // 20: byte offset from file start to BW bitmap data (shared by all styles)
+  uint32_t bold_offset;         // 24: file offset to Bold MbfStyleSection (0 = absent)
+  uint32_t italic_offset;       // 28: file offset to Italic MbfStyleSection (0 = absent)
+  uint32_t bold_italic_offset;  // 32: file offset to BoldItalic MbfStyleSection (0 = absent)
+  uint32_t kerning_offset;      // 36: file offset to Regular style kerning data
+  uint32_t gray_lsb_offset;     // 40: file offset to grayscale LSB bitmap data (0 = absent)
+  uint32_t gray_msb_offset;     // 44: file offset to grayscale MSB bitmap data (0 = absent)
 };
-static_assert(sizeof(MbfHeader) == 40, "MbfHeader must be 40 bytes");
+static_assert(sizeof(MbfHeader) == 48, "MbfHeader must be 48 bytes");
 
 // Style section preamble — appears at bold_offset / italic_offset / bold_italic_offset.
-// Immediately followed by MbfRange[num_ranges] then MbfGlyph[num_glyphs].
+// Immediately followed by MbfRange[num_ranges] then MbfGlyph[num_glyphs] then MbfClassKerning data block.
 struct MbfStyleSection {
   uint16_t num_ranges;
   uint16_t num_glyphs;
+  uint32_t kerning_length;
 };
-static_assert(sizeof(MbfStyleSection) == 4, "MbfStyleSection must be 4 bytes");
+static_assert(sizeof(MbfStyleSection) == 8, "MbfStyleSection must be 8 bytes");
 
 // Unicode range — maps a contiguous codepoint block to a slice of the glyph table.
 // 8 bytes each.
@@ -92,6 +95,23 @@ struct MbfGlyph {
   uint8_t reserved;
 };
 static_assert(sizeof(MbfGlyph) == 10, "MbfGlyph must be 10 bytes");
+
+// Class kerning metadata block (Format 3).
+// The binary kerning section is laid out as follows:
+//   uint8_t num_l_classes_minus_1;
+//   uint8_t num_r_classes_minus_1;
+//   uint8_t l_class_map[num_glyphs];
+//   uint8_t r_class_map[num_glyphs];
+//   int8_t  matrix[num_l_classes * num_r_classes];
+//
+struct MbfClassKerning {
+  uint8_t num_l_classes_minus_1;
+  uint8_t num_r_classes_minus_1;
+  // Followed by variable length arrays:
+  // uint8_t l_class_map[num_glyphs];
+  // uint8_t r_class_map[num_glyphs];
+  // int8_t  matrix[ (num_l_classes_minus_1+1) * (num_r_classes_minus_1+1) ];
+};
 
 #pragma pack(pop)
 

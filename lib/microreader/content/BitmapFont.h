@@ -80,7 +80,18 @@ class BitmapFont : public IFont {
     styles_[0].glyphs = reinterpret_cast<const MbfGlyph*>(data + ranges_end);
     styles_[0].num_ranges = hdr->num_ranges;
     styles_[0].num_glyphs = hdr->num_glyphs;
+    styles_[0].kerning_length = hdr->kerning_length;
     styles_[0].fallback_glyph_idx = find_glyph_index_in(styles_[0], 0xFFFD);
+
+    if (hdr->kerning_offset && styles_[0].kerning_length >= sizeof(MbfClassKerning)) {
+      size_t kern_end = hdr->kerning_offset + styles_[0].kerning_length;
+      if (kern_end <= size) {
+        styles_[0].kerning = reinterpret_cast<const MbfClassKerning*>(data + hdr->kerning_offset);
+        styles_[0].l_class_map = data + hdr->kerning_offset + sizeof(MbfClassKerning);
+        styles_[0].r_class_map = styles_[0].l_class_map + styles_[0].num_glyphs;
+        styles_[0].kerning_matrix = reinterpret_cast<const int8_t*>(styles_[0].r_class_map + styles_[0].num_glyphs);
+      }
+    }
 
     // Load additional styles if present
     load_style_(data, size, hdr->bold_offset, styles_[1]);
@@ -100,19 +111,41 @@ class BitmapFont : public IFont {
     if (idx < 0)
       idx = sd.fallback_glyph_idx;
     if (idx < 0)
-      return header_ ? header_->default_advance : 0;
-    return sd.glyphs[idx].advance_width;
+      return header_ ? (header_->default_advance + 2) / 4 : 0;
+    return (sd.glyphs[idx].advance_width + 2) / 4;
   }
 
   uint16_t word_width(const char* text, size_t len, FontStyle style, uint8_t size_pct = 100) const override {
-    uint16_t w = 0;
+    int w_q = 0;  // accumulated width in quarter-pixels
     const char* p = text;
     const char* end = text + len;
+    const StyleData& sd = resolve_style_(style);
+    int prev_idx = -1;
+
     while (p < end) {
       char32_t cp = decode_utf8(p, end);
-      w += char_width(cp, style, size_pct);
+      int idx = find_glyph_index_in(sd, cp);
+      if (idx < 0)
+        idx = sd.fallback_glyph_idx;
+
+      if (prev_idx >= 0 && idx >= 0 && sd.kerning_matrix) {
+        uint8_t lc = sd.l_class_map[prev_idx];
+        uint8_t rc = sd.r_class_map[idx];
+        uint8_t max_lc = sd.kerning->num_l_classes_minus_1;
+        uint8_t max_rc = sd.kerning->num_r_classes_minus_1;
+        if (lc <= max_lc && rc <= max_rc) {
+          w_q += sd.kerning_matrix[lc * (max_rc + 1) + rc];
+        }
+      }
+
+      if (idx < 0) {
+        w_q += header_ ? header_->default_advance : 0;
+      } else {
+        w_q += sd.glyphs[idx].advance_width;
+      }
+      prev_idx = idx;
     }
-    return w;
+    return (w_q + 2) / 4;  // round to nearest full pixel
   }
 
   uint16_t y_advance(uint8_t /*size_pct*/ = 100) const override {
@@ -124,6 +157,26 @@ class BitmapFont : public IFont {
   }
 
   // ── Glyph data access (for rendering) ───────────────────────────────────
+
+  int8_t get_kerning_q(char32_t left, char32_t right, FontStyle style = FontStyle::Regular) const {
+    const StyleData& sd = resolve_style_(style);
+    if (!sd.kerning_matrix)
+      return 0;
+
+    int l_idx = find_glyph_index_in(sd, left);
+    int r_idx = find_glyph_index_in(sd, right);
+    if (l_idx < 0 || r_idx < 0)
+      return 0;
+
+    uint8_t lc = sd.l_class_map[l_idx];
+    uint8_t rc = sd.r_class_map[r_idx];
+    uint8_t max_lc = sd.kerning->num_l_classes_minus_1;
+    uint8_t max_rc = sd.kerning->num_r_classes_minus_1;
+    if (lc <= max_lc && rc <= max_rc) {
+      return sd.kerning_matrix[lc * (max_rc + 1) + rc];
+    }
+    return 0;
+  }
 
   GlyphData glyph_data(char32_t ch, FontStyle style = FontStyle::Regular) const {
     const StyleData& sd = resolve_style_(style);
@@ -171,6 +224,11 @@ class BitmapFont : public IFont {
   struct StyleData {
     const MbfRange* ranges = nullptr;
     const MbfGlyph* glyphs = nullptr;
+    const MbfClassKerning* kerning = nullptr;
+    const uint8_t* l_class_map = nullptr;
+    const uint8_t* r_class_map = nullptr;
+    const int8_t* kerning_matrix = nullptr;
+    uint32_t kerning_length = 0;
     uint16_t num_ranges = 0;
     uint16_t num_glyphs = 0;
     int fallback_glyph_idx = -1;
@@ -206,7 +264,18 @@ class BitmapFont : public IFont {
     out.glyphs = reinterpret_cast<const MbfGlyph*>(data + ranges_end);
     out.num_ranges = sec->num_ranges;
     out.num_glyphs = sec->num_glyphs;
+    out.kerning_length = sec->kerning_length;
     out.fallback_glyph_idx = find_glyph_index_in(out, 0xFFFD);
+
+    if (out.kerning_length >= sizeof(MbfClassKerning)) {
+      size_t kern_end = glyphs_end + out.kerning_length;
+      if (kern_end <= size) {
+        out.kerning = reinterpret_cast<const MbfClassKerning*>(data + glyphs_end);
+        out.l_class_map = data + glyphs_end + sizeof(MbfClassKerning);
+        out.r_class_map = out.l_class_map + out.num_glyphs;
+        out.kerning_matrix = reinterpret_cast<const int8_t*>(out.r_class_map + out.num_glyphs);
+      }
+    }
   }
 
   // Find glyph table index for a codepoint within a style. Returns -1 if not found.

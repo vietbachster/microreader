@@ -212,14 +212,14 @@ void ListMenuScreen::draw_all_(DrawBuffer& buf, std::optional<uint8_t> battery_p
         // Full width bar for left-aligned
         const int bar_x = 16;
         const int bar_width = W - 32;
-        buf.fill_rect(bar_x + 1, iy - 1, bar_width - 2, bar_h, false);  // Body
-        buf.fill_rect(bar_x, iy, 1, bar_h - 2, false);                  // Left cap
-        buf.fill_rect(bar_x + bar_width - 1, iy, 1, bar_h - 2, false);  // Right cap
+        buf.fill_rect(bar_x + 1, iy, bar_width - 2, bar_h, false);          // Body
+        buf.fill_rect(bar_x, iy + 1, 1, bar_h - 2, false);                  // Left cap
+        buf.fill_rect(bar_x + bar_width - 1, iy + 1, 1, bar_h - 2, false);  // Right cap
         buf.draw_text_proportional(ix, iy + baseline, label, len, ui_font_, true);
       } else {
-        buf.fill_rect(ix - bar_w - 1, iy, 1, bar_h - 2, false);
-        buf.fill_rect(ix - bar_w, iy - 1, iw + bar_w * 2, bar_h, false);
-        buf.fill_rect(ix + iw + bar_w, iy, 1, bar_h - 2, false);
+        buf.fill_rect(ix - bar_w, iy, iw + bar_w * 2, bar_h, false);
+        buf.fill_rect(ix - bar_w - 1, iy + 1, 1, bar_h - 2, false);
+        buf.fill_rect(ix + iw + bar_w, iy + 1, 1, bar_h - 2, false);
         buf.draw_text_proportional(ix, iy + baseline, label, len, ui_font_, true);
       }
     } else {

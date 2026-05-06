@@ -645,11 +645,14 @@ class DrawBuffer {
                             bool white) {
     if (!text || !*text || !font.valid())
       return;
+    int cursor_q = x * 4;  // accumulate in quarter-pixels for sub-pixel precision
     for (const char* p = text; *p; ++p) {
       GlyphData g = font.glyph_data(static_cast<uint8_t>(*p), FontStyle::Regular);
       if (g.bits)
-        draw_glyph_impl_(t, x, baseline_y, g.bits, g.bitmap_width, g.bitmap_height, g.x_offset, g.y_offset, white);
-      x += g.advance_width;
+        draw_glyph_impl_(t, (cursor_q + 2) / 4, baseline_y, g.bits, g.bitmap_width, g.bitmap_height, g.x_offset,
+                         g.y_offset, white);
+      cursor_q += g.advance_width;
+      cursor_q = ((cursor_q + 2) / 4) * 4;  // snap to full pixel
     }
   }
 
@@ -703,7 +706,9 @@ inline int DrawBuffer::draw_text_proportional(int x, int baseline_y, const char*
     return x;
   const char* p = text;
   const char* end = text + len;
-  int cursor_x = x;
+  int cursor_q = x * 4;  // quarter pixels
+  char32_t prev_cp = 0;
+
   while (p < end) {
     // Decode UTF-8
     char32_t cp = 0;
@@ -727,13 +732,20 @@ inline int DrawBuffer::draw_text_proportional(int x, int baseline_y, const char*
       cp = 0xFFFD;
     }
 
+    if (prev_cp) {
+      cursor_q += font.get_kerning_q(prev_cp, cp, style);
+    }
+
     GlyphData g = font.glyph_data(cp, style);
     if (g.bits) {
-      draw_glyph(cursor_x, baseline_y, g.bits, g.bitmap_width, g.bitmap_height, g.x_offset, g.y_offset, white);
+      int draw_x = (cursor_q + 2) / 4;
+      draw_glyph(draw_x, baseline_y, g.bits, g.bitmap_width, g.bitmap_height, g.x_offset, g.y_offset, white);
     }
-    cursor_x += g.advance_width;
+    cursor_q += g.advance_width;
+    cursor_q = ((cursor_q + 2) / 4) * 4;  // snap to full pixel — prevents fractional accumulation across characters
+    prev_cp = cp;
   }
-  return cursor_x;
+  return cursor_q / 4;
 }
 
 inline int DrawBuffer::draw_text_plane(uint8_t* buf, int x, int baseline_y, const char* text, size_t len,
@@ -744,7 +756,9 @@ inline int DrawBuffer::draw_text_plane(uint8_t* buf, int x, int baseline_y, cons
     return x;
   const char* p = text;
   const char* end = text + len;
-  int cursor_x = x;
+  int cursor_q = x * 4;
+  char32_t prev_cp = 0;
+
   while (p < end) {
     char32_t cp = 0;
     uint8_t b = static_cast<uint8_t>(*p);
@@ -767,11 +781,18 @@ inline int DrawBuffer::draw_text_plane(uint8_t* buf, int x, int baseline_y, cons
       cp = 0xFFFD;
     }
 
+    if (prev_cp) {
+      cursor_q += f->get_kerning_q(prev_cp, cp, style);
+    }
+
     GlyphData g = f->glyph_data(cp, style);
-    draw_glyph_plane(buf, cursor_x, baseline_y, g, plane, white);
-    cursor_x += g.advance_width;
+    int draw_x = (cursor_q + 2) / 4;
+    draw_glyph_plane(buf, draw_x, baseline_y, g, plane, white);
+    cursor_q += g.advance_width;
+    cursor_q = ((cursor_q + 2) / 4) * 4;  // snap to full pixel — prevents fractional accumulation across characters
+    prev_cp = cp;
   }
-  return cursor_x;
+  return cursor_q / 4;
 }
 
 }  // namespace microreader

@@ -15,6 +15,12 @@ import struct
 import sys
 import urllib.request
 
+try:
+    import fontTools.ttLib
+except ImportError:
+    print("ERROR: fonttools not installed. Run: pip install fonttools")
+    sys.exit(1)
+
 # For PNG output
 try:
     from PIL import Image
@@ -48,6 +54,7 @@ RANGE_PRESETS = {
     "number-forms": [(0x2150, 0x218F)],  # Number Forms (fractions)
     "arrows": [(0x2190, 0x21FF)],  # Arrows
     "math-ops": [(0x2200, 0x22FF)],  # Mathematical Operators
+    "geometric": [(0x25A0, 0x25FF)],  # Geometric Shapes
     "misc-symbols": [(0x2600, 0x26FF)],  # Miscellaneous Symbols
     "combining": [(0x0300, 0x036F)],  # Combining Diacritical Marks
     "spacing-mod": [(0x02B0, 0x02FF)],  # Spacing Modifier Letters
@@ -71,6 +78,8 @@ DEFAULT_RANGES = [
     "currency",
     "letterlike",
     "number-forms",
+    "arrows",
+    "geometric",
     "latin-ext-add",
     "specials",
 ]
@@ -86,10 +95,10 @@ def render_glyph(face, codepoint, size):
     if glyph_index == 0:
         return None  # glyph not in font
 
-    # First, get the unhinted advance so we base our layout on true proportions (Option C)
+    # First, get the unhinted advance so we base our layout on true proportions
     face.load_glyph(glyph_index, freetype.FT_LOAD_NO_HINTING | freetype.FT_LOAD_NO_BITMAP)
     unhinted_advance = face.glyph.advance.x
-    x_advance = int(round(unhinted_advance / 64.0))
+    x_advance = int(round(unhinted_advance * 4.0 / 64.0))  # Scale by 4 for quarter-pixel precision
 
     # Then render the actual bitmap with hinting so it aligns nicely on the pixels
     face.load_glyph(glyph_index, freetype.FT_LOAD_RENDER)
@@ -214,16 +223,97 @@ def render_glyph(face, codepoint, size):
 # MBF writer
 # ---------------------------------------------------------------------------
 
+def extract_kerning_fonttools(ttfont, scale):
+    """
+    Extracts kerning pairs from 'kern' and 'GPOS' tables using fonttools.
+    Returns: dict mapping (left_ft_idx, right_ft_idx) -> px_kern
+    """
+    pairs = {}
+    
+    if "kern" in ttfont:
+        for table in ttfont["kern"].kernTables:
+            if hasattr(table, "kernTable"):
+                for (l, r), value in table.kernTable.items():
+                    pairs[(l, r)] = value
 
-def render_style_glyphs(face, size, codepoint_ranges):
-    """Render glyphs for one style. Returns (ranges, all_glyphs, bw_bitmaps, lsb_bitmaps, msb_bitmaps, max_glyph_height).
+    if "GPOS" in ttfont:
+        gpos = ttfont["GPOS"].table
+        if getattr(gpos, "LookupList", None) is not None:
+            all_glyphs = ttfont.getGlyphOrder()
+            for lookup in gpos.LookupList.Lookup:
+                subtables = []
+                if lookup.LookupType == 2:
+                    subtables = lookup.SubTable
+                elif lookup.LookupType == 9:
+                    for ext in getattr(lookup, "SubTable", []):
+                        if getattr(ext, "ExtensionLookupType", 0) == 2:
+                            if hasattr(ext, "ExtSubTable"):
+                                subtables.append(ext.ExtSubTable)
+                                
+                for sub in subtables:
+                    if sub.Format == 1:
+                        for p, pairSet in zip(sub.Coverage.glyphs, sub.PairSet):
+                            for pairValue in pairSet.PairValueRecord:
+                                r = pairValue.SecondGlyph
+                                val = getattr(getattr(pairValue, "Value1", None), "XAdvance", 0)
+                                if val != 0:
+                                    pairs[(p, r)] = val
+                    elif sub.Format == 2:
+                        classDef1 = sub.ClassDef1.classDefs if sub.ClassDef1 else {}
+                        classDef2 = sub.ClassDef2.classDefs if sub.ClassDef2 else {}
+                        
+                        c1_glyphs = {}
+                        for glyph, c in classDef1.items():
+                            c1_glyphs.setdefault(c, []).append(glyph)
+                        for glyph in getattr(sub, "Coverage").glyphs if hasattr(sub, "Coverage") else []:
+                            if glyph not in classDef1:
+                                c1_glyphs.setdefault(0, []).append(glyph)
+                        
+                        c2_glyphs = {}
+                        for glyph, c in classDef2.items():
+                            c2_glyphs.setdefault(c, []).append(glyph)
+                        # Fallback for class 0 in ClassDef2
+                        for glyph in all_glyphs:
+                            if glyph not in classDef2:
+                                c2_glyphs.setdefault(0, []).append(glyph)
+                                
+                        for class1, rec1 in enumerate(sub.Class1Record):
+                            if class1 not in c1_glyphs: continue
+                            for class2, rec2 in enumerate(rec1.Class2Record):
+                                if class2 not in c2_glyphs: continue
+                                val = getattr(getattr(rec2, "Value1", None), "XAdvance", 0)
+                                if val != 0:
+                                    for l in c1_glyphs[class1]:
+                                        for right in c2_glyphs[class2]:
+                                            pairs[(l, right)] = val
+
+    result = {}
+    for (l_name, r_name), val in pairs.items():
+        try:
+            l_id = ttfont.getGlyphID(l_name)
+            r_id = ttfont.getGlyphID(r_name)
+            px_kern = int(round(val * scale * 4.0))  # Scale by 4 for quarter-pixel precision
+            if px_kern != 0:
+                result[(l_id, r_id)] = px_kern
+        except KeyError:
+            continue
+            
+    return result
+
+
+def render_style_glyphs(face_info, size, codepoint_ranges):
+    """Render glyphs for one style. Returns (ranges, all_glyphs, bw_bitmaps, lsb_bitmaps, msb_bitmaps, max_glyph_height, kerning_pairs).
 
     ranges: list of (first_cp, count, glyph_table_start)
     all_glyphs: flat list of glyph dicts
     bw_bitmaps: bytearray of BW 1-bit bitmap data
     lsb_bitmaps: bytearray of grayscale LSB 1-bit bitmap data
     msb_bitmaps: bytearray of grayscale MSB 1-bit bitmap data
+    kerning_pairs: bytearray of (uint16_t left, uint16_t right, int8_t x_offset)
     """
+    face = face_info["face"]
+    ttfont = face_info["ttfont"]
+    
     face.set_pixel_sizes(0, size)
 
     ranges = []
@@ -268,7 +358,98 @@ def render_style_glyphs(face, size, codepoint_ranges):
         if has_any:
             ranges.append((range_start, count, glyph_table_start))
 
-    return ranges, all_glyphs, bw_bitmaps, lsb_bitmaps, msb_bitmaps, max_glyph_height
+    kerning_mbf_bytes = bytearray()
+
+    upem = ttfont["head"].unitsPerEm
+    scale = size / upem
+    fonttools_kern = extract_kerning_fonttools(ttfont, scale)
+
+    if fonttools_kern:
+        flat_pairs = {}
+        for l_idx, l_glyph in enumerate(all_glyphs):
+            if l_glyph["bitmap_width"] == 0 and l_glyph["x_advance"] == 0:
+                continue
+            l_ft_idx = face.get_char_index(l_glyph["codepoint"])
+            for r_idx, r_glyph in enumerate(all_glyphs):
+                if r_glyph["bitmap_width"] == 0 and r_glyph["x_advance"] == 0:
+                    continue
+                r_ft_idx = face.get_char_index(r_glyph["codepoint"])
+                
+                px_kern = fonttools_kern.get((l_ft_idx, r_ft_idx), 0)
+                if px_kern != 0:
+                    flat_pairs[(l_idx, r_idx)] = px_kern
+
+        if flat_pairs:
+            # Step 1: Compress Left Classes based on right kerning signatures
+            l_profiles = {}
+            for (l_idx, r_idx), val in flat_pairs.items():
+                l_profiles.setdefault(l_idx, {})[r_idx] = val
+                
+            l_class_map = [0] * len(all_glyphs)
+            l_class_list = [{}]
+            l_profile_to_class = {frozenset(): 0}
+            
+            for l_idx, profile in l_profiles.items():
+                fs = frozenset(profile.items())
+                if fs not in l_profile_to_class:
+                    new_class = len(l_class_list)
+                    if new_class > 255:
+                        new_class = 255
+                    l_profile_to_class[fs] = new_class
+                    if new_class == len(l_class_list):
+                        l_class_list.append(profile)
+                l_class_map[l_idx] = l_profile_to_class[fs]
+
+            # Step 2: Compress Right Classes based on left kerning classes
+            r_profiles = {}
+            for (l_idx, r_idx), val in flat_pairs.items():
+                lc = l_class_map[l_idx]
+                if lc == 255: continue
+                r_profiles.setdefault(r_idx, {})[lc] = val
+                
+            r_class_map = [0] * len(all_glyphs)
+            r_class_list = [{}]
+            r_profile_to_class = {frozenset(): 0}
+            
+            for r_idx, profile in r_profiles.items():
+                fs = frozenset(profile.items())
+                if fs not in r_profile_to_class:
+                    new_class = len(r_class_list)
+                    if new_class > 255:
+                        new_class = 255
+                    r_profile_to_class[fs] = new_class
+                    if new_class == len(r_class_list):
+                        r_class_list.append(profile)
+                r_class_map[r_idx] = r_profile_to_class[fs]
+
+            num_l_classes = min(256, len(l_class_list))
+            num_r_classes = min(256, len(r_class_list))
+
+            # Step 3: Build 2D Kerning Matrix
+            matrix = [0] * (num_l_classes * num_r_classes)
+            for (l_idx, r_idx), val in flat_pairs.items():
+                lc = l_class_map[l_idx]
+                rc = r_class_map[r_idx]
+                if lc < 256 and rc < 256:
+                    matrix[lc * num_r_classes + rc] = val
+
+            # Step 4: Pack MBF Format 3 Class Kerning
+            kerning_mbf_bytes.append(num_l_classes - 1)  # 0-255 stores 1-256
+            kerning_mbf_bytes.append(num_r_classes - 1)
+            for cid in l_class_map:
+                kerning_mbf_bytes.append(cid)
+            for cid in r_class_map:
+                kerning_mbf_bytes.append(cid)
+            for val in matrix:
+                kerning_mbf_bytes.append(max(-128, min(127, val)) & 0xFF)
+
+            print(f"    Style kerning: {len(flat_pairs)} basic pairs -> {num_l_classes}x{num_r_classes} classes ({len(kerning_mbf_bytes)} bytes)")
+        else:
+            print(f"    Style kerning pairs: 0")
+    else:
+        print(f"    Style kerning pairs: 0")
+
+    return ranges, all_glyphs, bw_bitmaps, lsb_bitmaps, msb_bitmaps, max_glyph_height, kerning_mbf_bytes
 
 
 def _encode_ranges_and_glyphs(ranges, all_glyphs, bitmap_base_offset):
@@ -295,29 +476,33 @@ def _encode_ranges_and_glyphs(ranges, all_glyphs, bitmap_base_offset):
     return buf
 
 
-def build_mbf(face, size, codepoint_ranges, bw_only=False):
+def build_mbf(face_info, size, codepoint_ranges, bw_only=False):
     """Build single-style MBF binary. Returns (bytes, stats_dict)."""
-    ranges, all_glyphs, bw_bitmaps, lsb_bitmaps, msb_bitmaps, max_glyph_height = (
-        render_style_glyphs(face, size, codepoint_ranges)
+    ranges, all_glyphs, bw_bitmaps, lsb_bitmaps, msb_bitmaps, max_glyph_height, kerning_bytes = (
+        render_style_glyphs(face_info, size, codepoint_ranges)
     )
 
     if bw_only:
         lsb_bitmaps = bytearray()
         msb_bitmaps = bytearray()
 
+    face = face_info["face"]
     face.set_pixel_sizes(0, size)
     ascender = face.size.ascender >> 6
     descender = face.size.descender >> 6
     y_advance = ascender - descender
     baseline = ascender
-    default_advance = size // 2
+    default_advance = (size // 2) * 4  # Scale by 4 for quarter-pixel precision
 
     num_ranges = len(ranges)
     num_glyphs = len(all_glyphs)
-    header_size = 40
+    header_size = 48
     ranges_size = num_ranges * 8
     glyphs_size = num_glyphs * 10
-    bitmap_data_offset = header_size + ranges_size + glyphs_size
+    
+    kerning_length = len(kerning_bytes)
+    kerning_offset = header_size + ranges_size + glyphs_size
+    bitmap_data_offset = kerning_offset + kerning_length
 
     bw_size = len(bw_bitmaps)
     gray_lsb_offset = (bitmap_data_offset + bw_size) if lsb_bitmaps else 0
@@ -326,9 +511,9 @@ def build_mbf(face, size, codepoint_ranges, bw_only=False):
     buf = bytearray()
     buf.extend(
         struct.pack(
-            "<IBBBBBBHHHIIIIII",
-            0x3246424D,  # MBF2
-            2,
+            "<IBBBBBBHHHIIIIIIII",
+            0x3346424D,  # MBF3
+            3,  # version 3
             max_glyph_height & 0xFF,
             baseline & 0xFF,
             y_advance & 0xFF,
@@ -337,15 +522,18 @@ def build_mbf(face, size, codepoint_ranges, bw_only=False):
             num_ranges,
             num_glyphs,
             size,  # nominal_size
+            kerning_length,
             bitmap_data_offset,
             0,  # bold_offset
             0,  # italic_offset
             0,  # bold_italic_offset
+            kerning_offset,
             gray_lsb_offset,
             gray_msb_offset,
         )
     )
     buf.extend(_encode_ranges_and_glyphs(ranges, all_glyphs, 0))
+    buf.extend(kerning_bytes)
     buf.extend(bw_bitmaps)
     buf.extend(lsb_bitmaps)
     buf.extend(msb_bitmaps)
@@ -366,60 +554,65 @@ def build_mbf(face, size, codepoint_ranges, bw_only=False):
 
 
 def build_multi_style_mbf(faces, size, codepoint_ranges, bw_only=False):
-    """Build multi-style MBF from dict of {FontStyle: freetype.Face}.
+    """Build multi-style MBF from dict of {FontStyle: face_info}.
 
     faces keys: 'regular' (required), 'bold', 'italic', 'bold_italic' (optional).
     Returns (bytes, stats_dict).
     """
     # Render all styles — now returns 6-tuples with 3 bitmap sections
     style_data = {}
-    for style_name, face in faces.items():
-        style_data[style_name] = render_style_glyphs(face, size, codepoint_ranges)
+    for style_name, face_info in faces.items():
+        style_data[style_name] = render_style_glyphs(face_info, size, codepoint_ranges)
 
     if bw_only:
         # Strip grayscale planes from all styles
         for key in style_data:
-            r, g, bw, lsb, msb, h = style_data[key]
-            style_data[key] = (r, g, bw, bytearray(), bytearray(), h)
+            r, g, bw, lsb, msb, h, k = style_data[key]
+            style_data[key] = (r, g, bw, bytearray(), bytearray(), h, k)
 
     # Metrics from Regular face
-    reg_face = faces["regular"]
+    reg_face = faces["regular"]["face"]
     reg_face.set_pixel_sizes(0, size)
     ascender = reg_face.size.ascender >> 6
     descender = reg_face.size.descender >> 6
     y_advance = ascender - descender
     baseline = ascender
-    default_advance = size // 2
+    default_advance = (size // 2) * 4  # Scale by 4 for quarter-pixel precision
 
     max_glyph_height = max(d[5] for d in style_data.values())
 
     # Compute layout sizes
     reg = style_data["regular"]
-    reg_ranges, reg_glyphs, reg_bw, reg_lsb, reg_msb, _ = reg
+    reg_ranges, reg_glyphs, reg_bw, reg_lsb, reg_msb, _, reg_kerning = reg
 
-    header_size = 40
+    header_size = 48
     reg_ranges_size = len(reg_ranges) * 8
     reg_glyphs_size = len(reg_glyphs) * 10
-    # After regular ranges+glyphs, append style sections for bold/italic/bold_italic
-    cursor = header_size + reg_ranges_size + reg_glyphs_size
+    
+    # After regular ranges+glyphs, append regular kerning, then extra styles
+    cursor = header_size + reg_ranges_size + reg_glyphs_size + len(reg_kerning)
 
     extra_styles = ["bold", "italic", "bold_italic"]
     style_offsets = {}  # style_name -> file offset
     style_sections = (
         {}
-    )  # style_name -> encoded bytes (section header + ranges + glyphs)
+    )  # style_name -> encoded bytes (section header + ranges + glyphs + kerning)
 
     for sname in extra_styles:
         if sname not in style_data:
             style_offsets[sname] = 0
             continue
-        ranges, glyphs, bw, lsb, msb, _ = style_data[sname]
+        ranges, glyphs, bw, lsb, msb, _, kerning = style_data[sname]
         style_offsets[sname] = cursor
-        # MbfStyleSection: uint16 num_ranges, uint16 num_glyphs (4 bytes)
-        sec = struct.pack("<HH", len(ranges), len(glyphs))
+        
+        kerning_length = len(kerning)
+        kerning_offset = cursor + 8 + len(ranges) * 8 + len(glyphs) * 10
+        
+        # MbfStyleSection: uint16 num_ranges, uint16 num_glyphs, uint32 kerning_length
+        sec = struct.pack("<HHI", len(ranges), len(glyphs), kerning_length)
         # Ranges + glyphs (bitmap offsets will be fixed up later)
-        style_sections[sname] = (sec, ranges, glyphs)
-        cursor += 4 + len(ranges) * 8 + len(glyphs) * 10
+        style_sections[sname] = (sec, ranges, glyphs, kerning)
+        cursor = kerning_offset + len(kerning)
 
     bitmap_data_offset = cursor
 
@@ -456,12 +649,16 @@ def build_multi_style_mbf(faces, size, codepoint_ranges, bw_only=False):
         style_flags |= 0x08
 
     # Build file
+    # Extra section offsets / counts
+    kerning_length = len(reg_kerning)
+    kerning_offset = header_size + reg_ranges_size + reg_glyphs_size
+
     buf = bytearray()
     buf.extend(
         struct.pack(
-            "<IBBBBBBHHHIIIIII",
-            0x3246424D,  # MBF2
-            2,  # version
+            "<IBBBBBBHHHIIIIIIII",
+            0x3346424D,  # MBF3
+            3,  # version 3
             max_glyph_height & 0xFF,
             baseline & 0xFF,
             y_advance & 0xFF,
@@ -470,10 +667,12 @@ def build_multi_style_mbf(faces, size, codepoint_ranges, bw_only=False):
             len(reg_ranges),
             len(reg_glyphs),
             size,  # nominal_size
+            kerning_length,
             bitmap_data_offset,
             style_offsets.get("bold", 0),
             style_offsets.get("italic", 0),
             style_offsets.get("bold_italic", 0),
+            kerning_offset,
             gray_lsb_offset,
             gray_msb_offset,
         )
@@ -483,14 +682,16 @@ def build_multi_style_mbf(faces, size, codepoint_ranges, bw_only=False):
     buf.extend(
         _encode_ranges_and_glyphs(reg_ranges, reg_glyphs, bitmap_bases["regular"])
     )
+    buf.extend(reg_kerning)
 
     # Extra style sections
     for sname in extra_styles:
         if sname not in style_sections:
             continue
-        sec_header, ranges, glyphs = style_sections[sname]
+        sec_header, ranges, glyphs, kerning = style_sections[sname]
         buf.extend(sec_header)
         buf.extend(_encode_ranges_and_glyphs(ranges, glyphs, bitmap_bases[sname]))
+        buf.extend(kerning)
 
     # Bitmap data: BW, then LSB, then MSB
     buf.extend(all_bw)
@@ -632,8 +833,8 @@ def main():
         "--bundle-sizes",
         type=int,
         nargs="+",
-        default=[20, 22, 24, 26, 28],
-        help="Font sizes for --bundle mode (default: 20 22 24 26 28). "
+        default=[20, 24, 28, 32],
+        help="Font sizes for --bundle mode (default: 20 24 28 32). "
         "The second value is 'Normal' (default body text).",
     )
     p.add_argument(
@@ -691,15 +892,15 @@ def main():
     has_extra_styles = bold_path or italic_path or bold_italic_path
 
     if has_extra_styles:
-        faces = {"regular": freetype.Face(font_path)}
+        faces = {"regular": {"face": freetype.Face(font_path), "ttfont": fontTools.ttLib.TTFont(font_path)}}
         if bold_path and os.path.isfile(bold_path):
-            faces["bold"] = freetype.Face(bold_path)
+            faces["bold"] = {"face": freetype.Face(bold_path), "ttfont": fontTools.ttLib.TTFont(bold_path)}
             print(f"Bold: {os.path.basename(bold_path)}")
         if italic_path and os.path.isfile(italic_path):
-            faces["italic"] = freetype.Face(italic_path)
+            faces["italic"] = {"face": freetype.Face(italic_path), "ttfont": fontTools.ttLib.TTFont(italic_path)}
             print(f"Italic: {os.path.basename(italic_path)}")
         if bold_italic_path and os.path.isfile(bold_italic_path):
-            faces["bold_italic"] = freetype.Face(bold_italic_path)
+            faces["bold_italic"] = {"face": freetype.Face(bold_italic_path), "ttfont": fontTools.ttLib.TTFont(bold_italic_path)}
             print(f"BoldItalic: {os.path.basename(bold_italic_path)}")
 
         if args.bundle:
@@ -710,16 +911,16 @@ def main():
             faces, args.size, codepoint_ranges, bw_only=args.bw_only
         )
     else:
-        face = freetype.Face(font_path)
+        face_info = {"face": freetype.Face(font_path), "ttfont": fontTools.ttLib.TTFont(font_path)}
 
         if args.bundle:
             _generate_bundle(
-                {"regular": face}, args, codepoint_ranges, multi_style=False
+                {"regular": face_info}, args, codepoint_ranges, multi_style=False
             )
             return
 
         mbf_data, stats = build_mbf(
-            face, args.size, codepoint_ranges, bw_only=args.bw_only
+            face_info, args.size, codepoint_ranges, bw_only=args.bw_only
         )
 
     # Write output
@@ -749,18 +950,40 @@ def main():
             face = freetype.Face(font_path)
             face.set_pixel_sizes(0, args.size)
             out_dir = os.path.dirname(os.path.abspath(args.output)) or "."
+            glyph_imgs = []
+            glyph_sizes = []
+            palette = [255, 200, 140, 80, 0]
+            max_h = 0
             for ch in sample_chars:
                 cp = ord(ch)
                 g = render_glyph(face, cp, args.size)
                 if g is None or g["bitmap_width"] == 0 or g["bitmap_height"] == 0:
+                    glyph_imgs.append(None)
+                    glyph_sizes.append((0, 0))
                     continue
                 arr = g["grayscale5"]
-                # Map 0-4 to 8-bit grayscale: 0=white, 1=light, 2=gray, 3=dark, 4=black
-                palette = [255, 200, 140, 80, 0]
                 img = Image.new("L", (g["bitmap_width"], g["bitmap_height"]))
                 img.putdata([palette[v] for v in arr])
-                png_path = os.path.join(out_dir, f"sample_{ch}_gray5.png")
-                img.save(png_path)
+                glyph_imgs.append(img)
+                glyph_sizes.append((g["bitmap_width"], g["bitmap_height"]))
+                if g["bitmap_height"] > max_h:
+                    max_h = g["bitmap_height"]
+
+            pad = 4
+            total_w = sum(w for w, h in glyph_sizes) + pad * (len(sample_chars) + 1)
+            total_h = max_h
+            if total_h > 0 and total_w > 0:
+                out_img = Image.new("L", (total_w, total_h), 255)
+                x = pad
+                for i in range(len(sample_chars)):
+                    img = glyph_imgs[i]
+                    w, h = glyph_sizes[i]
+                    if img is not None:
+                        y = (max_h - h) // 2
+                        out_img.paste(img, (x, y))
+                    x += w + pad
+                png_path = os.path.join(out_dir, "sample_all_gray5.png")
+                out_img.save(png_path)
                 print(f"  Sample PNG: {png_path}")
         except Exception as e:
             print(f"  [PNG sample error: {e}]")
@@ -791,11 +1014,12 @@ def _generate_bundle(faces, args, codepoint_ranges, multi_style):
             data, stats = build_multi_style_mbf(
                 faces, px_size, codepoint_ranges, bw_only=args.bw_only
             )
-            face = faces["regular"]
+            face = faces["regular"]["face"]
         else:
-            face = faces["regular"]
+            face_info = faces["regular"]
+            face = face_info["face"]
             data, stats = build_mbf(
-                face, px_size, codepoint_ranges, bw_only=args.bw_only
+                face_info, px_size, codepoint_ranges, bw_only=args.bw_only
             )
 
         out_path = os.path.join(out_dir, f"font-{idx}.mbf")
@@ -904,17 +1128,6 @@ def _generate_bundle(faces, args, codepoint_ranges, multi_style):
                 )
                 out_img.save(png_path)
                 print(f"  Sample PNG: {png_path}")
-
-                # Export BW, LSB, MSB layers as separate PNGs
-                bw_path = os.path.join(out_dir, f"sample_all_{label.lower()}_bw.png")
-                lsb_path = os.path.join(out_dir, f"sample_all_{label.lower()}_lsb.png")
-                msb_path = os.path.join(out_dir, f"sample_all_{label.lower()}_msb.png")
-                bw_out_img.save(bw_path)
-                lsb_out_img.save(lsb_path)
-                msb_out_img.save(msb_path)
-                print(f"  BW PNG:   {bw_path}")
-                print(f"  LSB PNG:  {lsb_path}")
-                print(f"  MSB PNG:  {msb_path}")
             except Exception as e:
                 print(f"  [PNG sample error: {e}]")
         else:
