@@ -71,8 +71,8 @@ void SettingsScreen::on_start() {
 #endif
 
   if (data_dir_) {
-    idx_clear_converted_ = count();
-    add_item("Clear Converted");
+    idx_clear_cache_ = count();
+    add_item("Clear Cache");
 
     idx_rebuild_index_ = count();
     add_item("Rebuild Book Index");
@@ -83,6 +83,8 @@ void SettingsScreen::on_start() {
     idx_invalidate_font_ = count();
     add_item("Invalidate Font");
   }
+
+  add_separator();
 
   idx_spiffs_ = count();
   add_item("Rebuild SPIFFS");
@@ -103,8 +105,8 @@ void SettingsScreen::on_select(int index) {
     return;
   }
 #endif
-  if (index == idx_clear_converted_) {
-    clear_converted_();
+  if (index == idx_clear_cache_) {
+    clear_cache_();
     return;  // stay on screen
   }
   if (index == idx_rebuild_index_) {
@@ -225,7 +227,7 @@ void SettingsScreen::on_select(int index) {
   return;
 }
 
-void SettingsScreen::clear_converted_() {
+void SettingsScreen::clear_cache_() {
   if (!data_dir_)
     return;
 #ifdef ESP_PLATFORM

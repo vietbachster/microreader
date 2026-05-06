@@ -471,6 +471,7 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
   opts.padding_top = static_cast<uint16_t>(kPaddingTop + reader_settings_.v_padding());
   opts.line_height_multiplier_percent = reader_settings_.line_height_multiplier_percent();
   opts.center_text = true;
+  opts.override_publisher_fonts = reader_settings_.override_publisher_fonts;
   layout_engine_.set_font(font);
   layout_engine_.set_options(opts);
   page_pos_ = layout_engine_.resolve_stable_position(page_pos_);

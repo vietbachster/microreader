@@ -41,9 +41,10 @@ struct ReaderSettings {
   uint8_t padding_v_idx = 1;                          // vertical top padding preset index
   uint8_t font_size_idx = 1;                          // base font size preset index (1 = Normal/24px)
   ProgressStyle progress_style = ProgressStyle::Bar;  // reading progress indicator style
+  bool override_publisher_fonts = false;              // ignore publisher's font sizes
 
   static constexpr uint16_t kHPaddingPresets[] = {4, 12, 24, 40};
-  static constexpr uint16_t kVPaddingPresets[] = {0, 4, 8, 12};
+  static constexpr uint16_t kVPaddingPresets[] = {0, 4, 12, 20};
 
   static constexpr uint16_t kSpacingPercents[] = {0, 80, 90, 100, 110, 120};  // Index matches SpacingOverride
 
@@ -123,6 +124,7 @@ class ReaderOptionsScreen final : public ListMenuScreen {
   int idx_line_spacing_ = -1;
   int idx_font_size_ = -1;
   int idx_progress_ = -1;
+  int idx_pub_fonts_ = -1;
   int idx_chapters_ = -1;
 
   // Re-populate item labels after an inline setting change, restoring selection.

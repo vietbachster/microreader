@@ -33,7 +33,7 @@ class SettingsScreen final : public ListMenuScreen {
   // Item indices (assigned during on_start).
   int idx_bouncing_ball_ = -1;
   int idx_grayscale_demo_ = -1;
-  int idx_clear_converted_ = -1;
+  int idx_clear_cache_ = -1;
   int idx_rebuild_index_ = -1;
   int idx_list_format_ = -1;
   int idx_switch_ota_ = -1;
@@ -43,7 +43,7 @@ class SettingsScreen final : public ListMenuScreen {
   int idx_invert_side_ = -1;
   DrawBuffer* buf_ = nullptr;
 
-  void clear_converted_();
+  void clear_cache_();
 };
 
 }  // namespace microreader

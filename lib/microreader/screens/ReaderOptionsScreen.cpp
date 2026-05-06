@@ -59,7 +59,8 @@ void ReaderOptionsScreen::on_start() {
   subtitle2_ = pct_str;
 
   clear_items();
-  idx_justify_ = idx_padding_h_ = idx_padding_v_ = idx_line_spacing_ = idx_progress_ = idx_chapters_ = -1;
+  idx_justify_ = idx_padding_h_ = idx_padding_v_ = idx_line_spacing_ = idx_progress_ = idx_chapters_ = idx_pub_fonts_ =
+      -1;
 
   char tmp[40];
 
@@ -75,7 +76,7 @@ void ReaderOptionsScreen::on_start() {
 
   if (settings_) {
     idx_justify_ = count();
-    add_item(fmt_setting(tmp, sizeof(tmp), "Align",
+    add_item(fmt_setting(tmp, sizeof(tmp), "Alignment",
                          ReaderSettings::kAlignNames[static_cast<uint8_t>(settings_->align_override)]));
 
     idx_font_size_ = count();
@@ -95,10 +96,13 @@ void ReaderOptionsScreen::on_start() {
         snprintf(val, sizeof(val), "%d", sz);
       else
         snprintf(val, sizeof(val), "Unknown");
-      add_item(fmt_setting(tmp, sizeof(tmp), "Size", val));
+      add_item(fmt_setting(tmp, sizeof(tmp), "Font Size", val));
     } else {
-      add_item(fmt_setting(tmp, sizeof(tmp), "Size", ReaderSettings::kFontSizeNames[settings_->font_size_idx]));
+      add_item(fmt_setting(tmp, sizeof(tmp), "Font Size", ReaderSettings::kFontSizeNames[settings_->font_size_idx]));
     }
+
+    idx_pub_fonts_ = count();
+    add_item(fmt_setting(tmp, sizeof(tmp), "Ignore pub fonts", settings_->override_publisher_fonts ? "Yes" : "No"));
 
     idx_padding_h_ = count();
     add_item(fmt_setting(tmp, sizeof(tmp), "H-Margin", ReaderSettings::kHPaddingNames[settings_->padding_h_idx]));
@@ -135,6 +139,11 @@ void ReaderOptionsScreen::on_select(int index) {
   if (index == idx_justify_) {
     settings_->align_override = static_cast<AlignOverride>((static_cast<uint8_t>(settings_->align_override) + 1) %
                                                            ReaderSettings::kNumAlignPresets);
+    refresh_items_(index);
+    return;
+  }
+  if (index == idx_pub_fonts_) {
+    settings_->override_publisher_fonts = !settings_->override_publisher_fonts;
     refresh_items_(index);
     return;
   }

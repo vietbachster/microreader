@@ -44,6 +44,7 @@ struct LayoutOptions {
   std::optional<Alignment> align_override;
   uint16_t first_line_extra_indent = 0;  // extra left indent for inline images on first line
   HyphenationLang hyphenation_lang = HyphenationLang::None;
+  bool override_publisher_fonts = false;
 
   LayoutOptions() = default;
   LayoutOptions(uint16_t w, std::optional<Alignment> a = std::nullopt) : width(w), align_override(a) {}
@@ -135,6 +136,7 @@ struct PageOptions {
   uint16_t line_height_multiplier_percent = 0;  // 0 = use CSS/Book default. Otherwise scale by this percent.
   std::optional<Alignment> align_override;
   bool center_text = false;  // vertically center text content within the padded area
+  bool override_publisher_fonts = false;
 
   PageOptions() = default;
   // Uniform padding constructor: sets all four sides to pad.

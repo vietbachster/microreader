@@ -189,6 +189,7 @@ void microreader::Application::save_settings_() {
   std::fprintf(f, "padding_v=%u\n", static_cast<unsigned>(rs.padding_v_idx));
   std::fprintf(f, "spacing_override=%u\n", static_cast<unsigned>(rs.spacing_override));
   std::fprintf(f, "progress=%u\n", static_cast<unsigned>(rs.progress_style));
+  std::fprintf(f, "override_pub_fonts=%u\n", rs.override_publisher_fonts ? 1u : 0u);
 
   // Menu list format
   std::fprintf(f, "list_format=%u\n", static_cast<unsigned>(menu_.list_format()));
@@ -239,12 +240,14 @@ void microreader::Application::load_settings_() {
       rs.spacing_override = SpacingOverride::Book;
     else if (std::sscanf(line, "progress=%u", &uval) == 1)
       rs.progress_style = uval <= 2 ? static_cast<ProgressStyle>(uval) : ProgressStyle::Bar;
+    else if (std::sscanf(line, "override_pub_fonts=%u", &uval) == 1)
+      rs.override_publisher_fonts = (uval != 0);
     else if (std::sscanf(line, "list_format=%u", &uval) == 1)
       menu_.set_list_format(uval <= 2 ? static_cast<BookListFormat>(uval) : BookListFormat::TitleAndAuthor);
-      else if (std::sscanf(line, "inv_menu=%u", &uval) == 1)
-        invert_menu_buttons_ = (uval != 0);
-      else if (std::sscanf(line, "inv_side=%u", &uval) == 1)
-        invert_side_buttons_ = (uval != 0);
+    else if (std::sscanf(line, "inv_menu=%u", &uval) == 1)
+      invert_menu_buttons_ = (uval != 0);
+    else if (std::sscanf(line, "inv_side=%u", &uval) == 1)
+      invert_side_buttons_ = (uval != 0);
   }
   std::fclose(f);
   MR_LOGI("app", "Loaded settings: align=%u ph=%u pv=%u ls=%u prog=%u sel=%s", static_cast<unsigned>(rs.align_override),
