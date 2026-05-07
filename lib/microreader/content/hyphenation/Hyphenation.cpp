@@ -166,6 +166,17 @@ size_t find_hyphen_break(const IFont& font, const char* word_ptr, size_t len, Fo
   }
   buf[hyph_len] = '\0';
 
+  // Count UTF-8 code points in a byte range (continuation bytes 0x80–0xBF don't start a codepoint).
+  auto utf8_codepoint_count = [](const char* s, size_t byte_len) -> int {
+    int n = 0;
+    for (size_t i = 0; i < byte_len; ++i)
+      if (((unsigned char)s[i] & 0xC0) != 0x80)
+        ++n;
+    return n;
+  };
+
+  static constexpr int kMinCharsEachSide = 2;
+
   size_t positions[32];
   int n = hyphenate_word(buf, hyph_len, lang, positions, 32);
   if (n <= 0)
@@ -174,6 +185,16 @@ size_t find_hyphen_break(const IFont& font, const char* word_ptr, size_t len, Fo
   for (int i = n - 1; i >= 0; --i) {
     size_t pos = positions[i];
     if (pos == 0 || pos >= len)
+      continue;
+    // Enforce leftmin/rightmin in Unicode code points, not bytes.
+    // Without this, a 2-byte character like ß counts as 2 bytes remaining
+    // and passes rightmin=2 even though only 1 character follows.
+    // Use hyph_len (stripped word) for the suffix check so trailing punctuation
+    // that was stripped (e.g. the comma in "weiß,") doesn't inflate the count.
+    if (utf8_codepoint_count(word_ptr, pos) < kMinCharsEachSide)
+      continue;
+    size_t suffix_byte_len = pos < hyph_len ? hyph_len - pos : 0;
+    if (utf8_codepoint_count(word_ptr + pos, suffix_byte_len) < kMinCharsEachSide)
       continue;
     uint16_t prefix_w = font.word_width(word_ptr, static_cast<uint16_t>(pos), style, size_pct);
     bool ends_with_hyphen = (word_ptr[pos - 1] == '-');
