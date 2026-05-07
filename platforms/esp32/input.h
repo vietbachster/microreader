@@ -114,8 +114,11 @@ class Esp32InputSource final : public microreader::IInputSource {
   }
 
  public:
-adc_oneshot_unit_handle_t get_adc_handle() const { return adc_handle_; }
-private:
+  adc_oneshot_unit_handle_t get_adc_handle() const {
+    return adc_handle_;
+  }
+
+ private:
   static constexpr gpio_num_t kPowerPin = GPIO_NUM_3;
   static constexpr int kAdcTol = 400;     // ±tolerance for threshold match
   static constexpr int kAdcNoBtn = 3800;  // ADC value when no key pressed
@@ -153,7 +156,7 @@ private:
     const uint32_t now = static_cast<uint32_t>(esp_timer_get_time() / 1000);
     const uint8_t raw = read_raw();
 
-    // Per-button debounce (press side only; release is immediate).
+    // Per-button debounce (both press and release).
     for (uint8_t i = 0; i < kNumButtons; ++i) {
       const uint8_t mask = static_cast<uint8_t>(1u << i);
       const bool raw_down = (raw & mask) != 0;
@@ -164,11 +167,13 @@ private:
         debounce_time_[i] = now;
       }
 
-      if (raw_down && !current_down) {
-        if ((now - debounce_time_[i]) >= kDebounceMs)
-          debounced_ |= mask;
-      } else if (!raw_down && current_down) {
-        debounced_ &= static_cast<uint8_t>(~mask);
+      if (raw_down != current_down) {
+        if ((now - debounce_time_[i]) >= kDebounceMs) {
+          if (raw_down)
+            debounced_ |= mask;
+          else
+            debounced_ &= static_cast<uint8_t>(~mask);
+        }
       }
     }
 

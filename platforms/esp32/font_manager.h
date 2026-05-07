@@ -27,11 +27,11 @@ class FontManager : public microreader::FontManager {
     if (font_part_.mmap()) {
       load_fonts_();
       if (font_set_.valid()) {
-        static const char* names[] = {"Small", "Normal", "Large", "XLarge", "XXLarge"};
         for (int i = 0; i < microreader::kMaxFontSizes; i++) {
-          if (prop_fonts_[i].valid())
-            ESP_LOGI("font", "%s: %u glyphs, height=%u baseline=%u", names[i], (unsigned)prop_fonts_[i].num_glyphs(),
+          if (prop_fonts_[i].valid()) {
+            ESP_LOGI("font", "Size %d: %u glyphs, height=%u baseline=%u", i, (unsigned)prop_fonts_[i].num_glyphs(),
                      (unsigned)prop_fonts_[i].glyph_height(), (unsigned)prop_fonts_[i].baseline());
+          }
         }
         if (!FontPartition::needs_provisioning(bundle_data_, bundle_size_)) {
           app_.set_reader_font(font_set());
