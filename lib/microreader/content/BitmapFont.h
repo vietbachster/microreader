@@ -143,9 +143,13 @@ class BitmapFont : public IFont {
       } else {
         w_q += sd.glyphs[idx].advance_width;
       }
+      // Snap to full pixel after each advance, matching draw_text_impl_'s
+      // per-character snap. Without this, word_width() can produce a different
+      // pixel width than the renderer, causing words to overlap or have gaps.
+      w_q = ((w_q + 2) / 4) * 4;
       prev_idx = idx;
     }
-    return (w_q + 2) / 4;  // round to nearest full pixel
+    return w_q / 4;
   }
 
   uint16_t y_advance(uint8_t /*size_pct*/ = 100) const override {
