@@ -46,15 +46,14 @@ RANGE_PRESETS = {
     "cyrillic": [(0x0400, 0x04FF)],  # Cyrillic
     "cjk": [(0x4E00, 0x9FFF)],  # CJK Unified Ideographs
     "greek": [(0x0370, 0x03FF)],  # Greek and Coptic
-    "general-punct": [
-        (0x2000, 0x206F)
-    ],  # General Punctuation (curly quotes, em-dash, ellipsis)
+    "general-punct": [(0x2000, 0x206F)],  # General Punctuation (curly quotes, em-dash, ellipsis)
     "currency": [(0x20A0, 0x20CF)],  # Currency Symbols (€ etc.)
     "letterlike": [(0x2100, 0x214F)],  # Letterlike Symbols (™ ℃ etc.)
     "number-forms": [(0x2150, 0x218F)],  # Number Forms (fractions)
     "arrows": [(0x2190, 0x21FF)],  # Arrows
     "math-ops": [(0x2200, 0x22FF)],  # Mathematical Operators
     "geometric": [(0x25A0, 0x25FF)],  # Geometric Shapes
+    "ui-shapes": [(0x25B2, 0x25B2), (0x25BC, 0x25BC), (0x25C0, 0x25C0), (0x25B6, 0x25B6)], # UI Button hints: ◀ ▶ ▼ ▲
     "misc-symbols": [(0x2600, 0x26FF)],  # Miscellaneous Symbols
     "combining": [(0x0300, 0x036F)],  # Combining Diacritical Marks
     "spacing-mod": [(0x02B0, 0x02FF)],  # Spacing Modifier Letters
@@ -69,7 +68,6 @@ DEFAULT_RANGES = [
     "ascii",
     "latin1",
     "latin-ext-a",
-    "latin-ext-b",
     "greek",
     "combining",
     "spacing-mod",
@@ -78,9 +76,7 @@ DEFAULT_RANGES = [
     "currency",
     "letterlike",
     "number-forms",
-    "arrows",
-    "geometric",
-    "latin-ext-add",
+    "ui-shapes",
     "specials",
 ]
 

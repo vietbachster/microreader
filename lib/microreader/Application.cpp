@@ -251,7 +251,7 @@ void microreader::Application::load_settings_() {
     else if (std::sscanf(line, "override_pub_fonts=%u", &uval) == 1)
       rs.override_publisher_fonts = (uval != 0);
     else if (std::sscanf(line, "font_size=%u", &uval) == 1)
-      rs.font_size_idx = uval < ReaderSettings::kNumFontSizePresets ? static_cast<uint8_t>(uval) : 1;
+      rs.font_size_idx = uval < kMaxFontSizes ? static_cast<uint8_t>(uval) : 1;
     else if (std::sscanf(line, "list_format=%u", &uval) == 1)
       menu_.set_list_format(uval <= 2 ? static_cast<BookListFormat>(uval) : BookListFormat::TitleAndAuthor);
     else if (std::sscanf(line, "inv_menu=%u", &uval) == 1)

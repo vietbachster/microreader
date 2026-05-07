@@ -52,10 +52,10 @@ int main() {
 
     // Load proportional fonts if available.
     microreader::FontManager font_mgr;
-    std::vector<uint8_t> font_data[5];
+    std::vector<uint8_t> font_data[microreader::kMaxFontSizes];
 
     static std::string fonts_dir = std::filesystem::absolute("resources/fonts").string();
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < microreader::kMaxFontSizes; i++) {
       std::string path = fonts_dir + "/font-" + std::to_string(i) + ".mbf";
       font_data[i] = load_file(path.c_str());
       if (!font_data[i].empty()) {

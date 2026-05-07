@@ -52,12 +52,12 @@ struct ReaderSettings {
   static constexpr const char* kVPaddingNames[] = {"Tight", "Normal", "Loose", "Looser"};
   static constexpr const char* kAlignNames[] = {"Book", "Left", "Center", "Right", "Justify"};
   static constexpr const char* kSpacingNames[] = {"Book", "0.8x", "0.9x", "1.0x", "1.1x", "1.2x"};
-  static constexpr const char* kFontSizeNames[] = {"20", "24", "28", "32"};
+  static constexpr const char* kFontSizeNames[] = {"20", "24", "26", "28", "30", "32", "34", "36"};
 
   static constexpr uint8_t kNumPresets = 4;
   static constexpr uint8_t kNumAlignPresets = 5;
   static constexpr uint8_t kNumSpacingPresets = 6;
-  static constexpr uint8_t kNumFontSizePresets = 4;
+  static constexpr uint8_t kNumFontSizePresets = 8;
 
   uint16_t h_padding() const {
     return kHPaddingPresets[padding_h_idx];
