@@ -98,7 +98,7 @@ void ListMenuScreen::draw_all_(DrawBuffer& buf, std::optional<uint8_t> battery_p
       const int kBarW = 26;
       const int kBarH = 8;
       const int kBarX = (W - kBarW) / 2;  // Center horizontally
-      const int kBarY = H - kBarH - 6;    // Position at the bottom
+      const int kBarY = H - kBarH - 4;    // Position at the bottom
 
       // Outline: rounded corners
       buf.fill_rect(kBarX + 1, kBarY, kBarW - 2, 1, false);              // top edge
