@@ -109,6 +109,13 @@ class Application {
     invert_side_buttons_ = v;
   }
 
+  bool rotate_display() const {
+    return rotate_display_;
+  }
+  void set_rotate_display(bool v) {
+    rotate_display_ = v;
+  }
+
   // Navigate to a screen: push on top of the current screen (current stays on stack).
   // Or replace the current screen (pop it first, then push the new one).
   // safe to call from within a screen's update(); the transition happens after update() returns.
@@ -149,6 +156,7 @@ class Application {
 
   bool invert_menu_buttons_ = false;
   bool invert_side_buttons_ = false;
+  bool rotate_display_ = false;
 
   ScreenManager screen_mgr_;
   MainMenu menu_;

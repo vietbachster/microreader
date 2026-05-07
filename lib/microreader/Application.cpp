@@ -49,6 +49,9 @@ void Application::start(DrawBuffer& buf, IRuntime& runtime) {
   // before the menu's on_start() (directory scan + selection restore) runs.
   load_settings_();
 
+  // Apply persisted display rotation.
+  buf.set_rotation(rotate_display_ ? Rotation::Deg0 : Rotation::Deg90);
+
   screen_mgr_.push(&menu_, buf, runtime);
 
   // Auto-open last book if one was active at shutdown — but only if the
@@ -92,6 +95,9 @@ void Application::update(const ButtonState& buttons, uint32_t dt_ms, DrawBuffer&
 
     // Save all persistent settings
     save_settings_();
+
+    // Reset rotation before drawing the sleeping screen
+    buf.set_rotation(Rotation::Deg90);
 
     // draw sleeping screen before powering down
     buf.draw_image(bebop_image, 0, 0, BEBOP_IMAGE_WIDTH, BEBOP_IMAGE_HEIGHT);
@@ -196,6 +202,7 @@ void microreader::Application::save_settings_() {
   std::fprintf(f, "list_format=%u\n", static_cast<unsigned>(menu_.list_format()));
   std::fprintf(f, "inv_menu=%u\n", invert_menu_buttons_ ? 1u : 0u);
   std::fprintf(f, "inv_side=%u\n", invert_side_buttons_ ? 1u : 0u);
+  std::fprintf(f, "rotate_display=%u\n", rotate_display_ ? 1u : 0u);
 
   std::fclose(f);
 }
@@ -251,6 +258,8 @@ void microreader::Application::load_settings_() {
       invert_menu_buttons_ = (uval != 0);
     else if (std::sscanf(line, "inv_side=%u", &uval) == 1)
       invert_side_buttons_ = (uval != 0);
+    else if (std::sscanf(line, "rotate_display=%u", &uval) == 1)
+      rotate_display_ = (uval != 0);
   }
   std::fclose(f);
   MR_LOGI("app", "Loaded settings: align=%u ph=%u pv=%u ls=%u prog=%u sel=%s", static_cast<unsigned>(rs.align_override),

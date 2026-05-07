@@ -114,7 +114,7 @@ class DrawBuffer {
   explicit DrawBuffer(IDisplay& display) : display_(display) {
     memset(bufs_[0], 0xFF, kBufSize);
     memset(bufs_[1], 0xFF, kBufSize);
-    display_.set_rotation(Rotation::Deg90);
+    set_rotation(Rotation::Deg90);
   }
 
   IDisplay& display() {
@@ -124,8 +124,26 @@ class DrawBuffer {
     return display_;
   }
 
-  // -- Draw helpers (logical portrait coordinates)
-  // -------------------------
+  // Set logical rotation; updates both the display driver and the draw-transform in DrawBuffer.
+  void set_rotation(Rotation r) {
+    rotation_ = r;
+    display_.set_rotation(r);
+  }
+
+  // Runtime logical dimensions (depend on rotation).
+  int width() const {
+    return rotation_ == Rotation::Deg0 ? DisplayFrame::kPhysicalWidth : kWidth;
+  }
+  int height() const {
+    return rotation_ == Rotation::Deg0 ? DisplayFrame::kPhysicalHeight : kHeight;
+  }
+
+  Rotation rotation() const {
+    return rotation_;
+  }
+
+  // -- Draw helpers (logical coordinates)
+  // ----------------------------------------
 
   // Fill the entire inactive buffer.
   void fill(bool white = true) {
@@ -134,20 +152,29 @@ class DrawBuffer {
 
   // Fill a logical rectangle.
   void fill_rect(int lx, int ly, int lw, int lh, bool white) {
-    // Deg90: logical (lx,ly,lw,lh) -> physical (px=ly, py=PhysH-lx-lw, pw=lh, ph=lw)
-    fill_rect_physical_(full_target_(), ly, DisplayFrame::kPhysicalHeight - lx - lw, lh, lw, white);
+    if (rotation_ == Rotation::Deg0)
+      fill_rect_physical_(full_target_(), lx, ly, lw, lh, white);
+    else
+      fill_rect_physical_(full_target_(), ly, DisplayFrame::kPhysicalHeight - lx - lw, lh, lw, white);
   }
 
   // Fill a logical horizontal span [x1, x2) on logical row ly.
-  // In physical space this is a vertical column segment.
   void fill_row(int ly, int x1, int x2, bool white) {
-    x1 = std::max(x1, 0);
-    x2 = std::min(x2, kWidth);
-    if (x1 >= x2 || ly < 0 || ly >= kHeight)
-      return;
-    // Deg90: logical row ly -> physical col ly; logical cols [x1,x2) -> physical rows [PhysH-x2, PhysH-x1)
-    fill_col_physical_(full_target_(), ly, DisplayFrame::kPhysicalHeight - x2, DisplayFrame::kPhysicalHeight - x1,
-                       white);
+    if (rotation_ == Rotation::Deg0) {
+      x1 = std::max(x1, 0);
+      x2 = std::min(x2, DisplayFrame::kPhysicalWidth);
+      if (x1 >= x2 || ly < 0 || ly >= DisplayFrame::kPhysicalHeight)
+        return;
+      fill_row_physical_(full_target_(), ly, x1, x2, white);
+    } else {
+      x1 = std::max(x1, 0);
+      x2 = std::min(x2, kWidth);
+      if (x1 >= x2 || ly < 0 || ly >= kHeight)
+        return;
+      // Deg90: logical row ly -> physical col ly; logical cols [x1,x2) -> physical rows [PhysH-x2, PhysH-x1)
+      fill_col_physical_(full_target_(), ly, DisplayFrame::kPhysicalHeight - x2, DisplayFrame::kPhysicalHeight - x1,
+                         white);
+    }
   }
 
   // Blit a 1-bit packed image into the inactive buffer at physical position (x, y).
@@ -202,10 +229,18 @@ class DrawBuffer {
 
   // Set a single logical pixel.
   void set_pixel(int lx, int ly, bool white) {
-    if (lx < 0 || lx >= kWidth || ly < 0 || ly >= kHeight)
-      return;
-    const int px = ly;
-    const int py = DisplayFrame::kPhysicalHeight - 1 - lx;
+    int px, py;
+    if (rotation_ == Rotation::Deg0) {
+      if (lx < 0 || lx >= DisplayFrame::kPhysicalWidth || ly < 0 || ly >= DisplayFrame::kPhysicalHeight)
+        return;
+      px = lx;
+      py = ly;
+    } else {
+      if (lx < 0 || lx >= kWidth || ly < 0 || ly >= kHeight)
+        return;
+      px = ly;
+      py = DisplayFrame::kPhysicalHeight - 1 - lx;
+    }
     uint8_t* buf = inactive_();
     const size_t bidx = static_cast<size_t>(py * DisplayFrame::kStride + px / 8);
     const uint8_t bit = static_cast<uint8_t>(0x80u >> (px & 7));
@@ -217,31 +252,49 @@ class DrawBuffer {
 
   // Blit a horizontal row of 1-bit packed pixels at logical position (lx, ly).
   // data_1bit is MSB-first packed, width pixels long.
-  // Due to Deg90 rotation, this maps to a vertical column in physical space.
   void blit_1bit_row(int lx, int ly, const uint8_t* data_1bit, int width) {
-    if (ly < 0 || ly >= kHeight || width <= 0)
-      return;
     uint8_t* buf = inactive_();
-    const int px = ly;
-    const int byte_col = px / 8;
-    const uint8_t set_mask = static_cast<uint8_t>(0x80u >> (px & 7));
-    const uint8_t clr_mask = static_cast<uint8_t>(~set_mask);
-
-    // Clip x range to [0, kWidth)
-    int col_start = 0, col_end = width;
-    if (lx < 0)
-      col_start = -lx;
-    if (lx + width > kWidth)
-      col_end = kWidth - lx;
-
-    for (int col = col_start; col < col_end; ++col) {
-      const int py = DisplayFrame::kPhysicalHeight - 1 - (lx + col);
-      const size_t bidx = static_cast<size_t>(py) * DisplayFrame::kStride + byte_col;
-      const bool white = (data_1bit[col >> 3] >> (7 - (col & 7))) & 1;
-      if (white)
-        buf[bidx] |= set_mask;
-      else
-        buf[bidx] &= clr_mask;
+    if (rotation_ == Rotation::Deg0) {
+      if (ly < 0 || ly >= DisplayFrame::kPhysicalHeight || width <= 0)
+        return;
+      int col_start = 0, col_end = width;
+      if (lx < 0)
+        col_start = -lx;
+      if (lx + width > DisplayFrame::kPhysicalWidth)
+        col_end = DisplayFrame::kPhysicalWidth - lx;
+      for (int col = col_start; col < col_end; ++col) {
+        const int px = lx + col;
+        const size_t bidx = static_cast<size_t>(ly) * DisplayFrame::kStride + px / 8;
+        const uint8_t set_mask = static_cast<uint8_t>(0x80u >> (px & 7));
+        const uint8_t clr_mask = static_cast<uint8_t>(~set_mask);
+        const bool white = (data_1bit[col >> 3] >> (7 - (col & 7))) & 1;
+        if (white)
+          buf[bidx] |= set_mask;
+        else
+          buf[bidx] &= clr_mask;
+      }
+    } else {
+      if (ly < 0 || ly >= kHeight || width <= 0)
+        return;
+      const int px = ly;
+      const int byte_col = px / 8;
+      const uint8_t set_mask = static_cast<uint8_t>(0x80u >> (px & 7));
+      const uint8_t clr_mask = static_cast<uint8_t>(~set_mask);
+      // Clip x range to [0, kWidth)
+      int col_start = 0, col_end = width;
+      if (lx < 0)
+        col_start = -lx;
+      if (lx + width > kWidth)
+        col_end = kWidth - lx;
+      for (int col = col_start; col < col_end; ++col) {
+        const int py = DisplayFrame::kPhysicalHeight - 1 - (lx + col);
+        const size_t bidx = static_cast<size_t>(py) * DisplayFrame::kStride + byte_col;
+        const bool white = (data_1bit[col >> 3] >> (7 - (col & 7))) & 1;
+        if (white)
+          buf[bidx] |= set_mask;
+        else
+          buf[bidx] &= clr_mask;
+      }
     }
   }
 
@@ -320,13 +373,8 @@ class DrawBuffer {
     display_.write_ram_bw(inactive_());
   }
 
-
-
-
   // Draw text glyphs only (no background fill). Glyph color = white param.
   // The scale parameter is accepted for API compatibility but ignored.
-
-
 
   // Write the inactive buffer to RED RAM only (no refresh).
   void write_ram_red() {
@@ -477,7 +525,8 @@ class DrawBuffer {
   };
 
   static void draw_glyph_impl_(const RenderTarget& t, int x, int y, const uint8_t* bits, int bitmap_width,
-                               int bitmap_height, int x_offset, int y_offset, bool white, bool invert_select = false) {
+                               int bitmap_height, int x_offset, int y_offset, bool white, bool invert_select = false,
+                               Rotation rotation = Rotation::Deg90) {
     if (!bits || bitmap_width <= 0 || bitmap_height <= 0)
       return;
     const int gx = x + x_offset;
@@ -491,9 +540,9 @@ class DrawBuffer {
         const int lx = gx + col;
         const bool bit_set = (row_data[col >> 3] >> (7 - (col & 7))) & 1;
         if (invert_select ? bit_set : !bit_set) {
-          // Ink pixel - compute absolute physical coords (Deg90: logical Y -> physical X).
-          const int px = ly;
-          const int py = DisplayFrame::kPhysicalHeight - 1 - lx;
+          // Ink pixel - compute absolute physical coords.
+          const int px = (rotation == Rotation::Deg0) ? lx : ly;
+          const int py = (rotation == Rotation::Deg0) ? ly : DisplayFrame::kPhysicalHeight - 1 - lx;
           if (px < t.phys_x0 || px >= t.phys_x0 + t.phys_w)
             continue;
           if (py < t.phys_y0 || py >= t.phys_y0 + t.phys_h)
@@ -515,6 +564,7 @@ class DrawBuffer {
   alignas(4) uint8_t bufs_[2][kBufSize];
   int active_idx_ = 0;
   bool active_valid_ = true;  // false after reset_after_scratch(); restored by refresh()/full_refresh()
+  Rotation rotation_ = Rotation::Deg90;
 
   uint8_t* inactive_() {
     return bufs_[1 - active_idx_];
@@ -608,7 +658,8 @@ class DrawBuffer {
 
   // Shared UTF-8 render core: draws text into any target from any GrayPlane.
   static int draw_text_impl_(const RenderTarget& t, int x, int baseline_y, const char* text, size_t len,
-                             const BitmapFont& font, GrayPlane plane, bool white, FontStyle style);
+                             const BitmapFont& font, GrayPlane plane, bool white, FontStyle style,
+                             Rotation rotation = Rotation::Deg90);
 
   // Render the loading box into a mini-buffer via the unified helpers.
   // Never reads or writes bufs_.
@@ -658,7 +709,8 @@ namespace microreader {
 // Shared UTF-8 text rendering core. Renders into any RenderTarget from any GrayPlane.
 // BW plane: ink pixels (bit=0) are drawn. Gray planes (LSB/MSB): set pixels (bit=1) are drawn.
 inline int DrawBuffer::draw_text_impl_(const RenderTarget& t, int x, int baseline_y, const char* text, size_t len,
-                                       const BitmapFont& font, GrayPlane plane, bool white, FontStyle style) {
+                                       const BitmapFont& font, GrayPlane plane, bool white, FontStyle style,
+                                       Rotation rotation) {
   if (!text || len == 0 || !font.valid())
     return x;
   const char* p = text;
@@ -712,7 +764,7 @@ inline int DrawBuffer::draw_text_impl_(const RenderTarget& t, int x, int baselin
     }
     if (bits) {
       draw_glyph_impl_(t, (cursor_q + 2) / 4, baseline_y, bits, g.bitmap_width, g.bitmap_height, g.x_offset, g.y_offset,
-                       white, invert);
+                       white, invert, rotation);
     }
     cursor_q += g.advance_width;
     cursor_q = ((cursor_q + 2) / 4) * 4;  // snap to full pixel - prevents fractional accumulation across characters
@@ -723,7 +775,7 @@ inline int DrawBuffer::draw_text_impl_(const RenderTarget& t, int x, int baselin
 
 inline int DrawBuffer::draw_text_proportional(int x, int baseline_y, const char* text, size_t len,
                                               const BitmapFont& font, bool white, FontStyle style) {
-  return draw_text_impl_(full_target_(), x, baseline_y, text, len, font, GrayPlane::BW, white, style);
+  return draw_text_impl_(full_target_(), x, baseline_y, text, len, font, GrayPlane::BW, white, style, rotation_);
 }
 
 inline int DrawBuffer::draw_text_plane(uint8_t* buf, int x, int baseline_y, const char* text, size_t len,
@@ -733,7 +785,7 @@ inline int DrawBuffer::draw_text_plane(uint8_t* buf, int x, int baseline_y, cons
   if (!f || !f->valid())
     return x;
   const RenderTarget t{buf, DisplayFrame::kStride, 0, 0, DisplayFrame::kPhysicalWidth, DisplayFrame::kPhysicalHeight};
-  return draw_text_impl_(t, x, baseline_y, text, len, *f, plane, white, style);
+  return draw_text_impl_(t, x, baseline_y, text, len, *f, plane, white, style, rotation_);
 }
 
 }  // namespace microreader

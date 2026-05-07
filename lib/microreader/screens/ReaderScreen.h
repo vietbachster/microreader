@@ -79,9 +79,10 @@ class ReaderScreen final : public IScreen {
 
   // Build PageOptions matching the reader's layout configuration.
   // Pass settings to get the correct bottom padding for the active progress style.
-  static PageOptions make_page_opts(const ReaderSettings* settings = nullptr) {
-    PageOptions opts(static_cast<uint16_t>(DrawBuffer::kWidth), static_cast<uint16_t>(DrawBuffer::kHeight), kPaddingTop,
-                     kParaSpacing, Alignment::Start);
+  static PageOptions make_page_opts(const ReaderSettings* settings = nullptr, int width = DrawBuffer::kWidth,
+                                    int height = DrawBuffer::kHeight) {
+    PageOptions opts(static_cast<uint16_t>(width), static_cast<uint16_t>(height), kPaddingTop, kParaSpacing,
+                     Alignment::Start);
     opts.padding_right = kPaddingRight;
     opts.padding_bottom = settings ? settings->progress_bottom() : kPaddingBottom;
     opts.padding_left = kPaddingLeft;

@@ -13,6 +13,7 @@ static constexpr int kBottomPadding = 16;  // list padding from bottom
 static constexpr int kButtonHintsH = 26;   // height of the button hint area
 
 void ListMenuScreen::start(DrawBuffer& buf, IRuntime& runtime) {
+  buf_ = &buf;
   if (!ui_font_.valid())
     ui_font_.init(kFontData_ui_small_mbf, kFontData_ui_small_mbf_size);
   if (!header_font_.valid())
@@ -33,14 +34,14 @@ void ListMenuScreen::start(DrawBuffer& buf, IRuntime& runtime) {
 }
 
 void ListMenuScreen::ensure_visible_() {
-  if (!ui_font_.valid() || count() == 0)
+  if (!ui_font_.valid() || count() == 0 || !buf_)
     return;
   const int line_h = ui_font_.y_advance() + 8;
   int subtitle_h = subtitle_.empty() ? 0 : ui_font_.y_advance() + 8;
   if (!subtitle2_.empty() && ui_font_.valid())
     subtitle_h += ui_font_.y_advance() + 8;
   const int header_h = kHeaderY + (header_font_.valid() ? header_font_.y_advance() : 0) + subtitle_h + 8;
-  const int visible = (DrawBuffer::kHeight - header_h - kBottomPadding) / line_h;
+  const int visible = (buf_->height() - header_h - kBottomPadding) / line_h;
   if (visible <= 0)
     return;
   if (selected_ < scroll_offset_)
@@ -59,14 +60,14 @@ void ListMenuScreen::ensure_visible_() {
 }
 
 void ListMenuScreen::center_on_selected_() {
-  if (!ui_font_.valid() || count() == 0)
+  if (!ui_font_.valid() || count() == 0 || !buf_)
     return;
   const int line_h = ui_font_.y_advance() + 8;
   int subtitle_h = subtitle_.empty() ? 0 : ui_font_.y_advance() + 8;
   if (!subtitle2_.empty() && ui_font_.valid())
     subtitle_h += ui_font_.y_advance() + 8;
   const int header_h = kHeaderY + (header_font_.valid() ? header_font_.y_advance() : 0) + subtitle_h + 8;
-  const int visible = (DrawBuffer::kHeight - header_h - kBottomPadding) / line_h;
+  const int visible = (buf_->height() - header_h - kBottomPadding) / line_h;
   if (visible <= 0)
     return;
   // Center the selection: put it in the middle of the visible window.
@@ -80,8 +81,8 @@ void ListMenuScreen::center_on_selected_() {
 }
 
 void ListMenuScreen::draw_all_(DrawBuffer& buf, std::optional<uint8_t> battery_pct) const {
-  const int W = DrawBuffer::kWidth;
-  const int H = DrawBuffer::kHeight;
+  const int W = buf.width();
+  const int H = buf.height();
   const int n = count();
 
   buf.fill(true);
@@ -228,13 +229,12 @@ void ListMenuScreen::draw_all_(DrawBuffer& buf, std::optional<uint8_t> battery_p
     y += line_h;
   }
 
-  // Scrollbar on the right edge when items overflow
+  // Scrollbar when items overflow. Left edge in landscape, right edge in portrait.
   if (n > visible) {
-    const int sb_x = W - 12;
     const int sb_w = 4;
-    const int sb_top = items_y - 1;
-    const int last_item_bottom = items_y + total_h - line_h + ui_font_.y_advance();
-    const int sb_bottom = last_item_bottom;
+    const int sb_x = (buf.rotation() == Rotation::Deg0) ? 8 : W - 12;
+    const int sb_top = items_y;
+    const int sb_bottom = items_y + total_h - line_h + ui_font_.y_advance() + 1;
     const int sb_total_h = sb_bottom - sb_top;
     const int thumb_h = sb_total_h * visible / n < 6 ? 6 : sb_total_h * visible / n;
     const int track = sb_total_h - thumb_h;
@@ -253,31 +253,44 @@ void ListMenuScreen::draw_all_(DrawBuffer& buf, std::optional<uint8_t> battery_p
 void ListMenuScreen::draw_button_hints_(DrawBuffer& buf) const {
   if (!ui_font_.valid())
     return;
-  const int W = DrawBuffer::kWidth;
-  const int H = DrawBuffer::kHeight;
+  const int W = buf.width();
+  const int H = buf.height();
   const int baseline = ui_font_.baseline();
-  const int text_y = H - kButtonHintsH / 2 - ui_font_.y_advance() / 2 + baseline + 3;
 
   // Four labels: back=◀, select=▶, down=▼, up=▲
-  // ◀ = U+25C0 (E2 97 80), ▶ = U+25B6 (E2 96 B6)
-  // ▼ = U+25BC (E2 96 BC), ▲ = U+25B2 (E2 96 B2)
   bool inv_menu = app_ && app_->invert_menu_buttons();
   const char* lbl_down = "\xe2\x96\xbc";
   const char* lbl_up = "\xe2\x96\xb2";
   const char* kLabels[4] = {"\xe2\x97\x80", "\xe2\x96\xb6", inv_menu ? lbl_up : lbl_down, inv_menu ? lbl_down : lbl_up};
   static const size_t kLens[4] = {3, 3, 3, 3};
 
-  const int pair0 = W * 163 / 550;
-  const int pair1 = W - pair0;
-  const int gap = 50;  // half-gap within a pair
+  const bool sideways = buf.rotation() == Rotation::Deg90;
+  const int L = sideways ? W : H;
+  const int pair0 = L * 163 / 550;
+  const int pair1 = L - pair0;
+  const int gap = 50;
   const int btns[4] = {pair0 - gap, pair0 + gap, pair1 - gap, pair1 + gap};
+
   for (int i = 0; i < 4; ++i) {
     const int lw = ui_font_.word_width(kLabels[i], kLens[i], FontStyle::Regular);
-    buf.draw_text_proportional(btns[i] - lw / 2, text_y, kLabels[i], kLens[i], ui_font_, false);
+    if (!sideways) {
+      const int text_x = W - kButtonHintsH / 2 - lw / 2;
+      // In landscape, if derived from portrait by rotating -90 deg,
+      // the original left button (X=0) becomes the bottom right button (Y=MAX).
+      // So we map i -> 3 - i if we need to reverse the order on the Y axis
+      // because pair0 is smaller and pair1 is larger.
+      int mapped_i = 3 - i;
+      const int text_y = btns[mapped_i] - ui_font_.y_advance() / 2 + baseline;
+      buf.draw_text_proportional(text_x, text_y, kLabels[i], kLens[i], ui_font_, false);
+    } else {
+      const int text_y = H - kButtonHintsH / 2 - ui_font_.y_advance() / 2 + baseline + 3;
+      buf.draw_text_proportional(btns[i] - lw / 2, text_y, kLabels[i], kLens[i], ui_font_, false);
+    }
   }
 }
 
 void ListMenuScreen::update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& runtime) {
+  buf_ = &buf;
   const int n = count();
 
   // Helper lambdas for selection movement (skip separators).

@@ -278,7 +278,7 @@ void ReaderScreen::start(DrawBuffer& buf, IRuntime& runtime) {
   open_ok_ = true;
   chapter_idx_ = 0;
   page_pos_ = PagePosition{0, 0};
-  image_size_fn_ = make_image_size_query(mrb_, path_, static_cast<uint16_t>(DrawBuffer::kWidth));
+  image_size_fn_ = make_image_size_query(mrb_, path_, static_cast<uint16_t>(buf.width()));
   // Restore position: if the user selected a chapter from the TOC, jump there;
   // otherwise load saved bookmark from disk.
   if (app_ && app_->chapter_select()->has_pending()) {
@@ -438,8 +438,8 @@ void ReaderScreen::load_chapter_(size_t idx) {
 }
 
 void ReaderScreen::render_page_(DrawBuffer& buf) {
-  static constexpr int W = DrawBuffer::kWidth;
-  static constexpr int H = DrawBuffer::kHeight;
+  const int W = buf.width();
+  const int H = buf.height();
 
 #ifdef ESP_PLATFORM
   int64_t t0 = esp_timer_get_time();
@@ -464,7 +464,8 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
       align_override = Alignment::Justify;
   }
 
-  PageOptions opts(static_cast<uint16_t>(W), static_cast<uint16_t>(H), kPaddingTop, 8, align_override);
+  PageOptions opts = make_page_opts(&reader_settings_, W, H);
+  opts.align_override = align_override;
   opts.padding_right = reader_settings_.h_padding();
   opts.padding_bottom = static_cast<uint16_t>(reader_settings_.progress_bottom() + reader_settings_.v_padding());
   opts.padding_left = reader_settings_.h_padding();
@@ -566,16 +567,19 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
 
   if (mrb_.paragraph_count() > 0 && reader_settings_.progress_style != ProgressStyle::None) {
     int pct = progress_pct();
+    const bool landscape = buf.rotation() == Rotation::Deg0;
     if (reader_settings_.progress_style == ProgressStyle::Percentage) {
       char pct_str[8];
       snprintf(pct_str, sizeof(pct_str), "%d%%", pct);
-      buf.draw_text_centered(W / 2, H - 14, pct_str, true);
+      buf.draw_text_centered(W / 2, landscape ? H - 18 : H - 16, pct_str, true);
     } else {
       // Progress bar: a thin filled line at the very bottom of the screen.
+      // Move it up 2px in landscape mode because of the screen edges being partially hidden.
+      const int kBarY = landscape ? H - 4 : H - 2;
       constexpr int kBarH = 2;
       const int bar_w = pct * W / 100;
-      buf.fill_rect(0, H - kBarH, bar_w, kBarH, false);         // filled portion (black)
-      buf.fill_rect(bar_w, H - kBarH, W - bar_w, kBarH, true);  // unfilled portion (white)
+      buf.fill_rect(0, kBarY, bar_w, kBarH, false);         // filled portion (black)
+      buf.fill_rect(bar_w, kBarY, W - bar_w, kBarH, true);  // unfilled portion (white)
     }
   }
 

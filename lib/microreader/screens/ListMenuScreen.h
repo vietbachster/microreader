@@ -90,6 +90,7 @@ class ListMenuScreen : public IScreen {
 
   BitmapFont ui_font_;
   BitmapFont header_font_;
+  DrawBuffer* buf_ = nullptr;
 
  protected:
   void draw_all_(DrawBuffer& buf, std::optional<uint8_t> battery_pct = std::nullopt) const;

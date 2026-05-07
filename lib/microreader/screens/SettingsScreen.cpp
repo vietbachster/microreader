@@ -41,6 +41,10 @@ static std::string get_side_paging_label(bool inverted) {
   return std::string("Side Paging: ") + (inverted ? "Top=Prev" : "Top=Next");
 }
 
+static std::string get_rotate_display_label(bool rotated) {
+  return std::string("Display: ") + (rotated ? "Landscape" : "Portrait");
+}
+
 void SettingsScreen::on_start() {
   title_ = "Settings";
   subtitle_ = MICROREADER_VERSION;
@@ -57,6 +61,9 @@ void SettingsScreen::on_start() {
 
   idx_invert_side_ = count();
   add_item(get_side_paging_label(app_ && app_->invert_side_buttons()));
+
+  idx_rotate_display_ = count();
+  add_item(get_rotate_display_label(app_ && app_->rotate_display()));
 
   add_separator();
 
@@ -150,6 +157,15 @@ void SettingsScreen::on_select(int index) {
       bool v = !app_->invert_side_buttons();
       app_->set_invert_side_buttons(v);
       set_item_label(idx_invert_side_, get_side_paging_label(v));
+    }
+    return;
+  }
+  if (index == idx_rotate_display_) {
+    if (app_ && buf_) {
+      bool v = !app_->rotate_display();
+      app_->set_rotate_display(v);
+      set_item_label(idx_rotate_display_, get_rotate_display_label(v));
+      buf_->set_rotation(v ? Rotation::Deg0 : Rotation::Deg90);
     }
     return;
   }
