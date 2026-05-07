@@ -464,12 +464,14 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
       align_override = Alignment::Justify;
   }
 
+  const bool landscape = buf.rotation() == Rotation::Deg0;
   PageOptions opts = make_page_opts(&reader_settings_, W, H);
   opts.align_override = align_override;
   opts.padding_right = reader_settings_.h_padding();
-  opts.padding_bottom = static_cast<uint16_t>(reader_settings_.progress_bottom() + reader_settings_.v_padding());
+  opts.padding_bottom =
+      static_cast<uint16_t>(reader_settings_.progress_bottom() + reader_settings_.v_padding() + (landscape ? 2 : 0));
   opts.padding_left = reader_settings_.h_padding();
-  opts.padding_top = static_cast<uint16_t>(kPaddingTop + reader_settings_.v_padding());
+  opts.padding_top = static_cast<uint16_t>(kPaddingTop + reader_settings_.v_padding() + (landscape ? 2 : 0));
   opts.line_height_multiplier_percent = reader_settings_.line_height_multiplier_percent();
   opts.center_text = true;
   opts.override_publisher_fonts = reader_settings_.override_publisher_fonts;
@@ -567,7 +569,6 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
 
   if (mrb_.paragraph_count() > 0 && reader_settings_.progress_style != ProgressStyle::None) {
     int pct = progress_pct();
-    const bool landscape = buf.rotation() == Rotation::Deg0;
     if (reader_settings_.progress_style == ProgressStyle::Percentage) {
       char pct_str[8];
       snprintf(pct_str, sizeof(pct_str), "%d%%", pct);

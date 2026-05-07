@@ -66,7 +66,7 @@ class ReaderScreen final : public IScreen {
   static constexpr int kScale = 2;
   static constexpr int kGlyphW = 8;
   static constexpr int kGlyphH = 8;
-  static constexpr int kPaddingTop = 2;
+  static constexpr int kPaddingTop = 0;
   static constexpr int kPaddingRight = 12;
   static constexpr int kPaddingBottom = 14;
   static constexpr int kPaddingLeft = 12;

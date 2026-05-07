@@ -178,8 +178,9 @@ void ListMenuScreen::draw_all_(DrawBuffer& buf, std::optional<uint8_t> battery_p
     size_t len = label_str.size();
     int iw = ui_font_.word_width(label, len, FontStyle::Regular);
 
+    const int landscape_pad = (buf.rotation() == Rotation::Deg0) ? 10 : 0;
     const int indent_px = align_left_ ? (32 + ((i < (int)indents_.size() ? indents_[i] : 0) * 20)) : 0;
-    const int max_item_w = align_left_ ? (W - 32 - indent_px) : (W - 120);
+    const int max_item_w = align_left_ ? (W - 32 - landscape_pad - indent_px) : (W - 120);
 
     // Truncate with "..." if the label is too wide to fit.
     if (iw > max_item_w) {
@@ -212,7 +213,7 @@ void ListMenuScreen::draw_all_(DrawBuffer& buf, std::optional<uint8_t> battery_p
       if (align_left_) {
         // Full width bar for left-aligned
         const int bar_x = 16;
-        const int bar_width = W - 32;
+        const int bar_width = W - 32 - landscape_pad;
         buf.fill_rect(bar_x + 1, iy, bar_width - 2, bar_h, false);          // Body
         buf.fill_rect(bar_x, iy + 1, 1, bar_h - 2, false);                  // Left cap
         buf.fill_rect(bar_x + bar_width - 1, iy + 1, 1, bar_h - 2, false);  // Right cap

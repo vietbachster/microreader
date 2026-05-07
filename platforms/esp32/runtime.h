@@ -122,7 +122,7 @@ class Esp32Runtime final : public microreader::IRuntime {
 
   // Only update the displayed battery percentage when the reading has moved
   // at least this many percentage points away from the last displayed value.
-  static constexpr int kHysteresisPercent = 2;
+  static constexpr int kHysteresisPercent = 3;
 
   uint32_t frame_time_ms_;
   uint32_t frame_start_ms_;
