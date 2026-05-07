@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <deque>
 #include <optional>
 #include <string>
 #include <vector>
@@ -345,7 +346,7 @@ class CssStylesheet {
 
  private:
   CssConfig config_;
-  std::vector<std::pair<Selector, CssRule>> rules_;
+  std::deque<std::pair<Selector, CssRule>> rules_;
 
   static std::string filter_comments(const char* css, size_t length);
 };
