@@ -201,6 +201,7 @@ void microreader::Application::save_settings_() {
   // Menu list format
   std::fprintf(f, "list_format=%u\n", static_cast<unsigned>(menu_.list_format()));
   std::fprintf(f, "inv_menu=%u\n", invert_menu_buttons_ ? 1u : 0u);
+  std::fprintf(f, "inv_bpage=%u\n", invert_bottom_paging_ ? 1u : 0u);
   std::fprintf(f, "inv_side=%u\n", invert_side_buttons_ ? 1u : 0u);
   std::fprintf(f, "rotate_display=%u\n", rotate_display_ ? 1u : 0u);
 
@@ -256,6 +257,8 @@ void microreader::Application::load_settings_() {
       menu_.set_list_format(uval <= 2 ? static_cast<BookListFormat>(uval) : BookListFormat::TitleAndAuthor);
     else if (std::sscanf(line, "inv_menu=%u", &uval) == 1)
       invert_menu_buttons_ = (uval != 0);
+    else if (std::sscanf(line, "inv_bpage=%u", &uval) == 1)
+      invert_bottom_paging_ = (uval != 0);
     else if (std::sscanf(line, "inv_side=%u", &uval) == 1)
       invert_side_buttons_ = (uval != 0);
     else if (std::sscanf(line, "rotate_display=%u", &uval) == 1)

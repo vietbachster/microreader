@@ -357,19 +357,19 @@ void ReaderScreen::update(const ButtonState& buttons, DrawBuffer& buf, IRuntime&
   bool had_prev_press = false;
 
   bool inv_side = app_ && app_->invert_side_buttons();
-  bool inv_menu = app_ && app_->invert_menu_buttons();
+  bool inv_bottom = app_ && app_->invert_bottom_paging();
 
-  Button logical_next_menu = inv_menu ? Button::Button3 : Button::Button2;
-  Button logical_prev_menu = inv_menu ? Button::Button2 : Button::Button3;
+  Button logical_next_bottom = inv_bottom ? Button::Button3 : Button::Button2;
+  Button logical_prev_bottom = inv_bottom ? Button::Button2 : Button::Button3;
   Button logical_next_side = inv_side ? Button::Down : Button::Up;
   Button logical_prev_side = inv_side ? Button::Up : Button::Down;
 
   Button btn;
   while (buttons.next_press(btn)) {
-    if (btn == logical_next_menu || btn == logical_next_side) {
+    if (btn == logical_next_bottom || btn == logical_next_side) {
       ++page_delta;
       had_next_press = true;
-    } else if (btn == logical_prev_menu || btn == logical_prev_side) {
+    } else if (btn == logical_prev_bottom || btn == logical_prev_side) {
       --page_delta;
       had_prev_press = true;
     } else {
@@ -394,9 +394,9 @@ void ReaderScreen::update(const ButtonState& buttons, DrawBuffer& buf, IRuntime&
   // Hold-down: advance one page per frame while a nav button is held,
   // but only if no fresh press event arrived this frame (avoids double-counting
   // the initial press).
-  if (!had_next_press && (buttons.is_down(logical_next_menu) || buttons.is_down(logical_next_side)))
+  if (!had_next_press && (buttons.is_down(logical_next_bottom) || buttons.is_down(logical_next_side)))
     ++page_delta;
-  if (!had_prev_press && (buttons.is_down(logical_prev_menu) || buttons.is_down(logical_prev_side)))
+  if (!had_prev_press && (buttons.is_down(logical_prev_bottom) || buttons.is_down(logical_prev_side)))
     --page_delta;
 
   bool changed = false;
@@ -471,7 +471,7 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
   opts.padding_bottom =
       static_cast<uint16_t>(reader_settings_.progress_bottom() + reader_settings_.v_padding() + (landscape ? 2 : 0));
   opts.padding_left = reader_settings_.h_padding();
-  opts.padding_top = static_cast<uint16_t>(kPaddingTop + reader_settings_.v_padding() + (landscape ? 2 : 0));
+  opts.padding_top = static_cast<uint16_t>(kPaddingTop + reader_settings_.v_padding());
   opts.line_height_multiplier_percent = reader_settings_.line_height_multiplier_percent();
   opts.center_text = true;
   opts.override_publisher_fonts = reader_settings_.override_publisher_fonts;

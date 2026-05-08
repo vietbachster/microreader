@@ -102,6 +102,13 @@ class Application {
     invert_menu_buttons_ = v;
   }
 
+  bool invert_bottom_paging() const {
+    return invert_bottom_paging_;
+  }
+  void set_invert_bottom_paging(bool v) {
+    invert_bottom_paging_ = v;
+  }
+
   bool invert_side_buttons() const {
     return invert_side_buttons_;
   }
@@ -155,6 +162,7 @@ class Application {
   bool running_ = true;
 
   bool invert_menu_buttons_ = false;
+  bool invert_bottom_paging_ = false;
   bool invert_side_buttons_ = false;
   bool rotate_display_ = false;
 

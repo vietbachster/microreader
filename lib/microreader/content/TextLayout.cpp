@@ -368,12 +368,14 @@ static uint16_t compute_line_height(const IFont& font, const LayoutLine& line, u
 }
 
 static uint16_t line_baseline(const IFont& font, const LayoutLine& line) {
-  uint16_t bl = font.baseline();
+  uint16_t bl = 0;
   for (const auto& w : line.words) {
     uint16_t b = font.baseline(w.size_pct);
     if (b > bl)
       bl = b;
   }
+  if (bl == 0)
+    bl = font.baseline();
   return bl;
 }
 

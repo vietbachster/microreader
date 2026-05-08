@@ -60,7 +60,7 @@ void ReaderOptionsScreen::on_start() {
 
   clear_items();
   idx_justify_ = idx_padding_h_ = idx_padding_v_ = idx_line_spacing_ = idx_progress_ = idx_chapters_ = idx_pub_fonts_ =
-      -1;
+      idx_rotate_display_ = -1;
 
   char tmp[40];
 
@@ -102,7 +102,7 @@ void ReaderOptionsScreen::on_start() {
     }
 
     idx_pub_fonts_ = count();
-    add_item(fmt_setting(tmp, sizeof(tmp), "Ignore pub fonts", settings_->override_publisher_fonts ? "Yes" : "No"));
+    add_item(fmt_setting(tmp, sizeof(tmp), "Publisher Sizes", settings_->override_publisher_fonts ? "Off" : "On"));
 
     idx_padding_h_ = count();
     add_item(fmt_setting(tmp, sizeof(tmp), "H-Margin", ReaderSettings::kHPaddingNames[settings_->padding_h_idx]));
@@ -119,6 +119,8 @@ void ReaderOptionsScreen::on_start() {
                             : settings_->progress_style == ProgressStyle::Percentage ? "Percent"
                                                                                      : "Bar";
     add_item(fmt_setting(tmp, sizeof(tmp), "Progress", prog_name));
+    idx_rotate_display_ = count();
+    add_item(fmt_setting(tmp, sizeof(tmp), "Display", app_ && app_->rotate_display() ? "Landscape" : "Portrait"));
   }
 }
 
@@ -177,6 +179,15 @@ void ReaderOptionsScreen::on_select(int index) {
   if (index == idx_progress_) {
     settings_->progress_style = static_cast<ProgressStyle>((static_cast<uint8_t>(settings_->progress_style) + 1) % 3);
     refresh_items_(index);
+    return;
+  }
+  if (index == idx_rotate_display_) {
+    if (app_ && buf_) {
+      bool v = !app_->rotate_display();
+      app_->set_rotate_display(v);
+      buf_->set_rotation(v ? Rotation::Deg0 : Rotation::Deg90);
+      refresh_items_(index);
+    }
     return;
   }
   if (index == idx_chapters_) {

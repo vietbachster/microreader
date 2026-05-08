@@ -37,6 +37,10 @@ static std::string get_menu_nav_label(bool inverted) {
   return std::string("Menu Nav: ") + (inverted ? "Left=Up" : "Left=Down");
 }
 
+static std::string get_bottom_paging_label(bool inverted) {
+  return std::string("Bottom Paging: ") + (inverted ? "Left=Prev" : "Left=Next");
+}
+
 static std::string get_side_paging_label(bool inverted) {
   return std::string("Side Paging: ") + (inverted ? "Top=Prev" : "Top=Next");
 }
@@ -58,6 +62,9 @@ void SettingsScreen::on_start() {
 
   idx_invert_menu_ = count();
   add_item(get_menu_nav_label(app_ && app_->invert_menu_buttons()));
+
+  idx_invert_bottom_paging_ = count();
+  add_item(get_bottom_paging_label(app_ && app_->invert_bottom_paging()));
 
   idx_invert_side_ = count();
   add_item(get_side_paging_label(app_ && app_->invert_side_buttons()));
@@ -149,6 +156,14 @@ void SettingsScreen::on_select(int index) {
       bool v = !app_->invert_menu_buttons();
       app_->set_invert_menu_buttons(v);
       set_item_label(idx_invert_menu_, get_menu_nav_label(v));
+    }
+    return;
+  }
+  if (index == idx_invert_bottom_paging_) {
+    if (app_) {
+      bool v = !app_->invert_bottom_paging();
+      app_->set_invert_bottom_paging(v);
+      set_item_label(idx_invert_bottom_paging_, get_bottom_paging_label(v));
     }
     return;
   }

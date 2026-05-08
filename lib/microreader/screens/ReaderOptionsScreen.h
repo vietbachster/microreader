@@ -19,10 +19,10 @@ enum class ProgressStyle : uint8_t {
 
 enum class AlignOverride : uint8_t {
   Book = 0,
+  Justify,
   Left,
   Center,
   Right,
-  Justify,
 };
 
 enum class SpacingOverride : uint8_t {
@@ -50,7 +50,7 @@ struct ReaderSettings {
 
   static constexpr const char* kHPaddingNames[] = {"Narrow", "Normal", "Wide", "Wider"};
   static constexpr const char* kVPaddingNames[] = {"Tight", "Normal", "Loose", "Looser"};
-  static constexpr const char* kAlignNames[] = {"Book", "Left", "Center", "Right", "Justify"};
+  static constexpr const char* kAlignNames[] = {"Book", "Justify", "Left", "Center", "Right"};
   static constexpr const char* kSpacingNames[] = {"Book", "0.8x", "0.9x", "1.0x", "1.1x", "1.2x"};
   static constexpr const char* kFontSizeNames[] = {"20", "24", "26", "28", "30", "32", "34", "36"};
 
@@ -110,12 +110,18 @@ class ReaderOptionsScreen final : public ListMenuScreen {
   void populate(const TableOfContents& toc, uint16_t current_chapter, uint16_t current_para,
                 const std::string& fallback_title, int progress_pct);
 
+  void update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& runtime) override {
+    buf_ = &buf;
+    ListMenuScreen::update(buttons, buf, runtime);
+  }
+
  protected:
   void on_start() override;
   void on_select(int index) override;
 
  private:
   ReaderSettings* settings_ = nullptr;
+  DrawBuffer* buf_ = nullptr;
 
   // Item indices (-1 = not shown).
   int idx_justify_ = -1;
@@ -126,6 +132,7 @@ class ReaderOptionsScreen final : public ListMenuScreen {
   int idx_progress_ = -1;
   int idx_pub_fonts_ = -1;
   int idx_chapters_ = -1;
+  int idx_rotate_display_ = -1;
 
   // Re-populate item labels after an inline setting change, restoring selection.
   void refresh_items_(int restore_selection);

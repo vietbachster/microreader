@@ -208,14 +208,38 @@ size_t find_hyphen_break(const IFont& font, const char* word_ptr, size_t len, Fo
 }
 
 HyphenationLang detect_language(const std::optional<std::string>& lang_tag) {
-  if (!lang_tag || lang_tag->size() < 2)
+  if (!lang_tag)
     return HyphenationLang::None;
-  const char a = (*lang_tag)[0];
-  const char b = (*lang_tag)[1];
-  if ((a == 'd' || a == 'D') && (b == 'e' || b == 'E'))
+
+  std::string_view sv = *lang_tag;
+
+  auto ieq = [](std::string_view s, const char* expected) {
+    size_t i = 0;
+    while (i < s.size() && (s[i] == ' ' || s[i] == '\t' || s[i] == '\n' || s[i] == '\r')) {
+      ++i;
+    }
+    for (size_t j = 0; expected[j]; ++j) {
+      if (i >= s.size())
+        return false;
+      char c = s[i++];
+      if (c >= 'A' && c <= 'Z')
+        c += 32;
+      if (c != expected[j])
+        return false;
+    }
+    if (i < s.size()) {
+      char c = s[i];
+      if (c != '-' && c != ' ' && c != '\t' && c != '\n' && c != '\r')
+        return false;
+    }
+    return true;
+  };
+
+  if (ieq(sv, "de") || ieq(sv, "ger") || ieq(sv, "deu"))
     return HyphenationLang::German;
-  if ((a == 'e' || a == 'E') && (b == 'n' || b == 'N'))
+  if (ieq(sv, "en") || ieq(sv, "eng"))
     return HyphenationLang::English;
+
   return HyphenationLang::None;
 }
 
