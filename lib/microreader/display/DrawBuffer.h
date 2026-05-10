@@ -21,9 +21,14 @@ enum class GrayPlane { BW, LSB, MSB };
 
 // Physical screen constants and bit-packed pixel helpers (used internally by DrawBuffer).
 struct DisplayFrame {
+#ifdef DEVICE_X3
+  static constexpr int kPhysicalWidth = 792;
+  static constexpr int kPhysicalHeight = 528;
+#else
   // The full size is 800x480 but we only use 788x480 to avoid the hidden areas.
   static constexpr int kPhysicalWidth = 788;
   static constexpr int kPhysicalHeight = 480;
+#endif
   static constexpr int kStride = (kPhysicalWidth + 7) / 8;
   static constexpr std::size_t kPixelBytes = static_cast<std::size_t>(kStride) * kPhysicalHeight;
 };
@@ -432,6 +437,16 @@ class DrawBuffer {
   void show_grayscale_image(const uint8_t* lsb, const uint8_t* msb, uint16_t w, uint16_t h) {
     fill(true);
     draw_image(lsb, 0, 0, w, h);
+    // Zero out any physical rows not covered by the image in the LSB plane.
+    // These rows will land in OLD RAM; 0x00 produces a BW (black→white) GRAY
+    // LUT transition which actively drives those pixels to white.  Without this,
+    // uncovered rows stay 0xFF → WW transition (no-drive) → ghost of the
+    // previous page persists.  No-op when h >= kPhysicalHeight (e.g. on X4).
+    if (h < DisplayFrame::kPhysicalHeight) {
+      uint8_t* buf = inactive_();
+      const size_t off = static_cast<size_t>(h) * DisplayFrame::kStride;
+      memset(buf + off, 0x00, static_cast<size_t>(DisplayFrame::kPhysicalHeight - h) * DisplayFrame::kStride);
+    }
     display_.write_ram_bw(inactive_());
     fill(true);
     draw_image(msb, 0, 0, w, h);
@@ -504,7 +519,13 @@ class DrawBuffer {
   //   text         - label shown inside the box (e.g. "Converting...")
   //   progress_pct - 0-100; controls how much of the bar is filled
   void show_loading(const char* text, int progress_pct) {
+    // X4: hardware RAM starts at pixel 12, so the physical coord needs +12 alignment.
+    // X3: full 792-pixel RAM, no offset — plain byte-alignment suffices.
+#ifdef DEVICE_X3
+    static_assert(kLoadPhysX % 8 == 0, "kLoadPhysX must be byte-aligned");
+#else
     static_assert((kLoadPhysX + 12) % 8 == 0, "kLoadPhysX + panel offset must be byte-aligned");
+#endif
     if (display_.is_busy())
       return;  // skip if panel is still refreshing
     uint8_t new_buf[kLoadBufBytes];

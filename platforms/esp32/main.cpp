@@ -18,6 +18,9 @@
 #include "runtime.h"
 #include "sdcard.h"
 #include "serial_communication.h"
+#ifdef DEVICE_X3
+#include "bq27220.h"
+#endif
 
 static void verify_ota() {
   const esp_partition_t* running = esp_ota_get_running_partition();
@@ -39,10 +42,29 @@ static constexpr uint32_t kPowerWakeupMs = 250;
 
 static void verify_wakeup_press() {
 #ifndef QEMU_BUILD
-  // If USB is connected (GPIO20/U0RXD reads HIGH), boot immediately.
+#ifdef DEVICE_X3
+  // X3: GPIO20=SDA, GPIO0=SCL — neither is a USB-detect line.
+  // Use the BQ27220 fuel gauge: positive charge current means USB is connected.
+  {
+    Bq27220 bq;
+    if (bq.is_charging()) {
+      if (esp_reset_reason() == ESP_RST_POWERON) {
+        // Plugging USB into a powered-off X3 causes ESP_RST_POWERON without any
+        // button press.  Go back to sleep; the power button GPIO3 wakeup fires
+        // when the user intentionally presses it.
+        ESP_LOGI("pwr", "X3 USB cold boot — returning to sleep");
+        esp_deep_sleep_enable_gpio_wakeup(1ULL << kPowerPin, ESP_GPIO_WAKEUP_GPIO_LOW);
+        esp_deep_sleep_start();
+      }
+      return;  // USB + non-POWERON reset (SW flash, etc.) → boot immediately
+    }
+  }
+#else
+  // X4: GPIO20/U0RXD reads HIGH when USB is connected.
   gpio_set_direction(GPIO_NUM_20, GPIO_MODE_INPUT);
   if (gpio_get_level(GPIO_NUM_20) == 1)
     return;
+#endif
 
   // Only require a hold check on a clean power-on (battery, no USB).
   // Crashes, panics, watchdog resets, SW resets — all boot immediately.
@@ -59,14 +81,24 @@ static void verify_wakeup_press() {
   cfg.intr_type = GPIO_INTR_DISABLE;
   gpio_config(&cfg);
 
+#ifdef DEVICE_X3
+  // X3 boots slower than X4, so the user has already been holding the button
+  // since power-on.  Subtract elapsed boot time from the required hold so that
+  // the perceived hold duration is consistent across devices.
+  const uint32_t boot_ms = static_cast<uint32_t>(esp_timer_get_time() / 1000);
+  const uint32_t required_ms = (boot_ms < kPowerWakeupMs) ? (kPowerWakeupMs - boot_ms) : 1;
+#else
+  const uint32_t required_ms = kPowerWakeupMs;
+#endif
+
   // Wait up to 2× the threshold; if the button isn't held long enough, sleep.
-  const uint32_t deadline_ms = kPowerWakeupMs * 2;
+  const uint32_t deadline_ms = required_ms * 2;
   uint32_t held_ms = 0;
   for (uint32_t elapsed = 0; elapsed < deadline_ms; elapsed += 10) {
     vTaskDelay(pdMS_TO_TICKS(10));
     if (gpio_get_level(kPowerPin) == 0) {
       held_ms += 10;
-      if (held_ms >= kPowerWakeupMs)
+      if (held_ms >= required_ms)
         return;  // confirmed long press — boot normally
     } else {
       held_ms = 0;  // button released, reset counter
@@ -126,6 +158,11 @@ extern "C" void app_main(void) {
     mkdir("/sdcard/.microreader", 0775);
     mkdir("/sdcard/.microreader/cache", 0775);
     mkdir("/sdcard/.microreader/data", 0775);
+#ifdef DEVICE_X3
+    // Separate cache subdir prevents layout mismatch when an SD card is moved
+    // between X3 (792×528) and X4 (788×480) devices.
+    mkdir("/sdcard/.microreader/cache/x3", 0775);
+#endif
 
     // Register the books directory for the selection screen.
     app.set_books_dir("/sdcard");

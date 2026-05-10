@@ -211,7 +211,11 @@ void ReaderScreen::start(DrawBuffer& buf, IRuntime& runtime) {
       name = sep + 1;
     const char* dot = std::strrchr(name, '.');
     size_t name_len = dot ? static_cast<size_t>(dot - name) : std::strlen(name);
+#ifdef DEVICE_X3
+    book_cache_dir_ = std::string(data_dir_) + "/cache/x3/" + std::string(name, name_len);
+#else
     book_cache_dir_ = std::string(data_dir_) + "/cache/" + std::string(name, name_len);
+#endif
 #ifdef ESP_PLATFORM
     mkdir(book_cache_dir_.c_str(), 0775);
 #else

@@ -3,32 +3,46 @@
 #include <algorithm>
 #include <cmath>
 
-#include "esp_adc/adc_cali.h"
-#include "esp_adc/adc_cali_scheme.h"
-#include "esp_adc/adc_oneshot.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "hal/adc_types.h"
 #include "microreader/Input.h"
 #include "microreader/Runtime.h"
 
+#ifdef DEVICE_X3
+#include "bq27220.h"
+#else
+#include "esp_adc/adc_cali.h"
+#include "esp_adc/adc_cali_scheme.h"
+#include "esp_adc/adc_oneshot.h"
+#include "hal/adc_types.h"
 // Assuming battery is connected to ADC1 channel for GPIO0
 // Usually GPIO0 maps to ADC1_CHANNEL_0 on ESP32-C3
-// But you may need to adjust the exact channel or unit if different
 #define BATTERY_ADC_CHANNEL ADC_CHANNEL_0
+#endif
 
 class Esp32Runtime final : public microreader::IRuntime {
  public:
   explicit Esp32Runtime(uint32_t frame_time_ms, adc_oneshot_unit_handle_t adc_handle)
-      : frame_time_ms_(frame_time_ms), frame_start_ms_(0), adc1_handle_(adc_handle) {
+      : frame_time_ms_(frame_time_ms), frame_start_ms_(0)
+#ifndef DEVICE_X3
+        ,
+        adc1_handle_(adc_handle)
+#endif
+  {
+#ifndef DEVICE_X3
     init_battery_adc();
+#else
+    (void)adc_handle;  // X3 uses BQ27220 fuel gauge; ADC channel 0 (GPIO0=SCL) is not used
+#endif
   }
 
   ~Esp32Runtime() override {
+#ifndef DEVICE_X3
     if (adc_cali_handle_) {
       adc_cali_delete_scheme_curve_fitting(adc_cali_handle_);
     }
+#endif
   }
 
   bool should_continue() const override {
@@ -52,6 +66,23 @@ class Esp32Runtime final : public microreader::IRuntime {
   }
 
   std::optional<uint8_t> battery_percentage() const override {
+#ifdef DEVICE_X3
+    // Rate-limit I²C reads to once per second (BQ27220 fuel gauge).
+    const uint32_t now = millis();
+    if (now - last_bq_read_ms_ < 1000 && last_pct_.has_value())
+      return last_pct_;
+    last_bq_read_ms_ = now;
+
+    const auto soc = bq27220_.read_soc();
+    if (soc.has_value()) {
+      const int new_pct = static_cast<int>(soc.value());
+      if (!last_pct_.has_value() ||
+          std::abs(new_pct - static_cast<int>(last_pct_.value())) >= kHysteresisPercent) {
+        last_pct_ = static_cast<uint8_t>(new_pct);
+      }
+    }
+    return last_pct_;
+#else
     if (!adc1_handle_)
       return std::nullopt;
 
@@ -64,7 +95,6 @@ class Esp32Runtime final : public microreader::IRuntime {
     if (adc_cali_handle_) {
       adc_cali_raw_to_voltage(adc_cali_handle_, adc_raw, &voltage_mv);
     } else {
-      // Fallback or handle differently if uncalibrated
       voltage_mv = adc_raw;
     }
 
@@ -74,20 +104,16 @@ class Esp32Runtime final : public microreader::IRuntime {
     // Polynomial derived from LiPo samples
     double y = -144.9390 * volts * volts * volts + 1655.8629 * volts * volts - 6158.8520 * volts + 7501.3202;
 
-    // Clamp to [0,100] and round
     y = std::max(y, 0.0);
     y = std::min(y, 100.0);
     y = std::round(y);
 
-    // Hysteresis: only update the displayed value when the new reading differs
-    // by more than kHysteresisPercent from the last displayed value.  This
-    // prevents voltage noise causing the indicator to flicker between adjacent
-    // percentages when switching screens.
     const int new_pct = static_cast<int>(y);
     if (!last_pct_.has_value() || std::abs(new_pct - static_cast<int>(last_pct_.value())) >= kHysteresisPercent) {
       last_pct_ = static_cast<uint8_t>(new_pct);
     }
     return last_pct_;
+#endif
   }
 
   void yield() override {
@@ -95,8 +121,8 @@ class Esp32Runtime final : public microreader::IRuntime {
   }
 
  private:
+#ifndef DEVICE_X3
   void init_battery_adc() {
-    // Configuration for ESP32-C3 ADC1 Channel 0 (GPIO0)
     adc_oneshot_chan_cfg_t config = {
         .atten = ADC_ATTEN_DB_12,
         .bitwidth = ADC_BITWIDTH_DEFAULT,
@@ -115,9 +141,10 @@ class Esp32Runtime final : public microreader::IRuntime {
       adc_cali_handle_ = nullptr;
     }
   }
+#endif
 
   static uint32_t millis() {
-    return (uint32_t)(esp_timer_get_time() / 1000);
+    return static_cast<uint32_t>(esp_timer_get_time() / 1000);
   }
 
   // Only update the displayed battery percentage when the reading has moved
@@ -126,7 +153,13 @@ class Esp32Runtime final : public microreader::IRuntime {
 
   uint32_t frame_time_ms_;
   uint32_t frame_start_ms_;
+  mutable std::optional<uint8_t> last_pct_;
+
+#ifdef DEVICE_X3
+  Bq27220 bq27220_;
+  mutable uint32_t last_bq_read_ms_ = 0;
+#else
   adc_oneshot_unit_handle_t adc1_handle_ = nullptr;
   adc_cali_handle_t adc_cali_handle_ = nullptr;
-  mutable std::optional<uint8_t> last_pct_;
+#endif
 };
