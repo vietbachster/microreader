@@ -68,6 +68,8 @@ DEFAULT_RANGES = [
     "ascii",
     "latin1",
     "latin-ext-a",
+    "latin-ext-b",    # ơ Ơ ư Ư and other Extended-B characters
+    "latin-ext-add",  # Latin Extended Additional (Vietnamese, Welsh, etc.)
     "greek",
     "combining",
     "spacing-mod",
