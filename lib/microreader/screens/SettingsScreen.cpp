@@ -262,16 +262,8 @@ void SettingsScreen::clear_cache_() {
   if (!data_dir_)
     return;
 #ifdef ESP_PLATFORM
-  if (buf_) {
-    buf_->sync_bw_ram();
-    buf_->show_loading("Clearing cache...", 0);
-  }
   char cache_dir[768];
-#ifdef DEVICE_X3
-  std::snprintf(cache_dir, sizeof(cache_dir), "%s/cache/x3", data_dir_);
-#else
   std::snprintf(cache_dir, sizeof(cache_dir), "%s/cache", data_dir_);
-#endif
   DIR* d = opendir(cache_dir);
   if (!d) {
     mkdir(cache_dir, 0775);
@@ -302,17 +294,11 @@ void SettingsScreen::clear_cache_() {
   }
   closedir(d);
   rmdir(cache_dir);
-  mkdir(cache_dir, 0775);
-  if (buf_)
-    buf_->show_loading("Done!", 100);
+  mkdir(cache_dir, 0775); 
 #else
   namespace fs = std::filesystem;
   try {
-#ifdef DEVICE_X3
-    std::string cache_path = std::string(data_dir_) + "/cache/x3";
-#else
     std::string cache_path = std::string(data_dir_) + "/cache";
-#endif
     fs::remove_all(cache_path);
     fs::create_directories(cache_path);
   } catch (...) {}
