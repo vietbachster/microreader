@@ -25,14 +25,20 @@ static constexpr uint8_t kBq27220RegCurrent = 0x0C;  // 16-bit LE, signed mA (>0
 
 class Bq27220 {
  public:
-  // Returns state-of-charge [0–100] or nullopt on I²C error.
+  // Returns state-of-charge [0–100].
+  // On I²C failure: returns the last good reading if one exists, otherwise 100
+  // as a safe pre-boot default (a fully-discharged battery wouldn't have booted
+  // the device, so 100 is safer than 0 for seeding the UI on a transient glitch).
   std::optional<uint8_t> read_soc() const {
     uint16_t val = 0;
-    if (!read_reg16_(kBq27220RegSoc, &val))
-      return std::nullopt;
-    if (val > 100)
-      return std::nullopt;
-    return static_cast<uint8_t>(val);
+    const bool ok = read_reg16_(kBq27220RegSoc, &val);
+    if (!ok || val > 100) {
+      return have_reading_ ? std::optional<uint8_t>(last_good_soc_)
+                           : std::optional<uint8_t>(100);
+    }
+    last_good_soc_ = static_cast<uint8_t>(val);
+    have_reading_ = true;
+    return last_good_soc_;
   }
 
   // Returns true when USB is supplying charge current.
@@ -50,6 +56,9 @@ class Bq27220 {
   }
 
  private:
+  mutable bool have_reading_ = false;
+  mutable uint8_t last_good_soc_ = 0;
+
   // Read a 16-bit little-endian register. Installs and deletes the I²C driver
   // around each call so the pins are released immediately after use.
   bool read_reg16_(uint8_t reg, uint16_t* out) const {
