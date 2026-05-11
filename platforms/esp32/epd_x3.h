@@ -168,23 +168,28 @@ static const uint8_t kX3LutVcomFast[] = {
     0x00,0x00,0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,0x00,0x00,
     0x00,0x00,0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,0x00,0x00,
     0x00,0x00,0x00,0x00,0x00,0x00};
+// W→W and B→B: no drive (all-zero VS) so unchanged pixels in the partial
+// window stay quiet. Without this the entire window "pulses" each refresh
+// because the LUTs were kicking stable pixels with ±V for 48 frames.
 static const uint8_t kX3LutWwFast[] = {
-    0x60,0x18,0x18,0x01,0x00,0x01, 0x00,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,0x00,0x00,
     0x00,0x00,0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,0x00,0x00,
     0x00,0x00,0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,0x00,0x00,
     0x00,0x00,0x00,0x00,0x00,0x00};
+// B→W: pull stable-black pixel to white with one VSH phase.
 static const uint8_t kX3LutBwFast[] = {
     0x20,0x18,0x18,0x01,0x00,0x01, 0x00,0x00,0x00,0x00,0x00,0x00,
     0x00,0x00,0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,0x00,0x00,
     0x00,0x00,0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,0x00,0x00,
     0x00,0x00,0x00,0x00,0x00,0x00};
+// W→B: pull stable-white pixel to black with one VSL phase.
 static const uint8_t kX3LutWbFast[] = {
     0x10,0x18,0x18,0x01,0x00,0x01, 0x00,0x00,0x00,0x00,0x00,0x00,
     0x00,0x00,0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,0x00,0x00,
     0x00,0x00,0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,0x00,0x00,
     0x00,0x00,0x00,0x00,0x00,0x00};
 static const uint8_t kX3LutBbFast[] = {
-    0x90,0x18,0x18,0x01,0x00,0x01, 0x00,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,0x00,0x00,
     0x00,0x00,0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,0x00,0x00,
     0x00,0x00,0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,0x00,0x00,
     0x00,0x00,0x00,0x00,0x00,0x00};
@@ -264,6 +269,7 @@ class EInkDisplay final : public microreader::IDisplay {
   // write_ram_bw: sends `data` to OLD RAM (0x10), Y-mirrored.
   // On X3 this primes the LSB plane for grayscale.
   void write_ram_bw(const uint8_t* data) override {
+    prepareForOp_(/*nextOpIsPartial=*/false);
     sendCommand(X3_CMD_DATA_OLD);
     sendMirroredPlane(data, false);
     lsbValid_ = true;
@@ -274,6 +280,7 @@ class EInkDisplay final : public microreader::IDisplay {
   void write_ram_red(const uint8_t* data) override {
     if (!lsbValid_)
       return;
+    prepareForOp_(/*nextOpIsPartial=*/false);
     sendCommand(X3_CMD_DATA_NEW);
     sendMirroredPlane(data, false);
   }
@@ -283,6 +290,7 @@ class EInkDisplay final : public microreader::IDisplay {
   void grayscale_refresh(bool turnOffScreen = false) override {
     if (!lsbValid_)
       return;
+    prepareForOp_(/*nextOpIsPartial=*/false);
 
     sendLuts5x42(kX3LutVcomGray, kX3LutWwGray, kX3LutBwGray, kX3LutWbGray, kX3LutBbGray);
     loadedLuts_ = X3LutSet::GRAY;
@@ -314,6 +322,7 @@ class EInkDisplay final : public microreader::IDisplay {
   void revert_grayscale(const uint8_t* prev_pixels) override {
     if (!prev_pixels)
       return;
+    prepareForOp_(/*nextOpIsPartial=*/false);
     sendCommand(X3_CMD_DATA_NEW);
     sendMirroredPlane(prev_pixels, false);
     sendCommand(X3_CMD_DATA_OLD);
@@ -327,9 +336,16 @@ class EInkDisplay final : public microreader::IDisplay {
 
   // partial_refresh_region: windowed update using the UC8276 partial window
   // commands and FAST LUTs. Returns immediately (non-blocking); next call
-  // blocks on is_busy() to wait for completion.
+  // drains BUSY in prepareForOp_() before issuing new commands.
+  //
+  // PARTIAL_OUT must NOT be sent before DISPLAY_REFRESH — that would make the
+  // refresh full-screen and cause the entire panel to flash with FAST LUT
+  // every time. We keep partial mode active across the refresh and let the
+  // next op's prologue exit it.
   void partial_refresh_region(int phys_x, int phys_y, int phys_w, int phys_h, const uint8_t* new_buf,
                               int stride_bytes) override {
+    prepareForOp_(/*nextOpIsPartial=*/true);
+
     // Coordinates in controller space (Y-mirrored from physical).
     const uint16_t x_start = static_cast<uint16_t>(phys_x);
     const uint16_t x_end = static_cast<uint16_t>(phys_x + phys_w - 1);
@@ -354,7 +370,10 @@ class EInkDisplay final : public microreader::IDisplay {
     sendCommand(X3_CMD_VCOM_INTERVAL);
     sendData(vcomArg, 2);
 
-    sendCommand(X3_CMD_PARTIAL_IN);
+    if (!inPartialMode_) {
+      sendCommand(X3_CMD_PARTIAL_IN);
+      inPartialMode_ = true;
+    }
     sendCommand(X3_CMD_PARTIAL_WINDOW);
     sendData(win, 9);
 
@@ -369,14 +388,14 @@ class EInkDisplay final : public microreader::IDisplay {
     }
     gpio_set_level(EPD_CS, 1);
 
-    sendCommand(X3_CMD_PARTIAL_OUT);
-
     powerOnIfNeeded();
     sendCommand(X3_CMD_DISPLAY_REFRESH);
-    // Non-blocking: caller checks is_busy() before next update.
+    // Non-blocking. Partial mode stays active until the next non-partial op
+    // calls prepareForOp_(false), which drains BUSY then sends PARTIAL_OUT.
   }
 
   void deep_sleep() override {
+    prepareForOp_(/*nextOpIsPartial=*/false);
     if (isScreenOn_) {
       sendCommand(X3_CMD_POWER_OFF);
       waitForRefresh("deep_sleep_poweroff");
@@ -405,8 +424,19 @@ class EInkDisplay final : public microreader::IDisplay {
   bool isScreenOn_ = false;
   bool redRamSynced_ = false;
   bool lsbValid_ = false;
-  //bool inGrayscaleMode_ = false;
-  uint8_t initialFullSyncsRemaining_ = 2;
+  // True after a partial-window refresh was issued; PARTIAL_OUT is deferred
+  // to the next op's prologue so the in-flight refresh stays partial.
+  bool inPartialMode_ = false;
+  // Number of forced full-sync passes after a hardware reset (e.g. wake from
+  // deep sleep). Must be 1: the first user-visible render then runs an IMG
+  // sync (3-phase, ~908ms — already a thorough cleanup) plus the FULL-LUT
+  // settle pass (triggered when remaining == 1), and the next user action
+  // (e.g. cursor move) goes through the fast path with no black flash.
+  //
+  // Setting this to 2 deferred the second bootstrap sync to the user's first
+  // input, producing a visible IMG-LUT flash on the first cursor move after
+  // wake — see git history for the symptom.
+  uint8_t initialFullSyncsRemaining_ = 1;
   bool forceFullSyncNext_ = false;
   uint8_t forcedConditionPassesNext_ = 0;
   X3LutSet loadedLuts_ = X3LutSet::NONE;
@@ -497,6 +527,29 @@ class EInkDisplay final : public microreader::IDisplay {
 
     if (comment) {
       ESP_LOGI("epd_x3", "waitForRefresh(%s): %lu ms", comment, millis() - t0);
+    }
+  }
+
+  // Single-phase wait: returns immediately if not busy, else blocks until the
+  // controller releases BUSY. Used at the start of each op to drain any
+  // refresh issued non-blocking by a previous call (e.g. partial_refresh_region).
+  void waitWhileBusy_() {
+    const uint32_t t0 = millis();
+    while (gpio_get_level(EPD_BUSY) == 0) {  // BUSY active-low on UC8276
+      vTaskDelay(pdMS_TO_TICKS(1));
+      if (millis() - t0 > 30000)
+        break;
+    }
+  }
+
+  // Prologue for any controller op. Drains the previous (possibly async)
+  // refresh, then exits partial-window mode if the previous op left it
+  // active and the next op needs full-screen mode.
+  void prepareForOp_(bool nextOpIsPartial) {
+    waitWhileBusy_();
+    if (inPartialMode_ && !nextOpIsPartial) {
+      sendCommand(X3_CMD_PARTIAL_OUT);
+      inPartialMode_ = false;
     }
   }
 
@@ -615,6 +668,13 @@ class EInkDisplay final : public microreader::IDisplay {
   // Decision also forced to full-sync when RAMs are not yet synced or we're
   // still in the initial 2-sync bootstrap.
   void displayBuffer(const uint8_t* frameBuffer, bool fastMode, bool turnOffScreen) {
+    // Drain any in-flight async refresh (e.g. show_loading) and exit partial
+    // mode if it's still active. Without this, sending LUTs/data while the
+    // panel is BUSY produces dropped commands and visible stalls — most
+    // visibly when a full page render fires right after the last loading-box
+    // refresh during EPUB conversion.
+    prepareForOp_(/*nextOpIsPartial=*/false);
+
     lsbValid_ = false;
 
     const bool forcedFullSync = forceFullSyncNext_;
