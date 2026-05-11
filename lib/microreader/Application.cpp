@@ -88,31 +88,13 @@ void Application::update(const ButtonState& buttons, uint32_t dt_ms, DrawBuffer&
   uptime_ms_ += dt_ms;
   buttons_ = buttons;
 
-  if (buttons_.is_pressed(Button::Power)) {
-    // Stop the active screen so it can save state (e.g. reading position).
-    if (IScreen* top = screen_mgr_.top())
-      top->stop();
+  if (buttons_.current != 0 || buttons_.pressed_latch != 0)
+    idle_ms_ = 0;
+  else
+    idle_ms_ += dt_ms;
 
-    // Save all persistent settings
-    save_settings_();
-
-    // Reset rotation before drawing the sleeping screen
-    buf.set_rotation(Rotation::Deg90);
-
-    // draw sleeping screen before powering down
-    buf.draw_image(bebop_image, 0, 0, BEBOP_IMAGE_WIDTH, BEBOP_IMAGE_HEIGHT);
-
-    // add sleeping... text below the image
-    const char* sleep_text = "sleeping...";
-    buf.draw_text_centered(DrawBuffer::kWidth / 2, DrawBuffer::kHeight - 24, sleep_text, true);
-
-    buf.full_refresh(RefreshMode::Full, false);
-
-    // Grayscale pass using the pre-built LSB/MSB planes of the bebop image,
-    // then power off the display.
-    buf.show_grayscale_image(bebop_image_lsb, bebop_image_msb, BEBOP_IMAGE_WIDTH, BEBOP_IMAGE_HEIGHT);
-
-    running_ = false;
+  if (buttons_.is_pressed(Button::Power) || idle_ms_ >= kAutoSleepTimeoutMs) {
+    do_sleep_(buf);
     return;
   }
 
@@ -276,6 +258,24 @@ void microreader::Application::load_settings_() {
   // Store the book to auto-open; actual push happens in start() after buf is ready.
   if (last_screen == "reader" && !last_book_path.empty())
     pending_book_path_ = last_book_path;
+}
+
+void Application::do_sleep_(DrawBuffer& buf) {
+  if (IScreen* top = screen_mgr_.top())
+    top->stop();
+
+  save_settings_();
+
+  buf.set_rotation(Rotation::Deg90);
+  buf.draw_image(bebop_image, 0, 0, BEBOP_IMAGE_WIDTH, BEBOP_IMAGE_HEIGHT);
+
+  const char* sleep_text = "sleeping...";
+  buf.draw_text_centered(DrawBuffer::kWidth / 2, DrawBuffer::kHeight - 24, sleep_text, true);
+
+  buf.full_refresh(RefreshMode::Full, false);
+  buf.show_grayscale_image(bebop_image_lsb, bebop_image_msb, BEBOP_IMAGE_WIDTH, BEBOP_IMAGE_HEIGHT);
+
+  running_ = false;
 }
 
 bool Application::running() const {

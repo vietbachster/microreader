@@ -161,6 +161,9 @@ class Application {
   bool started_ = false;
   bool running_ = true;
 
+  static constexpr uint32_t kAutoSleepTimeoutMs = 5 * 60 * 1000;
+  uint32_t idle_ms_ = 0;
+
   bool invert_menu_buttons_ = false;
   bool invert_bottom_paging_ = false;
   bool invert_side_buttons_ = false;
@@ -181,6 +184,7 @@ class Application {
   FontManager* font_manager_ = nullptr;
   std::function<void()> invalidate_font_fn_;
   IScreen* screen_for_(ScreenId id);
+  void do_sleep_(DrawBuffer& buf);
 };
 
 }  // namespace microreader
