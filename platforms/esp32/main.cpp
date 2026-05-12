@@ -221,6 +221,11 @@ extern "C" void app_main(void) {
           buf.reset_after_scratch();
           break;
         }
+        case SerialCmdType::InvalidateFont: {
+          app.set_installed_font_path("");
+          app.invalidate_font();
+          break;
+        }
         default:
           break;
       }

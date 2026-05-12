@@ -41,3 +41,5 @@ test/bench_results.json
 .venv/
 /sd/books
 /sd/.microreader
+/resources/fonts/alegreya
+/resources/fonts/bookerly

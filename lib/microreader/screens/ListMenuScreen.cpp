@@ -214,14 +214,14 @@ void ListMenuScreen::draw_all_(DrawBuffer& buf, std::optional<uint8_t> battery_p
         // Full width bar for left-aligned
         const int bar_x = 16;
         const int bar_width = W - 32 - landscape_pad;
-        buf.fill_rect(bar_x + 1, iy, bar_width - 2, bar_h, false);          // Body
-        buf.fill_rect(bar_x, iy + 1, 1, bar_h - 2, false);                  // Left cap
-        buf.fill_rect(bar_x + bar_width - 1, iy + 1, 1, bar_h - 2, false);  // Right cap
+        buf.fill_rect(bar_x + 1, iy - 1, bar_width - 2, bar_h, false);  // Body
+        buf.fill_rect(bar_x, iy, 1, bar_h - 2, false);                  // Left cap
+        buf.fill_rect(bar_x + bar_width - 1, iy, 1, bar_h - 2, false);  // Right cap
         buf.draw_text_proportional(ix, iy + baseline, label, len, ui_font_, true);
       } else {
-        buf.fill_rect(ix - bar_w, iy, iw + bar_w * 2, bar_h, false);
-        buf.fill_rect(ix - bar_w - 1, iy + 1, 1, bar_h - 2, false);
-        buf.fill_rect(ix + iw + bar_w, iy + 1, 1, bar_h - 2, false);
+        buf.fill_rect(ix - bar_w, iy - 1, iw + bar_w * 2, bar_h, false);
+        buf.fill_rect(ix - bar_w - 1, iy, 1, bar_h - 2, false);
+        buf.fill_rect(ix + iw + bar_w, iy, 1, bar_h - 2, false);
         buf.draw_text_proportional(ix, iy + baseline, label, len, ui_font_, true);
       }
     } else {
@@ -234,8 +234,8 @@ void ListMenuScreen::draw_all_(DrawBuffer& buf, std::optional<uint8_t> battery_p
   if (n > visible) {
     const int sb_w = 4;
     const int sb_x = (buf.rotation() == Rotation::Deg0) ? 8 : W - 12;
-    const int sb_top = items_y;
-    const int sb_bottom = items_y + total_h - line_h + ui_font_.y_advance() + 1;
+    const int sb_top = items_y - 1;
+    const int sb_bottom = items_y + total_h - line_h + ui_font_.y_advance();
     const int sb_total_h = sb_bottom - sb_top;
     const int thumb_h = sb_total_h * visible / n < 6 ? 6 : sb_total_h * visible / n;
     const int track = sb_total_h - thumb_h;
@@ -284,7 +284,7 @@ void ListMenuScreen::draw_button_hints_(DrawBuffer& buf) const {
       const int text_y = btns[mapped_i] - ui_font_.y_advance() / 2 + baseline;
       buf.draw_text_proportional(text_x, text_y, kLabels[i], kLens[i], ui_font_, false);
     } else {
-      const int text_y = H - kButtonHintsH / 2 - ui_font_.y_advance() / 2 + baseline + 3;
+      const int text_y = H - kButtonHintsH / 2 - ui_font_.y_advance() / 2 + baseline + 5;
       buf.draw_text_proportional(btns[i] - lw / 2, text_y, kLabels[i], kLens[i], ui_font_, false);
     }
   }

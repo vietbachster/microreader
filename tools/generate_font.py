@@ -13,7 +13,6 @@ import math
 import os
 import struct
 import sys
-import urllib.request
 
 try:
     import fontTools.ttLib
@@ -85,30 +84,44 @@ DEFAULT_RANGES = [
 # ---------------------------------------------------------------------------
 
 
-def render_glyph(face, codepoint, size):
+def render_glyph(face, codepoint, size, use_hinted_advance=False, fallback_face=None):
     """Render a single glyph. Returns dict with metrics + BW/LSB/MSB bitmap bytes."""
     glyph_index = face.get_char_index(codepoint)
+    active_face = face
+
+    if glyph_index == 0:
+        if fallback_face is not None:
+            fallback_index = fallback_face.get_char_index(codepoint)
+            if fallback_index != 0:
+                glyph_index = fallback_index
+                active_face = fallback_face
+                active_face.set_pixel_sizes(0, size)
+
     if glyph_index == 0:
         return None  # glyph not in font
 
-    # First, get the unhinted advance so we base our layout on true proportions
-    face.load_glyph(glyph_index, freetype.FT_LOAD_NO_HINTING | freetype.FT_LOAD_NO_BITMAP)
-    unhinted_advance = face.glyph.advance.x
-    x_advance = int(round(unhinted_advance * 4.0 / 64.0))  # Scale by 4 for quarter-pixel precision
+    if use_hinted_advance:
+        active_face.load_glyph(glyph_index, freetype.FT_LOAD_DEFAULT)
+        adv = active_face.glyph.advance.x
+    else:
+        # First, get the unhinted advance so we base our layout on true proportions
+        active_face.load_glyph(glyph_index, freetype.FT_LOAD_NO_HINTING | freetype.FT_LOAD_NO_BITMAP)
+        adv = active_face.glyph.advance.x
+
+    x_advance = int(round(adv * 4.0 / 64.0))  # Scale by 4 for quarter-pixel precision
 
     # Then render the actual bitmap with hinting so it aligns nicely on the pixels
-    face.load_glyph(glyph_index, freetype.FT_LOAD_RENDER)
+    active_face.load_glyph(glyph_index, freetype.FT_LOAD_RENDER)
 
-    bitmap = face.glyph.bitmap
+    bitmap = active_face.glyph.bitmap
     width = bitmap.width
     height = bitmap.rows
-    x_offset = face.glyph.bitmap_left
+    x_offset = active_face.glyph.bitmap_left
     y_offset = (
-        -face.glyph.bitmap_top
+        -active_face.glyph.bitmap_top
     )  # bitmap_top = pixels above baseline (positive), negate for MBF convention
 
     if width == 0 or height == 0:
-        # Space-like glyph: no bitmap
         return {
             "codepoint": codepoint,
             "bitmap_width": 0,
@@ -297,7 +310,7 @@ def extract_kerning_fonttools(ttfont, scale):
     return result
 
 
-def render_style_glyphs(face_info, size, codepoint_ranges):
+def render_style_glyphs(face_info, size, codepoint_ranges, use_hinted_advance=False, fallback_face=None):
     """Render glyphs for one style. Returns (ranges, all_glyphs, bw_bitmaps, lsb_bitmaps, msb_bitmaps, max_glyph_height, kerning_pairs).
 
     ranges: list of (first_cp, count, glyph_table_start)
@@ -311,6 +324,8 @@ def render_style_glyphs(face_info, size, codepoint_ranges):
     ttfont = face_info["ttfont"]
     
     face.set_pixel_sizes(0, size)
+    if fallback_face:
+        fallback_face.set_pixel_sizes(0, size)
 
     ranges = []
     all_glyphs = []
@@ -325,7 +340,7 @@ def render_style_glyphs(face_info, size, codepoint_ranges):
         has_any = False
 
         for cp in range(range_start, range_end + 1):
-            g = render_glyph(face, cp, size)
+            g = render_glyph(face, cp, size, use_hinted_advance, fallback_face)
             if g is None:
                 all_glyphs.append(
                     {
@@ -472,10 +487,10 @@ def _encode_ranges_and_glyphs(ranges, all_glyphs, bitmap_base_offset):
     return buf
 
 
-def build_mbf(face_info, size, codepoint_ranges, bw_only=False):
+def build_mbf(face_info, size, codepoint_ranges, bw_only=False, fallback_face=None):
     """Build single-style MBF binary. Returns (bytes, stats_dict)."""
     ranges, all_glyphs, bw_bitmaps, lsb_bitmaps, msb_bitmaps, max_glyph_height, kerning_bytes = (
-        render_style_glyphs(face_info, size, codepoint_ranges)
+        render_style_glyphs(face_info, size, codepoint_ranges, use_hinted_advance=bw_only, fallback_face=fallback_face)
     )
 
     if bw_only:
@@ -549,7 +564,7 @@ def build_mbf(face_info, size, codepoint_ranges, bw_only=False):
     return bytes(buf), stats
 
 
-def build_multi_style_mbf(faces, size, codepoint_ranges, bw_only=False):
+def build_multi_style_mbf(faces, size, codepoint_ranges, bw_only=False, fallback_face=None):
     """Build multi-style MBF from dict of {FontStyle: face_info}.
 
     faces keys: 'regular' (required), 'bold', 'italic', 'bold_italic' (optional).
@@ -558,7 +573,7 @@ def build_multi_style_mbf(faces, size, codepoint_ranges, bw_only=False):
     # Render all styles — now returns 6-tuples with 3 bitmap sections
     style_data = {}
     for style_name, face_info in faces.items():
-        style_data[style_name] = render_style_glyphs(face_info, size, codepoint_ranges)
+        style_data[style_name] = render_style_glyphs(face_info, size, codepoint_ranges, use_hinted_advance=bw_only, fallback_face=fallback_face)
 
     if bw_only:
         # Strip grayscale planes from all styles
@@ -714,49 +729,6 @@ def build_multi_style_mbf(faces, size, codepoint_ranges, bw_only=False):
     }
     return bytes(buf), stats
 
-
-# ---------------------------------------------------------------------------
-# Noto Serif downloader
-# ---------------------------------------------------------------------------
-
-NOTO_SERIF_URL = (
-    "https://github.com/notofonts/notofonts.github.io/raw/main/"
-    "fonts/NotoSerif/hinted/ttf/NotoSerif-Regular.ttf"
-)
-
-NOTO_SERIF_BOLD_URL = (
-    "https://github.com/notofonts/notofonts.github.io/raw/main/"
-    "fonts/NotoSerif/hinted/ttf/NotoSerif-Bold.ttf"
-)
-
-NOTO_SERIF_ITALIC_URL = (
-    "https://github.com/notofonts/notofonts.github.io/raw/main/"
-    "fonts/NotoSerif/hinted/ttf/NotoSerif-Italic.ttf"
-)
-
-NOTO_SERIF_BOLD_ITALIC_URL = (
-    "https://github.com/notofonts/notofonts.github.io/raw/main/"
-    "fonts/NotoSerif/hinted/ttf/NotoSerif-BoldItalic.ttf"
-)
-
-NOTO_SERIF_CJK_URL = (
-    "https://github.com/notofonts/noto-cjk/raw/main/"
-    "Serif/SubsetOTF/SC/NotoSerifSC-Regular.otf"
-)
-
-
-def ensure_font(font_path, url, name):
-    """Download font if not present."""
-    if os.path.isfile(font_path):
-        return font_path
-    print(f"Downloading {name}...")
-    os.makedirs(os.path.dirname(font_path) or ".", exist_ok=True)
-    urllib.request.urlretrieve(url, font_path)
-    size_kb = os.path.getsize(font_path) / 1024
-    print(f"  Saved: {font_path} ({size_kb:.0f} KB)")
-    return font_path
-
-
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -807,23 +779,23 @@ def main():
         ),
     )
     p.add_argument("--header", help="Also output C++ header with embedded font data")
-    p.add_argument(
-        "--noto-serif",
-        action="store_true",
-        help="Download and use Noto Serif Regular (if no font specified)",
-    )
     p.add_argument("--bold", help="Path to Bold TTF/OTF font file")
     p.add_argument("--italic", help="Path to Italic TTF/OTF font file")
     p.add_argument("--bold-italic", help="Path to BoldItalic TTF/OTF font file")
     p.add_argument(
+        "--fallback",
+        default="resources/fonts/bookerly/Bookerly.ttf",
+        help="Fallback TTF font file to use for missing glyphs (e.g. U+FFFD). Default: resources/fonts/bookerly/Bookerly.ttf",
+    )
+    p.add_argument(
         "--with-styles",
         action="store_true",
-        help="Auto-download and include Bold, Italic, BoldItalic Noto Serif variants",
+        help="Enable multi-style generation (bold, italic, bold-italic) using explicit files.",
     )
     p.add_argument(
         "--bundle",
         action="store_true",
-        help="Generate 5-size .mbf files + combined FNTS bundle (.mfb)",
+        help="Generate combined FNTS bundle (.mfb)",
     )
     p.add_argument(
         "--bundle-sizes",
@@ -832,6 +804,11 @@ def main():
         default=[20, 24, 28, 32],
         help="Font sizes for --bundle mode (default: 20 24 28 32). "
         "The second value is 'Normal' (default body text).",
+    )
+    p.add_argument(
+        "--keep-mbf",
+        action="store_true",
+        help="In bundle mode, also output the individual per-size .mbf files",
     )
     p.add_argument(
         "--bw-only",
@@ -852,8 +829,8 @@ def main():
     if args.font:
         font_path = args.font
     else:
-        font_path = os.path.join(fonts_cache, "NotoSerif-Regular.ttf")
-        ensure_font(font_path, NOTO_SERIF_URL, "Noto Serif Regular")
+        print("ERROR: No font specified.")
+        sys.exit(1)
 
     if not os.path.isfile(font_path):
         print(f"ERROR: font file not found: {font_path}")
@@ -863,19 +840,6 @@ def main():
     bold_path = args.bold
     italic_path = args.italic
     bold_italic_path = args.bold_italic
-
-    if args.with_styles:
-        if not bold_path:
-            bold_path = os.path.join(fonts_cache, "NotoSerif-Bold.ttf")
-            ensure_font(bold_path, NOTO_SERIF_BOLD_URL, "Noto Serif Bold")
-        if not italic_path:
-            italic_path = os.path.join(fonts_cache, "NotoSerif-Italic.ttf")
-            ensure_font(italic_path, NOTO_SERIF_ITALIC_URL, "Noto Serif Italic")
-        if not bold_italic_path:
-            bold_italic_path = os.path.join(fonts_cache, "NotoSerif-BoldItalic.ttf")
-            ensure_font(
-                bold_italic_path, NOTO_SERIF_BOLD_ITALIC_URL, "Noto Serif BoldItalic"
-            )
 
     # Parse ranges
     codepoint_ranges = parse_ranges(args.ranges)
@@ -899,24 +863,28 @@ def main():
             faces["bold_italic"] = {"face": freetype.Face(bold_italic_path), "ttfont": fontTools.ttLib.TTFont(bold_italic_path)}
             print(f"BoldItalic: {os.path.basename(bold_italic_path)}")
 
+        fallback_face = freetype.Face(args.fallback) if args.fallback else None
+
         if args.bundle:
-            _generate_bundle(faces, args, codepoint_ranges, multi_style=True)
+            _generate_bundle(faces, args, codepoint_ranges, multi_style=True, fallback_face=fallback_face)
             return
 
         mbf_data, stats = build_multi_style_mbf(
-            faces, args.size, codepoint_ranges, bw_only=args.bw_only
+            faces, args.size, codepoint_ranges, bw_only=args.bw_only, fallback_face=fallback_face
         )
     else:
         face_info = {"face": freetype.Face(font_path), "ttfont": fontTools.ttLib.TTFont(font_path)}
 
+        fallback_face = freetype.Face(args.fallback) if args.fallback else None
+
         if args.bundle:
             _generate_bundle(
-                {"regular": face_info}, args, codepoint_ranges, multi_style=False
+                {"regular": face_info}, args, codepoint_ranges, multi_style=False, fallback_face=fallback_face
             )
             return
 
         mbf_data, stats = build_mbf(
-            face_info, args.size, codepoint_ranges, bw_only=args.bw_only
+            face_info, args.size, codepoint_ranges, bw_only=args.bw_only, fallback_face=fallback_face
         )
 
     # Write output
@@ -952,7 +920,7 @@ def main():
             max_h = 0
             for ch in sample_chars:
                 cp = ord(ch)
-                g = render_glyph(face, cp, args.size)
+                g = render_glyph(face, cp, args.size, use_hinted_advance=args.bw_only)
                 if g is None or g["bitmap_width"] == 0 or g["bitmap_height"] == 0:
                     glyph_imgs.append(None)
                     glyph_sizes.append((0, 0))
@@ -992,7 +960,7 @@ def main():
         print(f"  Header:   {args.header}")
 
 
-def _generate_bundle(faces, args, codepoint_ranges, multi_style):
+def _generate_bundle(faces, args, codepoint_ranges, multi_style, fallback_face=None):
     """Generate Small/Normal/Large .mbf files and a combined FNTS .mfb bundle."""
     out_dir = os.path.dirname(os.path.abspath(args.output)) or "."
     os.makedirs(out_dir, exist_ok=True)
@@ -1008,28 +976,30 @@ def _generate_bundle(faces, args, codepoint_ranges, multi_style):
         print(f"{'='*40}")
         if multi_style:
             data, stats = build_multi_style_mbf(
-                faces, px_size, codepoint_ranges, bw_only=args.bw_only
+                faces, px_size, codepoint_ranges, bw_only=args.bw_only, fallback_face=fallback_face
             )
             face = faces["regular"]["face"]
         else:
             face_info = faces["regular"]
             face = face_info["face"]
             data, stats = build_mbf(
-                face_info, px_size, codepoint_ranges, bw_only=args.bw_only
+                face_info, px_size, codepoint_ranges, bw_only=args.bw_only, fallback_face=fallback_face
             )
 
         out_path = os.path.join(out_dir, f"font-{idx}.mbf")
-        with open(out_path, "wb") as f:
-            f.write(data)
+        if args.keep_mbf:
+            with open(out_path, "wb") as f:
+                f.write(data)
 
         kb = len(data) / 1024
         print(f"  Glyphs:   {stats['rendered_glyphs']} rendered")
         print(f"  Height:   {stats['glyph_height']}px, baseline={stats['baseline']}px")
-        print(f"  File:     {out_path} ({kb:.1f} KB)")
+        if args.keep_mbf:
+            print(f"  File:     {out_path} ({kb:.1f} KB)")
         mbf_files.append((label, px_size, data, stats))
 
         # Write a single PNG with all A-Z, a-z, 0-9, ä, Ä for this size, no labels
-        if Image is not None:
+        if Image is not None and args.keep_mbf:
             try:
                 # Build sample character list: A-Z, a-z, 0-9, ä, Ä
                 sample_chars = [chr(c) for c in range(ord("A"), ord("Z") + 1)]
@@ -1046,7 +1016,7 @@ def _generate_bundle(faces, args, codepoint_ranges, multi_style):
                 max_h = 0
                 for ch in sample_chars:
                     cp = ord(ch)
-                    g = render_glyph(face, cp, px_size)
+                    g = render_glyph(face, cp, px_size, use_hinted_advance=args.bw_only)
                     if g is None or g["bitmap_width"] == 0 or g["bitmap_height"] == 0:
                         glyph_imgs.append(None)
                         glyph_sizes.append((0, 0))
@@ -1162,7 +1132,10 @@ def _generate_bundle(faces, args, codepoint_ranges, multi_style):
     for _, _, data, _ in mbf_files:
         bundle.extend(data)
 
-    bundle_path = os.path.join(out_dir, "font-bundle.mfb")
+    bundle_path = args.output
+    if not bundle_path.endswith(".mfb"):
+        bundle_path = os.path.splitext(bundle_path)[0] + ".mfb"
+
     with open(bundle_path, "wb") as f:
         f.write(bundle)
 
@@ -1172,7 +1145,7 @@ def _generate_bundle(faces, args, codepoint_ranges, multi_style):
     # number of flash blocks without over-estimating.
     import zlib as _zlib
     compressed = _zlib.compress(bytes(bundle), level=9)
-    bin_path = os.path.join(out_dir, "font_bundle.bin")
+    bin_path = os.path.splitext(bundle_path)[0] + ".bin"
     with open(bin_path, "wb") as f:
         f.write(struct.pack("<I", len(bundle)))  # uncompressed size prefix
         f.write(compressed)

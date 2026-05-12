@@ -33,11 +33,10 @@ class FontManager : public microreader::FontManager {
                      (unsigned)prop_fonts_[i].glyph_height(), (unsigned)prop_fonts_[i].baseline());
           }
         }
-        if (!FontPartition::needs_provisioning(bundle_data_, bundle_size_)) {
-          app_.set_reader_font(font_set());
-        } else {
-          ESP_LOGI("font", "font needs provisioning â€” will install before app start");
-        }
+        app_.set_reader_font(font_set());
+          if (FontPartition::needs_provisioning(bundle_data_, bundle_size_)) {
+            ESP_LOGI("font", "font needs provisioning — will install before app start");
+          }
       } else {
         ESP_LOGW("font", "no valid Normal font found");
       }
@@ -145,4 +144,5 @@ class FontManager : public microreader::FontManager {
   const uint8_t* bundle_data_ = nullptr;
   size_t bundle_size_ = 0;
 };
+
 

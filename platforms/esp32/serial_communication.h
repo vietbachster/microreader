@@ -70,7 +70,7 @@ volatile uint8_t g_serial_buttons = 0;
 // Single-slot command queue: only one path command can be pending at a time.
 // The serial receiver task writes path then sets type as the commit signal.
 // The main loop reads type, dispatches, then clears to None.
-enum class SerialCmdType : uint8_t { None = 0, Open, Bench, ImgBench, ImgDecode, FlashBench };
+enum class SerialCmdType : uint8_t { None = 0, Open, Bench, ImgBench, ImgDecode, FlashBench, InvalidateFont };
 static char g_cmd_path[256];
 static volatile SerialCmdType g_cmd_type = SerialCmdType::None;
 
@@ -599,34 +599,8 @@ static void handle_serial_cmd() {
       break;
     }
     case 'F': {
-      // Invalidate the font partition by zeroing the CRC field in the header.
-      // The next book open will detect needs_provisioning() == true and re-copy
-      // the embedded font bundle — useful for testing the provisioning flow.
-      const esp_partition_t* part =
-          esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_SPIFFS, "spiffs");
-      if (!part) {
-        serial_write("ERR:no_font_part\n");
-        break;
-      }
-      // Read the existing 12-byte header, zero bytes 8-11 (CRC), write back.
-      uint8_t hdr[12];
-      if (esp_partition_read(part, 0, hdr, 12) != ESP_OK) {
-        serial_write("ERR:read_hdr\n");
-        break;
-      }
-      hdr[8] = hdr[9] = hdr[10] = hdr[11] = 0;
-      // Must erase the first sector before writing (flash can only clear bits).
-      if (esp_partition_erase_range(part, 0, 4096) != ESP_OK) {
-        serial_write("ERR:erase_hdr\n");
-        break;
-      }
-      // Re-write the first 12 bytes with CRC zeroed; rest of sector is 0xFF.
-      if (esp_partition_write(part, 0, hdr, 12) != ESP_OK) {
-        serial_write("ERR:write_hdr\n");
-        break;
-      }
+      g_cmd_type = SerialCmdType::InvalidateFont;
       serial_write("FONT_INVALIDATED\n");
-      ESP_LOGI(kCmdTag, "font partition CRC zeroed — will re-provision on next book open");
       break;
     }
     default:

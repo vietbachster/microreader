@@ -19,6 +19,33 @@ class FontManager {
     font_set_.add(&prop_fonts_[idx]);
   }
 
+  // Load a combined FNTS bundle. The data pointer must outlive this object.
+  bool load_bundle(const uint8_t* d, size_t sz) {
+    if (sz < 40 || d[0] != 'F' || d[1] != 'N' || d[2] != 'T' || d[3] != 'S' || d[5] < 1) {
+      return false;
+    }
+
+    uint8_t num = d[4];
+    if (num > kMaxFontSizes)
+      num = kMaxFontSizes;
+
+    constexpr size_t kSizeTableOff = 8 + 32;
+    uint32_t sizes[kMaxFontSizes] = {};
+    for (int i = 0; i < num; i++) {
+      const uint8_t* p = d + kSizeTableOff + i * 4;
+      sizes[i] = p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24);
+    }
+
+    size_t off = kSizeTableOff + static_cast<size_t>(num) * 4;
+    for (int i = 0; i < num; i++) {
+      if (off + sizes[i] > sz)
+        break;
+      load_font(d + off, sizes[i]);
+      off += sizes[i];
+    }
+    return true;
+  }
+
   // Return the font set (use with app.set_reader_font()).
   BitmapFontSet* font_set() {
     return font_set_.valid() ? &font_set_ : nullptr;

@@ -92,7 +92,7 @@ void SettingsScreen::on_start() {
 #else
   namespace fs = std::filesystem;
   try {
-    for (const auto& entry : fs::directory_iterator("fonts")) {
+    for (const auto& entry : fs::directory_iterator("resources/fonts")) {
       std::string ext = entry.path().extension().string();
       if (ext == ".mfb") {
         sd_fonts_.push_back(entry.path().string());
@@ -261,8 +261,10 @@ void SettingsScreen::on_select(int index) {
     esp_restart();
   }
   if (index == idx_invalidate_font_) {
-    if (app_)
+    if (app_) {
+      app_->set_installed_font_path("");
       app_->invalidate_font();
+    }
     return;  // stay on settings screen
   }
   if (index == idx_spiffs_) {

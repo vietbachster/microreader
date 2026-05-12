@@ -31,6 +31,55 @@ static std::vector<uint8_t> load_file(const char* path) {
   return data;
 }
 
+class DesktopFontManager : public microreader::FontManager {
+ public:
+  explicit DesktopFontManager(microreader::Application& app) : app_(app) {}
+
+  void ensure_ready(microreader::DrawBuffer&) override {
+    const std::string& custom_font = app_.custom_font_path();
+
+    if (custom_font == currently_loaded_path_ && font_set_.valid())
+      return;  // already loaded
+
+    std::string path = custom_font;
+    if (path.empty()) {
+      path = std::filesystem::absolute("resources/fonts").string() + "/bookerly.mfb";
+    } else {
+      // Allow relative paths inside resources/fonts/ for testing,
+      // or absolute paths if it handles them.
+      if (!std::filesystem::exists(path) && path.find('/') == std::string::npos) {
+        path = std::filesystem::absolute("resources/fonts").string() + "/" + path;
+      }
+    }
+
+    bundle_data_ = load_file(path.c_str());
+    if (!bundle_data_.empty()) {
+      // Clear fonts first
+      for (int i = 0; i < microreader::kMaxFontSizes; i++) {
+        prop_fonts_[i] = microreader::BitmapFont();
+      }
+      font_set_ = microreader::BitmapFontSet();
+      num_fonts_ = 0;
+
+      if (load_bundle(bundle_data_.data(), bundle_data_.size())) {
+        printf("[font] Loaded bundle: %s (%zu bytes)\n", path.c_str(), bundle_data_.size());
+        app_.set_installed_font_path(custom_font);
+        currently_loaded_path_ = custom_font;
+        app_.set_reader_font(font_set());
+      } else {
+        printf("[font] Invalid bundle file: %s\n", path.c_str());
+      }
+    } else {
+      printf("[font] Could not load bundle file: %s\n", path.c_str());
+    }
+  }
+
+ private:
+  microreader::Application& app_;
+  std::vector<uint8_t> bundle_data_;
+  std::string currently_loaded_path_;
+};
+
 int main() {
   try {
     DesktopRuntime runtime(16);
@@ -50,27 +99,12 @@ int main() {
     std::filesystem::create_directories(data_path + "/data");
     app.set_data_dir(data_path.c_str());
 
-    // Load proportional fonts if available.
-    microreader::FontManager font_mgr;
-    std::vector<uint8_t> font_data[microreader::kMaxFontSizes];
-
-    static std::string fonts_dir = std::filesystem::absolute("resources/fonts").string();
-    for (int i = 0; i < microreader::kMaxFontSizes; i++) {
-      std::string path = fonts_dir + "/font-" + std::to_string(i) + ".mbf";
-      font_data[i] = load_file(path.c_str());
-      if (!font_data[i].empty()) {
-        font_mgr.load_font(font_data[i].data(), font_data[i].size());
-        if (font_mgr.valid())
-          printf("[font] Size index %d: %s (%zu bytes)\n", i, path.c_str(), font_data[i].size());
-        else
-          printf("[font] Invalid font file: %s\n", path.c_str());
-      }
-    }
-
-    app.set_reader_font(font_mgr.font_set());
+    DesktopFontManager font_mgr(app);
     app.set_font_manager(&font_mgr);
-    if (!font_mgr.valid())
-      printf("[font] No valid Normal font — using builtin 8x8\n");
+
+    // Provide an initial font so that Application::start() passes the auto-open check.
+    // The correct custom font will be loaded when ReaderScreen::start() is entered.
+    font_mgr.ensure_ready(buf);
 
     app.start(buf, runtime);
     microreader::run_loop(app, buf, input, runtime);
