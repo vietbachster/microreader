@@ -5,7 +5,6 @@
 #include <ctime>
 
 #include "HeapLog.h"
-#include "microreader/resources/bebop_image.h"
 
 #ifdef ESP_PLATFORM
 #include "esp_random.h"
@@ -266,16 +265,46 @@ void Application::do_sleep_(DrawBuffer& buf) {
 
   save_settings_();
 
-  buf.set_rotation(Rotation::Deg90);
-  buf.draw_image(bebop_image, 0, 0, BEBOP_IMAGE_WIDTH, BEBOP_IMAGE_HEIGHT);
-
-  const char* sleep_text = "sleeping...";
-  buf.draw_text_centered(DrawBuffer::kWidth / 2, DrawBuffer::kHeight - 24, sleep_text, true);
+  // Keep whatever screen is currently displayed — no rotation reset, no image clear.
+  // Ensure the draw buffer reflects the current visual frame before overlaying the
+  // bookmark. This is necessary when the draw buffer is stale (e.g. after a
+  // grayscale pass in ReaderScreen where the inactive buffer holds an MSB plane).
+  buf.sync_draw_buf_to_display();
+  draw_sleep_bookmark_(buf);
 
   buf.full_refresh(RefreshMode::Full, false);
-  buf.show_grayscale_image(bebop_image_lsb, bebop_image_msb, BEBOP_IMAGE_WIDTH, BEBOP_IMAGE_HEIGHT);
+  buf.deep_sleep();
 
   running_ = false;
+}
+
+void Application::draw_sleep_bookmark_(DrawBuffer& buf) {
+  constexpr int SQ           = 40;  // square side length (px)
+  constexpr int NOTCH        = 20;  // notch height = right-angle leg length (px)
+  constexpr int RIGHT_MARGIN = 20;  // gap from right screen edge (px)
+
+  // Left edge of bookmark; top edge is flush with the screen top (y = 0).
+  // buf.width() is rotation-aware, so the bookmark always lands in the top-right corner.
+  const int x = buf.width() - SQ - RIGHT_MARGIN;
+
+  // Part 1: filled 40×40 square.
+  buf.fill_rect(x, 0, SQ, SQ, /*white=*/false);
+
+  // Part 2: two right-isosceles triangles (legs = 20 px) below the square.
+  //
+  // Left triangle  — 90° at (x, SQ), tips at (x+20, SQ) and (x, SQ+NOTCH).
+  // Right triangle — 90° at (x+SQ, SQ), tips at (x+20, SQ) and (x+SQ, SQ+NOTCH).
+  //
+  // Their hypotenuses face each other, meeting at (x+20, SQ).
+  // The empty space between them is a Λ-shaped notch, giving the bookmark two downward tips.
+  //
+  // At row i the gap widens by 2 px per step:
+  //   left strip : [x,        x+20-i)
+  //   right strip: [x+20+i,   x+SQ  )
+  for (int i = 0; i < NOTCH; i++) {
+    buf.fill_row(SQ + i, x,          x + 20 - i, /*white=*/false);
+    buf.fill_row(SQ + i, x + 20 + i, x + SQ,     /*white=*/false);
+  }
 }
 
 bool Application::running() const {

@@ -424,6 +424,14 @@ class DrawBuffer {
     display_.deep_sleep();
   }
 
+  // Copy the active (currently-displayed) buffer into the inactive (draw) buffer
+  // so that subsequent draw calls are applied on top of the current visual frame.
+  // Needed when the draw buffer may be stale, e.g. after a grayscale pass where
+  // the two RAMs hold the LSB/MSB planes rather than the BW render.
+  void sync_draw_buf_to_display() {
+    memcpy(inactive_(), active_(), kBufSize);
+  }
+
   // Write the active (currently-displayed) buffer to BW RAM so that BW and RED
   // RAM are in sync before a grayscale pass. No-op if active buffer is stale.
   void sync_bw_ram() {
@@ -505,15 +513,34 @@ class DrawBuffer {
   static constexpr int kLoadStride = (kLoadPhysW + 7) / 8;                                  // 5
   static constexpr int kLoadBufBytes = kLoadStride * kLoadPhysH;                            // 1280
 
-  // Bar geometry.
+  // Bar geometry (portrait).
   static constexpr int kBarW = 160;
   static constexpr int kBarH = 7;
   static constexpr int kBarX = kWidth / 2 - kBarW / 2;
   static constexpr int kBarY = kLoadLogY + kLoadLogH - kBarH - 4;
 
+  // -- Landscape (Deg0) loading-box constants
+  // Physical == logical in Deg0 (no rotation transform).
+  // Box: 256x32 px, centred horizontally, flush to bottom edge.
+#ifdef DEVICE_X3
+  // kPhysicalWidth=792, centre=(792-256)/2=268 → round down to 264 (264%8==0)
+  static constexpr int kLandPhysX = 264;
+#else
+  // kPhysicalWidth=788, centre=(788-256)/2=266 → adjust to 268 ((268+12)%8==0)
+  static constexpr int kLandPhysX = 268;
+#endif
+  static constexpr int kLandPhysY    = DisplayFrame::kPhysicalHeight - kLoadLogH;
+  static constexpr int kLandPhysW    = kLoadLogW;                          // 256
+  static constexpr int kLandPhysH    = kLoadLogH;                          // 32
+  static constexpr int kLandStride   = (kLandPhysW + 7) / 8;              // 32
+  static constexpr int kLandBufBytes = kLandStride * kLandPhysH;           // 1024
+  // Bar centred within the landscape box (absolute physical == logical coords in Deg0).
+  static constexpr int kLandBarX = kLandPhysX + (kLandPhysW - kBarW) / 2;
+  static constexpr int kLandBarY = kLandPhysY + kLandPhysH - kBarH - 4;
+
   // Draw a loading box (label + progress bar) and push it to the display
   // via a region-only hardware update.  The main draw buffers are NEVER
-  // touched - all rendering goes directly into the 1280-byte mini-buffer.
+  // touched - all rendering goes directly into the mini-buffer.
   // Both display buffers may be used as scratch before or after this call.
   //
   //   text         - label shown inside the box (e.g. "Converting...")
@@ -523,14 +550,22 @@ class DrawBuffer {
     // X3: full 792-pixel RAM, no offset — plain byte-alignment suffices.
 #ifdef DEVICE_X3
     static_assert(kLoadPhysX % 8 == 0, "kLoadPhysX must be byte-aligned");
+    static_assert(kLandPhysX % 8 == 0, "kLandPhysX must be byte-aligned");
 #else
     static_assert((kLoadPhysX + 12) % 8 == 0, "kLoadPhysX + panel offset must be byte-aligned");
+    static_assert((kLandPhysX + 12) % 8 == 0, "kLandPhysX + panel offset must be byte-aligned");
 #endif
     if (display_.is_busy())
       return;  // skip if panel is still refreshing
-    uint8_t new_buf[kLoadBufBytes];
-    render_loading_box_(new_buf, text, progress_pct);
-    display_.partial_refresh_region(kLoadPhysX, kLoadPhysY, kLoadPhysW, kLoadPhysH, new_buf, kLoadStride);
+    if (rotation_ == Rotation::Deg90) {
+      uint8_t new_buf[kLoadBufBytes];
+      render_loading_box_(new_buf, text, progress_pct, Rotation::Deg90);
+      display_.partial_refresh_region(kLoadPhysX, kLoadPhysY, kLoadPhysW, kLoadPhysH, new_buf, kLoadStride);
+    } else {
+      uint8_t new_buf[kLandBufBytes];
+      render_loading_box_(new_buf, text, progress_pct, Rotation::Deg0);
+      display_.partial_refresh_region(kLandPhysX, kLandPhysY, kLandPhysW, kLandPhysH, new_buf, kLandStride);
+    }
   }
 
  private:
@@ -684,41 +719,75 @@ class DrawBuffer {
 
   // Render the loading box into a mini-buffer via the unified helpers.
   // Never reads or writes bufs_.
-  static void render_loading_box_(uint8_t* mini, const char* text, int progress_pct) {
-    const RenderTarget t = mini_target_(mini);
-    memset(mini, 0xFF, kLoadBufBytes);  // white fill
-
-    // Helper: fill a logical rect in black.
-    // Deg90: fill_rect_physical_(t, phys_x=ly, phys_y=PhysH-lx-lw, phys_w=lh, phys_h=lw)
-    auto fill = [&](int lx, int ly, int lw, int lh) {
-      fill_rect_physical_(t, ly, DisplayFrame::kPhysicalHeight - lx - lw, lh, lw, /*white=*/false);
-    };
-
-    // Text centred horizontally, near top of loading region.
+  static void render_loading_box_(uint8_t* mini, const char* text, int progress_pct, Rotation rotation) {
     const BitmapFont& font = ui_font_();
-    if (text && *text) {
-      const int tw = static_cast<int>(font.word_width(text, strlen(text), FontStyle::Regular));
-      const int text_lx = kWidth / 2 - tw / 2;
-      const int baseline_ly = kLoadLogY + 3 + static_cast<int>(font.baseline());
-      draw_text_impl_(t, text_lx, baseline_ly, text, strlen(text), font, GrayPlane::BW, /*white=*/false,
-                      FontStyle::Regular);
-    }
+    const int max_fill = kBarW - 4;  // usable bar width inside border
+    const int filled   = (progress_pct * max_fill) / 100;
+    const int max_w    = kBarW - 4;
 
-    // Outline: 160x7, rounded corners (corner pixels stay white).
-    fill(kBarX + 1, kBarY, kBarW - 2, 1);              // top edge
-    fill(kBarX + 1, kBarY + kBarH - 1, kBarW - 2, 1);  // bottom edge
-    fill(kBarX, kBarY + 1, 1, kBarH - 2);              // left edge
-    fill(kBarX + kBarW - 1, kBarY + 1, 1, kBarH - 2);  // right edge
+    if (rotation == Rotation::Deg90) {
+      // Portrait path: Deg90 transform (px=ly, py=PhysH-lx-lw).
+      const RenderTarget t = mini_target_(mini);
+      memset(mini, 0xFF, kLoadBufBytes);
 
-    // Inner bar: 3 rows (kBarH=7 -> border(0), pad(1), bar(2,3,4), pad(5), border(6)).
-    // Sloped right side: bottom row widest, each row above is 1px shorter.
-    const int max_fill = kBarW - 4;  // usable width inside border
-    const int filled = (progress_pct * max_fill) / 100;
-    const int max_w = kBarW - 4;
-    if (filled > 0) {
-      fill(kBarX + 2, kBarY + 4, std::min(filled + 2, max_w), 1);  // bottom row - widest
-      fill(kBarX + 2, kBarY + 3, std::min(filled + 1, max_w), 1);  // middle row
-      fill(kBarX + 2, kBarY + 2, std::min(filled, max_w), 1);      // top row - narrowest
+      // Helper: fill a logical rect → Deg90 physical coords.
+      auto fill = [&](int lx, int ly, int lw, int lh) {
+        fill_rect_physical_(t, ly, DisplayFrame::kPhysicalHeight - lx - lw, lh, lw, /*white=*/false);
+      };
+
+      // Text centred horizontally, near top of loading region.
+      if (text && *text) {
+        const int tw = static_cast<int>(font.word_width(text, strlen(text), FontStyle::Regular));
+        const int text_lx    = kWidth / 2 - tw / 2;
+        const int baseline_ly = kLoadLogY + 3 + static_cast<int>(font.baseline());
+        draw_text_impl_(t, text_lx, baseline_ly, text, strlen(text), font, GrayPlane::BW, /*white=*/false,
+                        FontStyle::Regular);
+      }
+
+      // Outline: 160x7, rounded corners (corner pixels stay white).
+      fill(kBarX + 1, kBarY, kBarW - 2, 1);              // top edge
+      fill(kBarX + 1, kBarY + kBarH - 1, kBarW - 2, 1);  // bottom edge
+      fill(kBarX, kBarY + 1, 1, kBarH - 2);              // left edge
+      fill(kBarX + kBarW - 1, kBarY + 1, 1, kBarH - 2);  // right edge
+
+      // Inner bar: 3 rows (kBarH=7 -> border(0), pad(1), bar(2,3,4), pad(5), border(6)).
+      // Sloped right side: bottom row widest, each row above is 1px shorter.
+      if (filled > 0) {
+        fill(kBarX + 2, kBarY + 4, std::min(filled + 2, max_w), 1);  // bottom row - widest
+        fill(kBarX + 2, kBarY + 3, std::min(filled + 1, max_w), 1);  // middle row
+        fill(kBarX + 2, kBarY + 2, std::min(filled, max_w), 1);      // top row - narrowest
+      }
+    } else {
+      // Landscape path: Deg0 — physical == logical, no rotation transform.
+      const RenderTarget t = {mini, kLandStride, kLandPhysX, kLandPhysY, kLandPhysW, kLandPhysH};
+      memset(mini, 0xFF, kLandBufBytes);
+
+      // Helper: fill using absolute physical (== logical) coords directly.
+      auto fill = [&](int px, int py, int pw, int ph) {
+        fill_rect_physical_(t, px, py, pw, ph, /*white=*/false);
+      };
+
+      // Text centred horizontally, near top of loading region.
+      if (text && *text) {
+        const int tw = static_cast<int>(font.word_width(text, strlen(text), FontStyle::Regular));
+        const int text_lx    = kLandPhysX + (kLandPhysW - tw) / 2;
+        const int baseline_ly = kLandPhysY + 3 + static_cast<int>(font.baseline());
+        draw_text_impl_(t, text_lx, baseline_ly, text, strlen(text), font, GrayPlane::BW, /*white=*/false,
+                        FontStyle::Regular, Rotation::Deg0);
+      }
+
+      // Outline: 160x7, rounded corners (corner pixels stay white).
+      fill(kLandBarX + 1, kLandBarY, kBarW - 2, 1);              // top edge
+      fill(kLandBarX + 1, kLandBarY + kBarH - 1, kBarW - 2, 1);  // bottom edge
+      fill(kLandBarX, kLandBarY + 1, 1, kBarH - 2);              // left edge
+      fill(kLandBarX + kBarW - 1, kLandBarY + 1, 1, kBarH - 2);  // right edge
+
+      // Inner bar (same sloped geometry as portrait).
+      if (filled > 0) {
+        fill(kLandBarX + 2, kLandBarY + 4, std::min(filled + 2, max_w), 1);  // bottom row - widest
+        fill(kLandBarX + 2, kLandBarY + 3, std::min(filled + 1, max_w), 1);  // middle row
+        fill(kLandBarX + 2, kLandBarY + 2, std::min(filled, max_w), 1);      // top row - narrowest
+      }
     }
   }
 };

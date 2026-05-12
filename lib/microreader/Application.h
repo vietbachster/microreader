@@ -185,6 +185,7 @@ class Application {
   std::function<void()> invalidate_font_fn_;
   IScreen* screen_for_(ScreenId id);
   void do_sleep_(DrawBuffer& buf);
+  void draw_sleep_bookmark_(DrawBuffer& buf);
 };
 
 }  // namespace microreader
