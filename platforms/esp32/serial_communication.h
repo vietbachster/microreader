@@ -51,6 +51,8 @@ static constexpr const char* kLutRxTag = "lut_rx";
 static constexpr const char* kUpTag = "upload";
 static constexpr uint8_t kLutMagic[4] = {0xDE, 0xAD, 0xBE, 0xEF};
 static constexpr uint8_t kEpubMagic[4] = {'E', 'P', 'U', 'B'};
+static constexpr uint8_t kSimgMagic[4] = {'S', 'I', 'M', 'G'};
+static constexpr uint8_t kSdFntMagic[4] = {'S', 'D', 'F', 'N'};
 static constexpr uint8_t kCmdMagic[4] = {'C', 'M', 'N', 'D'};
 static constexpr uint8_t kFontMagic[4] = {'F', 'O', 'N', 'T'};
 static constexpr uint32_t kMaxPayload = 256;
@@ -179,9 +181,9 @@ static void handle_lut_frame() {
 }
 
 // ---------------------------------------------------------------------------
-// Handle an incoming EPUB upload (after magic has been matched).
+// Handle an incoming upload to a specific directory (after magic matched).
 // ---------------------------------------------------------------------------
-static void handle_epub_upload() {
+static void handle_file_upload(const char* target_dir) {
   // Read filename length (2 bytes LE).
   uint8_t hdr[2];
   if (!serial_read_exact(hdr, 2, 2000)) {
@@ -210,10 +212,10 @@ static void handle_epub_upload() {
   }
   uint32_t file_size = sz_buf[0] | (sz_buf[1] << 8) | (sz_buf[2] << 16) | (sz_buf[3] << 24);
 
-  // Build path: /sdcard/books/<name>
+  // Build path
   char path[256];
-  snprintf(path, sizeof(path), "/sdcard/books/%s", name);
-  mkdir("/sdcard/books", 0775);
+  snprintf(path, sizeof(path), "%s/%s", target_dir, name);
+  mkdir(target_dir, 0775);
 
   FILE* f = fopen(path, "wb");
   if (!f) {
@@ -268,6 +270,21 @@ static void handle_epub_upload() {
 
   ESP_LOGI(kUpTag, "saved %s (%lu bytes, CRC OK)", path, (unsigned long)file_size);
   serial_write("OK\n");
+}
+
+// ---------------------------------------------------------------------------
+// Specific upload handlers
+// ---------------------------------------------------------------------------
+static void handle_epub_upload() {
+  handle_file_upload("/sdcard/books");
+}
+
+static void handle_simg_upload() {
+  handle_file_upload("/sdcard/sleep");
+}
+
+static void handle_sdfnt_upload() {
+  handle_file_upload("/sdcard/fonts");
 }
 
 // ---------------------------------------------------------------------------
@@ -510,6 +527,50 @@ static void handle_serial_cmd() {
       ESP_LOGI(kCmdTag, "cleared %d cache entries", count);
       break;
     }
+    case 'Z': {
+      const char* sleep_dir = "/sdcard/sleep";
+      DIR* dir = opendir(sleep_dir);
+      int count = 0;
+      if (dir) {
+        struct dirent* ent;
+        char fpath[300];
+        while ((ent = readdir(dir)) != nullptr) {
+          if (ent->d_name[0] == '.')
+            continue;
+          snprintf(fpath, sizeof(fpath), "%s/%s", sleep_dir, ent->d_name);
+          if (remove(fpath) == 0)
+            ++count;
+        }
+        closedir(dir);
+      }
+      char buf[64];
+      snprintf(buf, sizeof(buf), "CLEARED_SLEEP:%d\n", count);
+      serial_write(buf);
+      ESP_LOGI(kCmdTag, "cleared %d sleep images", count);
+      break;
+    }
+    case 'Y': {
+      const char* fonts_dir = "/sdcard/fonts";
+      DIR* dir = opendir(fonts_dir);
+      int count = 0;
+      if (dir) {
+        struct dirent* ent;
+        char fpath[300];
+        while ((ent = readdir(dir)) != nullptr) {
+          if (ent->d_name[0] == '.')
+            continue;
+          snprintf(fpath, sizeof(fpath), "%s/%s", fonts_dir, ent->d_name);
+          if (remove(fpath) == 0)
+            ++count;
+        }
+        closedir(dir);
+      }
+      char buf[64];
+      snprintf(buf, sizeof(buf), "CLEARED_SDFONTS:%d\n", count);
+      serial_write(buf);
+      ESP_LOGI(kCmdTag, "cleared %d SD fonts", count);
+      break;
+    }
     case 'X': {
       if (!read_cmd_path("bench"))
         return;
@@ -578,10 +639,12 @@ static void handle_serial_cmd() {
 static void serial_receiver_task(void* /*arg*/) {
   uint8_t lut_pos = 0;   // progress matching kLutMagic
   uint8_t epub_pos = 0;  // progress matching kEpubMagic
+  uint8_t simg_pos = 0;  // progress matching kSimgMagic
+  uint8_t sdfn_pos = 0;  // progress matching kSdFntMagic
   uint8_t cmd_pos = 0;   // progress matching kCmdMagic
   uint8_t font_pos = 0;  // progress matching kFontMagic
 
-  ESP_LOGI(kLutRxTag, "receiver ready (LUT + EPUB + CMD)");
+  ESP_LOGI(kLutRxTag, "receiver ready (LUT + EPUB + SIMG + SDFN + CMD + FONT)");
 
   while (true) {
     uint8_t byte;
@@ -597,7 +660,10 @@ static void serial_receiver_task(void* /*arg*/) {
       if (++lut_pos == 4) {
         lut_pos = 0;
         epub_pos = 0;
+        simg_pos = 0;
+        sdfn_pos = 0;
         cmd_pos = 0;
+        font_pos = 0;
         handle_lut_frame();
         continue;
       }
@@ -610,7 +676,10 @@ static void serial_receiver_task(void* /*arg*/) {
       if (++epub_pos == 4) {
         lut_pos = 0;
         epub_pos = 0;
+        simg_pos = 0;
+        sdfn_pos = 0;
         cmd_pos = 0;
+        font_pos = 0;
         handle_epub_upload();
         continue;
       }
@@ -618,11 +687,45 @@ static void serial_receiver_task(void* /*arg*/) {
       epub_pos = (byte == kEpubMagic[0]) ? 1 : 0;
     }
 
+    // Match SIMG magic.
+    if (byte == kSimgMagic[simg_pos]) {
+      if (++simg_pos == 4) {
+        lut_pos = 0;
+        epub_pos = 0;
+        simg_pos = 0;
+        sdfn_pos = 0;
+        cmd_pos = 0;
+        font_pos = 0;
+        handle_simg_upload();
+        continue;
+      }
+    } else {
+      simg_pos = (byte == kSimgMagic[0]) ? 1 : 0;
+    }
+
+    // Match SDFN magic.
+    if (byte == kSdFntMagic[sdfn_pos]) {
+      if (++sdfn_pos == 4) {
+        lut_pos = 0;
+        epub_pos = 0;
+        simg_pos = 0;
+        sdfn_pos = 0;
+        cmd_pos = 0;
+        font_pos = 0;
+        handle_sdfnt_upload();
+        continue;
+      }
+    } else {
+      sdfn_pos = (byte == kSdFntMagic[0]) ? 1 : 0;
+    }
+
     // Match CMND magic.
     if (byte == kCmdMagic[cmd_pos]) {
       if (++cmd_pos == 4) {
         lut_pos = 0;
         epub_pos = 0;
+        simg_pos = 0;
+        sdfn_pos = 0;
         cmd_pos = 0;
         font_pos = 0;
         handle_serial_cmd();
@@ -637,6 +740,8 @@ static void serial_receiver_task(void* /*arg*/) {
       if (++font_pos == 4) {
         lut_pos = 0;
         epub_pos = 0;
+        simg_pos = 0;
+        sdfn_pos = 0;
         cmd_pos = 0;
         font_pos = 0;
         handle_font_upload();

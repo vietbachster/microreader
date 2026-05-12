@@ -440,6 +440,104 @@ class DrawBuffer {
     display_.deep_sleep();
   }
 
+  // Load and show sleep image from MGR file stream directly into display buffers
+  bool show_sleep_image(const char* path) {
+    FILE* f = std::fopen(path, "rb");
+    if (!f)
+      return false;
+
+    char magic[4];
+    if (std::fread(magic, 1, 4, f) != 4 || std::memcmp(magic, "MGR1", 4) != 0) {
+      std::fclose(f);
+      return false;
+    }
+
+    uint16_t w, h;
+    if (std::fread(&w, 2, 1, f) != 1 || std::fread(&h, 2, 1, f) != 1) {
+      std::fclose(f);
+      return false;
+    }
+
+    size_t in_stride = (w + 7) / 8;
+    auto read_plane_to_inactive = [&](bool is_bw_plane) {
+      fill(true);
+      for (uint16_t y = 0; y < h && y < DisplayFrame::kPhysicalHeight; ++y) {
+        uint8_t row_buf[128];  // Max width ~1024
+        size_t to_read = std::min<size_t>(in_stride, sizeof(row_buf));
+        size_t read_len = std::fread(row_buf, 1, to_read, f);
+        if (read_len < in_stride) {
+          std::fseek(f, static_cast<long>(in_stride - read_len), SEEK_CUR);
+        }
+
+        size_t dest_offset = static_cast<size_t>(y) * DisplayFrame::kStride;
+        size_t copy_bytes = std::min<size_t>(read_len, DisplayFrame::kStride);
+        std::memcpy(inactive_() + dest_offset, row_buf, copy_bytes);
+      }
+
+      if (h > DisplayFrame::kPhysicalHeight) {
+        std::fseek(f, static_cast<long>((h - DisplayFrame::kPhysicalHeight) * in_stride), SEEK_CUR);
+      }
+
+      if (is_bw_plane) {
+        // Draw text over BW plane before full refresh
+        const char* sleep_text = "sleeping...";
+        draw_text_centered(kWidth / 2, kHeight - 24, sleep_text, true);
+        full_refresh(RefreshMode::Full, false);
+      }
+    };
+
+    // Read planes
+    read_plane_to_inactive(true);  // BW plane
+
+    read_plane_to_inactive(false);  // LSB plane
+    display_.write_ram_bw(inactive_());
+
+    read_plane_to_inactive(false);  // MSB plane
+    display_.write_ram_red(inactive_());
+
+    display_.grayscale_refresh(/*turnOffScreen=*/true);
+    display_.deep_sleep();
+
+    std::fclose(f);
+    return true;
+  }
+
+  bool show_sleep_image_embedded() {
+#ifdef ESP_PLATFORM
+    extern const uint8_t _binary_sleep_mgr_start[] asm("_binary_sleep_mgr_start");
+    extern const uint8_t _binary_sleep_mgr_end[] asm("_binary_sleep_mgr_end");
+
+    size_t size = _binary_sleep_mgr_end - _binary_sleep_mgr_start;
+    if (size < 8)
+      return false;
+
+    if (std::memcmp(_binary_sleep_mgr_start, "MGR1", 4) != 0)
+      return false;
+
+    uint16_t w = _binary_sleep_mgr_start[4] | (_binary_sleep_mgr_start[5] << 8);
+    uint16_t h = _binary_sleep_mgr_start[6] | (_binary_sleep_mgr_start[7] << 8);
+
+    size_t plane_bytes = static_cast<size_t>((w + 7) / 8) * h;
+    if (size < 8 + plane_bytes * 3)
+      return false;
+
+    const uint8_t* bw = _binary_sleep_mgr_start + 8;
+    const uint8_t* lsb = bw + plane_bytes;
+    const uint8_t* msb = lsb + plane_bytes;
+
+    fill(true);
+    draw_image(bw, 0, 0, w, h);
+    draw_text_centered(kWidth / 2, kHeight - 24, "sleeping...", true);
+    full_refresh(RefreshMode::Full, false);
+
+    show_grayscale_image(lsb, msb, w, h);
+    return true;
+#else
+    // Desktop emulator uses the resources folder relative file
+    return show_sleep_image("resources/sleep.mgr");
+#endif
+  }
+
   // -- Scratch buffer loan (for EPUB conversion / image decode) ------------
 
   // Loan the inactive buffer as scratch (will be overwritten before next refresh).

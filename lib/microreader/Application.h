@@ -123,6 +123,22 @@ class Application {
     rotate_display_ = v;
   }
 
+  const std::string& custom_font_path() const {
+    return custom_font_path_;
+  }
+  void set_custom_font_path(const std::string& path) {
+    custom_font_path_ = path;
+    save_settings_();
+  }
+
+  const std::string& installed_font_path() const {
+    return installed_font_path_;
+  }
+  void set_installed_font_path(const std::string& path) {
+    installed_font_path_ = path;
+    save_settings_();
+  }
+
   // Navigate to a screen: push on top of the current screen (current stays on stack).
   // Or replace the current screen (pop it first, then push the new one).
   // safe to call from within a screen's update(); the transition happens after update() returns.
@@ -165,6 +181,9 @@ class Application {
   bool invert_bottom_paging_ = false;
   bool invert_side_buttons_ = false;
   bool rotate_display_ = false;
+
+  std::string custom_font_path_;
+  std::string installed_font_path_;
 
   ScreenManager screen_mgr_;
   MainMenu menu_;

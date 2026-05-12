@@ -47,18 +47,44 @@ class FontManager : public microreader::FontManager {
   // Called by ReaderScreen before opening a book (IFontEnsurer interface).
   // No-op if fonts are already provisioned.
   void ensure_ready(microreader::DrawBuffer& buf) override {
-    if (!FontPartition::needs_provisioning(bundle_data_, bundle_size_))
+    const std::string& custom_font = app_.custom_font_path();
+    const std::string& installed_font = app_.installed_font_path();
+
+    if (custom_font == installed_font &&
+        (custom_font != "" || !FontPartition::needs_provisioning(bundle_data_, bundle_size_))) {
+      // If we skipped setting it in init() due to CRC checks, set it now.
+      if (font_set_.valid()) {
+        app_.set_reader_font(font_set());
+      }
       return;
-    ESP_LOGI("font", "Provisioning font from firmware (first launch or firmware update)...");
+    }
+
     buf.sync_bw_ram();
     buf.show_loading("Installing fonts...", 0);
-    if (FontPartition::provision_embedded(
-            bundle_data_, bundle_size_, buf.scratch_buf1(), microreader::DrawBuffer::kBufSize, buf.scratch_buf2(),
-            microreader::DrawBuffer::kBufSize, [&buf](int pct) { buf.show_loading("Installing fonts...", pct); })) {
-      buf.reset_after_scratch();
-      if (font_part_.mmap()) {
-        load_fonts_();
-        app_.set_reader_font(font_set());
+
+    if (custom_font == "") {
+      ESP_LOGI("font", "Provisioning font from firmware (first launch or firmware update)...");
+      if (FontPartition::provision_embedded(
+              bundle_data_, bundle_size_, buf.scratch_buf1(), microreader::DrawBuffer::kBufSize, buf.scratch_buf2(),
+              microreader::DrawBuffer::kBufSize, [&buf](int pct) { buf.show_loading("Installing fonts...", pct); })) {
+        app_.set_installed_font_path("");
+        buf.reset_after_scratch();
+        if (font_part_.mmap()) {
+          load_fonts_();
+          app_.set_reader_font(font_set());
+        }
+      }
+    } else {
+      ESP_LOGI("font", "Provisioning font from SD card: %s", custom_font.c_str());
+      if (FontPartition::provision_uncompressed_file(
+              custom_font.c_str(), buf.scratch_buf2(), microreader::DrawBuffer::kBufSize,
+              [&buf](int pct) { buf.show_loading("Installing fonts...", pct); })) {
+        app_.set_installed_font_path(custom_font);
+        buf.reset_after_scratch();
+        if (font_part_.mmap()) {
+          load_fonts_();
+          app_.set_reader_font(font_set());
+        }
       }
     }
   }
@@ -119,3 +145,4 @@ class FontManager : public microreader::FontManager {
   const uint8_t* bundle_data_ = nullptr;
   size_t bundle_size_ = 0;
 };
+

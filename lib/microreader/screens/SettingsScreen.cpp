@@ -72,6 +72,57 @@ void SettingsScreen::on_start() {
   idx_rotate_display_ = count();
   add_item(get_rotate_display_label(app_ && app_->rotate_display()));
 
+  sd_fonts_.clear();
+  sd_fonts_.push_back("");  // built-in
+  font_sel_idx_ = 0;
+#ifdef ESP_PLATFORM
+  DIR* d = opendir("/sdcard/fonts");
+  if (d) {
+    struct dirent* ent;
+    while ((ent = readdir(d)) != nullptr) {
+      if (ent->d_name[0] == '.')
+        continue;
+      const char* ext = std::strrchr(ent->d_name, '.');
+      if (ext && strcmp(ext, ".mfb") == 0) {
+        sd_fonts_.push_back(std::string("/sdcard/fonts/") + ent->d_name);
+      }
+    }
+    closedir(d);
+  }
+#else
+  namespace fs = std::filesystem;
+  try {
+    for (const auto& entry : fs::directory_iterator("fonts")) {
+      std::string ext = entry.path().extension().string();
+      if (ext == ".mfb") {
+        sd_fonts_.push_back(entry.path().string());
+      }
+    }
+  } catch (...) {}
+#endif
+
+  if (app_) {
+    const std::string& current = app_->custom_font_path();
+    for (size_t i = 0; i < sd_fonts_.size(); ++i) {
+      if (sd_fonts_[i] == current) {
+        font_sel_idx_ = static_cast<int>(i);
+        break;
+      }
+    }
+  }
+
+  idx_font_ = count();
+  std::string font_label = "Font: Built-in";
+  if (font_sel_idx_ > 0) {
+    const char* slash = strrchr(sd_fonts_[font_sel_idx_].c_str(), '/');
+#ifndef ESP_PLATFORM
+    if (!slash)
+      slash = strrchr(sd_fonts_[font_sel_idx_].c_str(), '\\');
+#endif
+    font_label = "Font: " + std::string(slash ? slash + 1 : sd_fonts_[font_sel_idx_].c_str());
+  }
+  add_item(font_label);
+
   add_separator();
 
 #ifdef MICROREADER_ENABLE_DEMOS
@@ -181,6 +232,24 @@ void SettingsScreen::on_select(int index) {
       app_->set_rotate_display(v);
       set_item_label(idx_rotate_display_, get_rotate_display_label(v));
       buf_->set_rotation(v ? Rotation::Deg0 : Rotation::Deg90);
+    }
+    return;
+  }
+  if (index == idx_font_) {
+    if (app_ && !sd_fonts_.empty()) {
+      font_sel_idx_ = (font_sel_idx_ + 1) % sd_fonts_.size();
+      app_->set_custom_font_path(sd_fonts_[font_sel_idx_]);
+
+      std::string font_label = "Font: Built-in";
+      if (font_sel_idx_ > 0) {
+        const char* slash = strrchr(sd_fonts_[font_sel_idx_].c_str(), '/');
+#ifndef ESP_PLATFORM
+        if (!slash)
+          slash = strrchr(sd_fonts_[font_sel_idx_].c_str(), '\\');
+#endif
+        font_label = "Font: " + std::string(slash ? slash + 1 : sd_fonts_[font_sel_idx_].c_str());
+      }
+      set_item_label(idx_font_, font_label);
     }
     return;
   }

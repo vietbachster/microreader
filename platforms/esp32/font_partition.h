@@ -73,6 +73,87 @@ struct FontPartition {
     return stored_crc != embedded_crc;
   }
 
+  // Copy an uncompressed .mbf/.bin file from the SD card to the SPIFFS partition
+  static bool provision_uncompressed_file(const char* path, uint8_t* write_buf_ext, size_t write_buf_size,
+                                          std::function<void(int)> on_progress = nullptr) {
+    const esp_partition_t* part = find();
+    if (!part)
+      return false;
+
+    FILE* f = fopen(path, "rb");
+    if (!f)
+      return false;
+
+    fseek(f, 0, SEEK_END);
+    long file_size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    if (kFontPartHeaderSize + file_size > part->size) {
+      fclose(f);
+      return false;
+    }
+
+    if (on_progress)
+      on_progress(0);
+
+    size_t erase_size = (kFontPartHeaderSize + file_size + 0xFFF) & ~0xFFF;
+    if (esp_partition_erase_range(part, 0, erase_size) != ESP_OK) {
+      fclose(f);
+      return false;
+    }
+
+    uint8_t header[kFontPartHeaderSize];
+    memset(header, 0xFF, sizeof(header));
+    memcpy(header, kFontPartMagic, 4);
+    header[4] = file_size & 0xFF;
+    header[5] = (file_size >> 8) & 0xFF;
+    header[6] = (file_size >> 16) & 0xFF;
+    header[7] = (file_size >> 24) & 0xFF;
+    // CRC is 0 to distinguish it from the embedded built-in cache
+    if (esp_partition_write(part, 0, header, sizeof(header)) != ESP_OK) {
+      fclose(f);
+      return false;
+    }
+
+    size_t write_offset = kFontPartHeaderSize;
+    long remaining = file_size;
+
+    bool own_write = false;
+    if (!write_buf_ext || write_buf_size < 4096) {
+      write_buf_size = 32768;
+      write_buf_ext = (uint8_t*)malloc(write_buf_size);
+      own_write = true;
+      if (!write_buf_ext) {
+        fclose(f);
+        return false;
+      }
+    }
+
+    bool success = true;
+    while (remaining > 0) {
+      size_t to_read = remaining < (long)write_buf_size ? (size_t)remaining : write_buf_size;
+      size_t read_bytes = fread(write_buf_ext, 1, to_read, f);
+      if (read_bytes == 0)
+        break;
+      if (esp_partition_write(part, write_offset, write_buf_ext, read_bytes) != ESP_OK) {
+        success = false;
+        break;
+      }
+      write_offset += read_bytes;
+      remaining -= read_bytes;
+
+      if (on_progress) {
+        int pct = 5 + (int)(((file_size - remaining) * 95LL) / file_size);
+        on_progress(pct);
+      }
+    }
+
+    if (own_write)
+      free(write_buf_ext);
+    fclose(f);
+    return success;
+  }
+
   // Stream-decompress zlib-compressed firmware font bytes and write them to
   // the spiffs partition.  Does NOT do a CRC check — call needs_provisioning()
   // first.  Returns true on success.

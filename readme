@@ -6,3 +6,12 @@ python tools/generate_font.py "resources/fonts/Bookerly.ttf" -o resources/fonts/
 
 #### upload font
 python .\tools\serial_cmd.py --upload-font .\resources\fonts\font-bundle.mfb
+
+#### convert sleep screen
+python tools/png_to_grayscale_layers.py "resources/sleep.png" --out-prefix "resources/sleep" --bin
+python tools/serial_cmd.py --upload-sleep "C:\Users\Patrick\Desktop\microreader\microreader2\resources\sleep.mgr"
+python tools/serial_cmd.py --clear-sleep
+
+#### upload fonts
+python tools/serial_cmd.py --upload-sd-font arial.mbf
+python tools/serial_cmd.py --upload-sd-font times.mbf

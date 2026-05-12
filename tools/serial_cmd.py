@@ -133,14 +133,14 @@ def read_multiline_response(ser: serial.Serial, timeout: float = 5.0) -> str:
     return "\n".join(result) if result else "(no books found)"
 
 
-def upload_epub(ser: serial.Serial, filepath: Path) -> bool:
-    """Upload an EPUB file to the device over the existing serial connection."""
+def upload_file(ser: serial.Serial, filepath: Path, magic: bytes) -> bool:
+    """Upload a file to the device over the existing serial connection using the specifies magic."""
     data = filepath.read_bytes()
     name = filepath.name.encode("utf-8")
     crc = zlib.crc32(data) & 0xFFFFFFFF
     print(f"Uploading {filepath.name} ({len(data)} bytes, CRC32=0x{crc:08x})")
 
-    header = b"EPUB"
+    header = magic
     header += struct.pack("<H", len(name))
     header += name
     header += struct.pack("<I", len(data))
@@ -203,6 +203,18 @@ def upload_epub(ser: serial.Serial, filepath: Path) -> bool:
     print("Timeout waiting for result")
     return False
 
+def upload_epub(ser: serial.Serial, filepath: Path) -> bool:
+    """Upload an EPUB file to the device over the existing serial connection."""
+    return upload_file(ser, filepath, b"EPUB")
+
+def upload_sleep(ser: serial.Serial, filepath: Path) -> bool:
+    """Upload a sleep image file to the device over the existing serial connection."""
+    return upload_file(ser, filepath, b"SIMG")
+
+
+def upload_font_sd(ser: serial.Serial, filepath: Path) -> bool:
+    """Upload an MBF font file to the device's SD card over the existing serial connection."""
+    return upload_file(ser, filepath, b"SDFN")
 
 def drain(ser: serial.Serial):
     """Drain any pending serial data."""
@@ -301,6 +313,11 @@ def send_list_books_raw(ser: serial.Serial) -> list[str]:
     return result
 
 
+def send_remove_file(ser: serial.Serial, path: str) -> str:
+    path_bytes = path.encode("utf-8")
+    ser.write(MAGIC + b"R" + struct.pack("<H", len(path_bytes)) + path_bytes)
+    return read_response(ser, timeout=10.0)
+
 def send_clear_mrb(ser: serial.Serial) -> str:
     """Send 'C' command to delete all .mrb files. Returns 'CLEARED:N' or error."""
     drain(ser)
@@ -311,6 +328,32 @@ def send_clear_mrb(ser: serial.Serial) -> str:
         if not line:
             continue
         if line.startswith("CLEARED:") or line.startswith("ERR:"):
+            return line
+    return "TIMEOUT"
+
+def send_clear_sleep(ser: serial.Serial) -> str:
+    """Send 'Z' command to delete all sleep images. Returns 'CLEARED_SLEEP:N' or error."""
+    drain(ser)
+    ser.write(MAGIC + b"Z")
+    deadline = time.time() + 10.0
+    while time.time() < deadline:
+        line = ser.readline().decode("utf-8", errors="replace").strip()
+        if not line:
+            continue
+        if line.startswith("CLEARED_SLEEP:") or line.startswith("ERR:"):
+            return line
+    return "TIMEOUT"
+
+def send_clear_sd_fonts(ser: serial.Serial) -> str:
+    """Send 'Y' command to delete all SD fonts. Returns 'CLEARED_SDFONTS:N' or error."""
+    drain(ser)
+    ser.write(MAGIC + b"Y")
+    deadline = time.time() + 10.0
+    while time.time() < deadline:
+        line = ser.readline().decode("utf-8", errors="replace").strip()
+        if not line:
+            continue
+        if line.startswith("CLEARED_SDFONTS:") or line.startswith("ERR:"):
             return line
     return "TIMEOUT"
 
@@ -483,10 +526,34 @@ def main():
         help="Non-interactive: upload an EPUB file then exit",
     )
     parser.add_argument(
+        "--upload-sleep",
+        metavar="FILE",
+        default=None,
+        help="Non-interactive: upload a sleep image file (.mgr) then exit",
+    )
+    parser.add_argument(
+        "--clear-sleep",
+        action="store_true",
+        default=False,
+        help="Non-interactive: delete all images in the /sdcard/sleep/ folder on the device",
+    )
+    parser.add_argument(
+        "--clear-sd-fonts",
+        action="store_true",
+        default=False,
+        help="Non-interactive: delete all fonts in the /sdcard/fonts/ folder on the device",
+    )
+    parser.add_argument(
         "--upload-font",
         metavar="FILE",
         default=None,
         help="Non-interactive: upload an MBF font file to the flash partition then exit",
+    )
+    parser.add_argument(
+        "--upload-sd-font",
+        metavar="FILE",
+        default=None,
+        help="Non-interactive: upload an MBF font file to the /sdcard/fonts/ folder on the device then exit",
     )
     parser.add_argument(
         "--bench",
@@ -546,6 +613,26 @@ def main():
         ser.close()
         sys.exit(0 if ok else 1)
 
+    if args.upload_sleep:
+        fp = Path(args.upload_sleep)
+        if not fp.exists():
+            print(f"File not found: {fp}", file=sys.stderr)
+            ser.close()
+            sys.exit(1)
+        ok = upload_sleep(ser, fp)
+        ser.close()
+        sys.exit(0 if ok else 1)
+
+    if args.clear_sleep:
+        print(send_clear_sleep(ser))
+        ser.close()
+        sys.exit(0)
+
+    if args.clear_sd_fonts:
+        print(send_clear_sd_fonts(ser))
+        ser.close()
+        sys.exit(0)
+
     if args.upload_font:
         fp = Path(args.upload_font)
         if not fp.exists():
@@ -553,6 +640,16 @@ def main():
             ser.close()
             sys.exit(1)
         ok = upload_font(ser, fp)
+        ser.close()
+        sys.exit(0 if ok else 1)
+
+    if args.upload_sd_font:
+        fp = Path(args.upload_sd_font)
+        if not fp.exists():
+            print(f"File not found: {fp}", file=sys.stderr)
+            ser.close()
+            sys.exit(1)
+        ok = upload_font_sd(ser, fp)
         ser.close()
         sys.exit(0 if ok else 1)
 
@@ -864,6 +961,11 @@ def main():
                 if not path.startswith("/"):
                     path = f"/sdcard/books/{path}"
                 print(send_open(ser, path))
+            elif verb == "rm":
+                if not arg:
+                    print("Usage: rm <path>")
+                    continue
+                print(send_remove_file(ser, arg))
             elif verb == "test":
                 targs = arg.split()
                 clean = "--clean" in targs
@@ -889,6 +991,10 @@ def main():
                 )
             elif verb == "clear":
                 print(send_clear_mrb(ser))
+            elif verb == "clear-sleep":
+                print(send_clear_sleep(ser))
+            elif verb == "clear-sd-fonts":
+                print(send_clear_sd_fonts(ser))
             elif verb == "upload":
                 if not arg:
                     print("Usage: upload <file>")
@@ -898,6 +1004,15 @@ def main():
                     print(f"File not found: {fp}")
                     continue
                 upload_epub(ser, fp)
+            elif verb == "upload-sleep":
+                if not arg:
+                    print("Usage: upload-sleep <file>")
+                    continue
+                fp = Path(arg)
+                if not fp.exists():
+                    print(f"File not found: {fp}")
+                    continue
+                upload_sleep(ser, fp)
             elif verb == "uploadfont":
                 if not arg:
                     print("Usage: uploadfont <file.mbf>")
@@ -907,6 +1022,15 @@ def main():
                     print(f"File not found: {fp}")
                     continue
                 upload_font(ser, fp)
+            elif verb == "uploadsdfont":
+                if not arg:
+                    print("Usage: uploadsdfont <file.mbf>")
+                    continue
+                fp = Path(arg)
+                if not fp.exists():
+                    print(f"File not found: {fp}")
+                    continue
+                upload_font_sd(ser, fp)
             elif verb == "bench":
                 if not arg:
                     print("Usage: bench <path_or_filename>")
