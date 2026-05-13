@@ -50,6 +50,8 @@ class Application {
   std::string settings_path_;
   // Book path to auto-open on next start() (set by load_settings_)
   std::string pending_book_path_;
+  // Screen to auto-open on next start() (set by load_settings_)
+  std::string pending_screen_;
   // Save all persistent state to the settings file
   void save_settings_();
   // Load all persistent state from the settings file
@@ -131,6 +133,14 @@ class Application {
     save_settings_();
   }
 
+  const std::string& sleep_image_path() const {
+    return sleep_image_path_;
+  }
+  void set_sleep_image_path(const std::string& path) {
+    sleep_image_path_ = path;
+    save_settings_();
+  }
+
   const std::string& installed_font_path() const {
     return installed_font_path_;
   }
@@ -184,6 +194,7 @@ class Application {
 
   std::string custom_font_path_;
   std::string installed_font_path_;
+  std::string sleep_image_path_;
 
   ScreenManager screen_mgr_;
   MainMenu menu_;

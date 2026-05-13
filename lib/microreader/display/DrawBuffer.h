@@ -502,26 +502,44 @@ class DrawBuffer {
     return true;
   }
 
-  bool show_sleep_image_embedded() {
+  bool show_sleep_image_embedded(int idx = 0) {
 #ifdef ESP_PLATFORM
-    extern const uint8_t _binary_sleep_mgr_start[] asm("_binary_sleep_mgr_start");
-    extern const uint8_t _binary_sleep_mgr_end[] asm("_binary_sleep_mgr_end");
+    const uint8_t* start = nullptr;
+    const uint8_t* end = nullptr;
 
-    size_t size = _binary_sleep_mgr_end - _binary_sleep_mgr_start;
+    extern const uint8_t _binary_sleep_0_mgr_start[] asm("_binary_sleep_0_mgr_start");
+    extern const uint8_t _binary_sleep_0_mgr_end[] asm("_binary_sleep_0_mgr_end");
+    extern const uint8_t _binary_sleep_1_mgr_start[] asm("_binary_sleep_1_mgr_start");
+    extern const uint8_t _binary_sleep_1_mgr_end[] asm("_binary_sleep_1_mgr_end");
+    extern const uint8_t _binary_sleep_2_mgr_start[] asm("_binary_sleep_2_mgr_start");
+    extern const uint8_t _binary_sleep_2_mgr_end[] asm("_binary_sleep_2_mgr_end");
+
+    if (idx == 1) {
+      start = _binary_sleep_1_mgr_start;
+      end = _binary_sleep_1_mgr_end;
+    } else if (idx == 2) {
+      start = _binary_sleep_2_mgr_start;
+      end = _binary_sleep_2_mgr_end;
+    } else {
+      start = _binary_sleep_0_mgr_start;
+      end = _binary_sleep_0_mgr_end;
+    }
+
+    size_t size = end - start;
     if (size < 8)
       return false;
 
-    if (std::memcmp(_binary_sleep_mgr_start, "MGR1", 4) != 0)
+    if (std::memcmp(start, "MGR1", 4) != 0)
       return false;
 
-    uint16_t w = _binary_sleep_mgr_start[4] | (_binary_sleep_mgr_start[5] << 8);
-    uint16_t h = _binary_sleep_mgr_start[6] | (_binary_sleep_mgr_start[7] << 8);
+    uint16_t w = start[4] | (start[5] << 8);
+    uint16_t h = start[6] | (start[7] << 8);
 
     size_t plane_bytes = static_cast<size_t>((w + 7) / 8) * h;
     if (size < 8 + plane_bytes * 3)
       return false;
 
-    const uint8_t* bw = _binary_sleep_mgr_start + 8;
+    const uint8_t* bw = start + 8;
     const uint8_t* lsb = bw + plane_bytes;
     const uint8_t* msb = lsb + plane_bytes;
 
@@ -534,7 +552,9 @@ class DrawBuffer {
     return true;
 #else
     // Desktop emulator uses the resources folder relative file
-    return show_sleep_image("resources/sleep.mgr");
+    char path[64];
+    snprintf(path, sizeof(path), "resources/sleep/sleep_%d.mgr", idx);
+    return show_sleep_image(path);
 #endif
   }
 

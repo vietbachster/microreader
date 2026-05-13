@@ -75,10 +75,6 @@ void ReaderOptionsScreen::on_start() {
     add_separator();
 
   if (settings_) {
-    idx_justify_ = count();
-    add_item(fmt_setting(tmp, sizeof(tmp), "Alignment",
-                         ReaderSettings::kAlignNames[static_cast<uint8_t>(settings_->align_override)]));
-
     idx_font_size_ = count();
     if (app_ && app_->font_manager() && app_->font_manager()->valid()) {
       auto* fonts = app_->font_manager()->font_set();
@@ -104,21 +100,30 @@ void ReaderOptionsScreen::on_start() {
     idx_pub_fonts_ = count();
     add_item(fmt_setting(tmp, sizeof(tmp), "Publisher Sizes", settings_->override_publisher_fonts ? "Off" : "On"));
 
+    idx_line_spacing_ = count();
+    add_item(fmt_setting(tmp, sizeof(tmp), "Line spacing",
+                         ReaderSettings::kSpacingNames[static_cast<uint8_t>(settings_->spacing_override)]));
+
+    idx_justify_ = count();
+    add_item(fmt_setting(tmp, sizeof(tmp), "Alignment",
+                         ReaderSettings::kAlignNames[static_cast<uint8_t>(settings_->align_override)]));
+
+    add_separator();
+
     idx_padding_h_ = count();
     add_item(fmt_setting(tmp, sizeof(tmp), "H-Margin", ReaderSettings::kHPaddingNames[settings_->padding_h_idx]));
 
     idx_padding_v_ = count();
     add_item(fmt_setting(tmp, sizeof(tmp), "V-Margin", ReaderSettings::kVPaddingNames[settings_->padding_v_idx]));
 
-    idx_line_spacing_ = count();
-    add_item(fmt_setting(tmp, sizeof(tmp), "Line spacing",
-                         ReaderSettings::kSpacingNames[static_cast<uint8_t>(settings_->spacing_override)]));
+    add_separator();
 
     idx_progress_ = count();
     const char* prog_name = settings_->progress_style == ProgressStyle::None         ? "None"
                             : settings_->progress_style == ProgressStyle::Percentage ? "Percent"
                                                                                      : "Bar";
     add_item(fmt_setting(tmp, sizeof(tmp), "Progress", prog_name));
+
     idx_rotate_display_ = count();
     add_item(fmt_setting(tmp, sizeof(tmp), "Display", app_ && app_->rotate_display() ? "Landscape" : "Portrait"));
   }

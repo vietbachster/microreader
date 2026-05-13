@@ -24,6 +24,13 @@ class ListMenuScreen : public IScreen {
   void stop() override {}
   void update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& runtime) override;
 
+  int selected_index() const {
+    return selected_;
+  }
+  void set_initial_selection(int index) {
+    initial_selection_ = index;
+  }
+
  protected:
   const char* title_ = nullptr;
   std::string subtitle_;
@@ -84,6 +91,7 @@ class ListMenuScreen : public IScreen {
   int selected_ = 0;
   int scroll_offset_ = 0;
   bool on_start_set_selection_ = false;
+  int initial_selection_ = -1;
   // Hold-down acceleration counters (frames button has been held without a fresh press).
   int hold_frames_up_ = 0;
   int hold_frames_down_ = 0;

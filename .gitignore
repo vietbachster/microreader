@@ -43,3 +43,5 @@ test/bench_results.json
 /sd/.microreader
 /resources/fonts/alegreya
 /resources/fonts/bookerly
+/resources/images
+/resources/sd fonts/ttf

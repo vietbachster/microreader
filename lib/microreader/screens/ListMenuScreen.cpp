@@ -24,9 +24,13 @@ void ListMenuScreen::start(DrawBuffer& buf, IRuntime& runtime) {
   on_start();
   // Restore selection if on_start() didn't explicitly call set_selected()
   // (e.g. returning from a sub-screen after navigating away).
-  if (!on_start_set_selection_ && prev_selected > 0 && prev_selected < count())
+  if (!on_start_set_selection_ && initial_selection_ >= 0 && initial_selection_ < count()) {
+    selected_ = initial_selection_;
+    initial_selection_ = -1;  // Only use once
+  } else if (!on_start_set_selection_ && prev_selected > 0 && prev_selected < count()) {
     selected_ = prev_selected;
-  if (on_start_set_selection_)
+  }
+  if (on_start_set_selection_ || selected_ > 0)
     center_on_selected_();
   else
     ensure_visible_();

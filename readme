@@ -10,6 +10,10 @@ python .\tools\serial_cmd.py --upload-font .\resources\fonts\bookerly.mfb
 python tools/serial_cmd.py --upload-sd-font .\resources\fonts\alegreya.mfb
 
 #### convert sleep screen
-python tools/png_to_grayscale_layers.py "resources/sleep.png" --out-prefix "resources/sleep" --bin
+python .\tools\image_to_mgr.py "resources/sleep/sleep_2.jpg" --out-prefix "resources/sleep/sleep_2" --bin
 python tools/serial_cmd.py --upload-sleep "C:\Users\Patrick\Desktop\microreader\microreader2\resources\sleep.mgr"
 python tools/serial_cmd.py --clear-sleep
+
+#### selecting boot partition
+python -m esptool --port COM4 write_flash 0xE000 otadata_boot_app0.bin
+python -m esptool --port COM4 write_flash 0x10000 app0_backup.bin

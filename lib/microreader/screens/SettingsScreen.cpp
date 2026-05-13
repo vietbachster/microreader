@@ -49,31 +49,44 @@ static std::string get_rotate_display_label(bool rotated) {
   return std::string("Display: ") + (rotated ? "Landscape" : "Portrait");
 }
 
+static std::string get_font_label(const std::string& font_path) {
+  std::string label = "Font: ";
+  if (font_path == "Bookerly" || font_path == "Alegreya") {
+    label += font_path;
+  } else {
+    const char* slash = strrchr(font_path.c_str(), '/');
+#ifndef ESP_PLATFORM
+    if (!slash)
+      slash = strrchr(font_path.c_str(), '\\');
+#endif
+    label += std::string(slash ? slash + 1 : font_path.c_str());
+  }
+  return label;
+}
+
+static std::string get_sleep_image_label(const std::string& path) {
+  std::string label = "Sleep Image: ";
+  if (path.rfind("embedded:", 0) == 0) {
+    int idx = std::atoi(path.c_str() + 9);
+    label += (idx == 0 ? "bird" : (idx == 1 ? "stone" : "bebop"));
+  } else {
+    const char* slash = strrchr(path.c_str(), '/');
+#ifndef ESP_PLATFORM
+    if (!slash)
+      slash = strrchr(path.c_str(), '\\');
+#endif
+    label += (slash ? slash + 1 : path.c_str());
+  }
+  return label;
+}
+
 void SettingsScreen::on_start() {
   title_ = "Settings";
   subtitle_ = MICROREADER_VERSION;
 
-  idx_list_format_ = count();
-  BookListFormat fmt = BookListFormat::TitleAndAuthor;
-  if (app_ && app_->main_menu()) {
-    fmt = app_->main_menu()->list_format();
-  }
-  add_item(get_list_format_label(fmt));
-
-  idx_invert_menu_ = count();
-  add_item(get_menu_nav_label(app_ && app_->invert_menu_buttons()));
-
-  idx_invert_bottom_paging_ = count();
-  add_item(get_bottom_paging_label(app_ && app_->invert_bottom_paging()));
-
-  idx_invert_side_ = count();
-  add_item(get_side_paging_label(app_ && app_->invert_side_buttons()));
-
-  idx_rotate_display_ = count();
-  add_item(get_rotate_display_label(app_ && app_->rotate_display()));
-
   sd_fonts_.clear();
-  sd_fonts_.push_back("");  // built-in
+  sd_fonts_.push_back("Bookerly");
+  sd_fonts_.push_back("Alegreya");
   font_sel_idx_ = 0;
 #ifdef ESP_PLATFORM
   DIR* d = opendir("/sdcard/fonts");
@@ -111,30 +124,82 @@ void SettingsScreen::on_start() {
     }
   }
 
-  idx_font_ = count();
-  std::string font_label = "Font: Built-in";
-  if (font_sel_idx_ > 0) {
-    const char* slash = strrchr(sd_fonts_[font_sel_idx_].c_str(), '/');
-#ifndef ESP_PLATFORM
-    if (!slash)
-      slash = strrchr(sd_fonts_[font_sel_idx_].c_str(), '\\');
-#endif
-    font_label = "Font: " + std::string(slash ? slash + 1 : sd_fonts_[font_sel_idx_].c_str());
+  sleep_images_.clear();
+  sleep_images_.push_back("embedded:0");
+  sleep_images_.push_back("embedded:1");
+  sleep_images_.push_back("embedded:2");
+  sleep_image_sel_idx_ = 0;
+#ifdef ESP_PLATFORM
+  d = opendir("/sdcard/sleep");
+  if (d) {
+    struct dirent* ent;
+    while ((ent = readdir(d)) != nullptr) {
+      if (ent->d_name[0] == '.')
+        continue;
+      const char* ext = std::strrchr(ent->d_name, '.');
+      if (ext && strcmp(ext, ".mgr") == 0) {
+        sleep_images_.push_back(std::string("/sdcard/sleep/") + ent->d_name);
+      }
+    }
+    closedir(d);
   }
-  add_item(font_label);
-
-  add_separator();
-
-#ifdef MICROREADER_ENABLE_DEMOS
-  idx_bouncing_ball_ = count();
-  add_item("Bouncing Ball");
-
-  idx_grayscale_demo_ = count();
-  add_item("Grayscale Demo");
-
-  add_separator();
+#else
+  try {
+    for (const auto& entry : fs::directory_iterator("sd/sleep")) {
+      std::string ext = entry.path().extension().string();
+      if (ext == ".mgr") {
+        sleep_images_.push_back(std::string("/sdcard/sleep/") + entry.path().filename().string());
+      }
+    }
+  } catch (...) {}
 #endif
 
+  if (app_) {
+    const std::string& current = app_->sleep_image_path();
+    if (current.empty()) {
+      sleep_image_sel_idx_ = 0;  // Default to embedded:0
+    } else {
+      for (size_t i = 0; i < sleep_images_.size(); ++i) {
+        if (sleep_images_[i] == current) {
+          sleep_image_sel_idx_ = static_cast<int>(i);
+          break;
+        }
+      }
+    }
+  }
+
+  // --- Appearance / General ---
+  idx_rotate_display_ = count();
+  add_item(get_rotate_display_label(app_ && app_->rotate_display()));
+
+  idx_list_format_ = count();
+  if (app_) {
+    add_item(get_list_format_label(app_->main_menu() ? app_->main_menu()->list_format() : BookListFormat::TitleOnly));
+  } else {
+    add_item("List: Title");
+  }
+
+  idx_font_ = count();
+  add_item(get_font_label(sd_fonts_[font_sel_idx_]));
+
+  idx_sleep_image_ = count();
+  add_item(get_sleep_image_label(sleep_images_[sleep_image_sel_idx_]));
+
+  add_separator();
+
+  // --- Controls ---
+  idx_invert_side_ = count();
+  add_item(app_->invert_side_buttons() ? "Side Btn: Next/Prev" : "Side Btn: Prev/Next");
+
+  idx_invert_bottom_paging_ = count();
+  add_item(app_->invert_bottom_paging() ? "Reader Btn: Prev/Next" : "Reader Btn: Next/Prev");
+
+  idx_invert_menu_ = count();
+  add_item(app_->invert_menu_buttons() ? "Menu Btn: Up/Down" : "Menu Btn: Down/Up");
+
+  add_separator();
+
+  // --- System / Maintenance ---
   if (data_dir_) {
     idx_clear_cache_ = count();
     add_item("Clear Cache");
@@ -149,13 +214,21 @@ void SettingsScreen::on_start() {
     add_item("Invalidate Font");
   }
 
-  add_separator();
-
   idx_spiffs_ = count();
   add_item("Rebuild SPIFFS");
 
   idx_switch_ota_ = count();
   add_item("Switch OTA");
+#endif
+
+  // --- Demos ---
+#ifdef MICROREADER_ENABLE_DEMOS
+  add_separator();
+  idx_bouncing_ball_ = count();
+  add_item("Bouncing Ball");
+
+  idx_grayscale_demo_ = count();
+  add_item("Grayscale Demo");
 #endif
 }
 
@@ -239,17 +312,15 @@ void SettingsScreen::on_select(int index) {
     if (app_ && !sd_fonts_.empty()) {
       font_sel_idx_ = (font_sel_idx_ + 1) % sd_fonts_.size();
       app_->set_custom_font_path(sd_fonts_[font_sel_idx_]);
-
-      std::string font_label = "Font: Built-in";
-      if (font_sel_idx_ > 0) {
-        const char* slash = strrchr(sd_fonts_[font_sel_idx_].c_str(), '/');
-#ifndef ESP_PLATFORM
-        if (!slash)
-          slash = strrchr(sd_fonts_[font_sel_idx_].c_str(), '\\');
-#endif
-        font_label = "Font: " + std::string(slash ? slash + 1 : sd_fonts_[font_sel_idx_].c_str());
-      }
-      set_item_label(idx_font_, font_label);
+      set_item_label(idx_font_, get_font_label(sd_fonts_[font_sel_idx_]));
+    }
+    return;
+  }
+  if (index == idx_sleep_image_) {
+    if (app_ && !sleep_images_.empty()) {
+      sleep_image_sel_idx_ = (sleep_image_sel_idx_ + 1) % sleep_images_.size();
+      app_->set_sleep_image_path(sleep_images_[sleep_image_sel_idx_]);
+      set_item_label(idx_sleep_image_, get_sleep_image_label(sleep_images_[sleep_image_sel_idx_]));
     }
     return;
   }

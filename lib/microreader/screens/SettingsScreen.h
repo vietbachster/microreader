@@ -44,9 +44,12 @@ class SettingsScreen final : public ListMenuScreen {
   int idx_invert_side_ = -1;
   int idx_rotate_display_ = -1;
   int idx_font_ = -1;
+  int idx_sleep_image_ = -1;
   DrawBuffer* buf_ = nullptr;
   std::vector<std::string> sd_fonts_;
   int font_sel_idx_ = 0;
+  std::vector<std::string> sleep_images_;
+  int sleep_image_sel_idx_ = 0;
 
   void clear_cache_();
 };

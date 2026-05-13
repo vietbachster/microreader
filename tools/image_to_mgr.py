@@ -65,6 +65,9 @@ def main():
     parser.add_argument(
         "--bin", action="store_true", help="Output a raw binary file instead of C++ header"
     )
+    parser.add_argument(
+        "--save-layers", action="store_true", help="Save the individual BW, LSB, MSB layers as PNGs for debugging"
+    )
     args = parser.parse_args()
 
     img = Image.open(args.input).convert("L")
@@ -87,10 +90,11 @@ def main():
     msb = (((levels == 2) | (levels == 3)).astype(np.uint8)) * 255
 
     # Save debug PNGs
-    Image.fromarray(bw).save(f"{args.out_prefix}_bw.png")
-    Image.fromarray(lsb).save(f"{args.out_prefix}_lsb.png")
-    Image.fromarray(msb).save(f"{args.out_prefix}_msb.png")
-    print(f"Saved {args.out_prefix}_bw.png, _lsb.png, _msb.png")
+    if args.save_layers:
+        Image.fromarray(bw).save(f"{args.out_prefix}_bw.png")
+        Image.fromarray(lsb).save(f"{args.out_prefix}_lsb.png")
+        Image.fromarray(msb).save(f"{args.out_prefix}_msb.png")
+        print(f"Saved {args.out_prefix}_bw.png, _lsb.png, _msb.png")
 
     # Pack bits into bytes (row-major, left-to-right, top-to-bottom)
     def pack_bits(arr, invert=False):

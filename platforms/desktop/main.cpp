@@ -45,6 +45,12 @@ class DesktopFontManager : public microreader::FontManager {
     if (path.empty()) {
       path = std::filesystem::absolute("resources/fonts").string() + "/bookerly.mfb";
     } else {
+      // Map built-in names from ESP32 to local .mfb files
+      if (path == "Bookerly")
+        path = "bookerly.mfb";
+      else if (path == "Alegreya")
+        path = "alegreya.mfb";
+
       // Allow relative paths inside resources/fonts/ for testing,
       // or absolute paths if it handles them.
       if (!std::filesystem::exists(path) && path.find('/') == std::string::npos) {
@@ -52,8 +58,10 @@ class DesktopFontManager : public microreader::FontManager {
       }
     }
 
-    bundle_data_ = load_file(path.c_str());
-    if (!bundle_data_.empty()) {
+    std::vector<uint8_t> new_bundle = load_file(path.c_str());
+    if (!new_bundle.empty()) {
+      bundle_data_ = std::move(new_bundle);
+
       // Clear fonts first
       for (int i = 0; i < microreader::kMaxFontSizes; i++) {
         prop_fonts_[i] = microreader::BitmapFont();

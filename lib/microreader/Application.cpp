@@ -66,6 +66,12 @@ void Application::start(DrawBuffer& buf, IRuntime& runtime) {
     pending_book_path_.clear();
   }
 
+  // Restore settings screen if it was active
+  if (pending_screen_ == "settings") {
+    screen_mgr_.push(&settings_, buf, runtime);
+  }
+  pending_screen_.clear();
+
   buf.full_refresh();
 }
 
@@ -98,9 +104,19 @@ void Application::update(const ButtonState& buttons, uint32_t dt_ms, DrawBuffer&
     // Reset rotation before drawing the sleeping screen
     buf.set_rotation(Rotation::Deg90);
 
-    // Attempt to load and show the sleep image (SD card first, then embedded fallback)
-    if (!buf.show_sleep_image("/sdcard/sleep/sleep.mgr")) {
-      buf.show_sleep_image_embedded();
+    // Attempt to load and show the sleep image (settings > SD card default > embedded fallback)
+    bool sleep_shown = false;
+    if (!sleep_image_path_.empty()) {
+      if (sleep_image_path_.rfind("embedded:", 0) == 0) {
+        int idx = std::atoi(sleep_image_path_.c_str() + 9);
+        sleep_shown = buf.show_sleep_image_embedded(idx);
+      } else {
+        sleep_shown = buf.show_sleep_image(sleep_image_path_.c_str());
+      }
+    }
+
+    if (!sleep_shown) {
+      buf.show_sleep_image_embedded(0);
     }
 
     running_ = false;
@@ -167,8 +183,18 @@ void microreader::Application::save_settings_() {
   // Last screen / book — treat reader-is-anywhere-in-stack as "reader" so
   // shutting down from ReaderOptionsScreen still boots back into the reader.
   ReaderScreen* reader = &reader_;
+  const bool settings_active = screen_mgr_.contains(&settings_);
   const bool reader_active = screen_mgr_.contains(reader);
-  std::fprintf(f, "screen=%s\n", reader_active ? "reader" : "menu");
+
+  if (settings_active) {
+    std::fprintf(f, "screen=settings\n");
+    std::fprintf(f, "setting_sel=%d\n", settings_.selected_index());
+  } else if (reader_active) {
+    std::fprintf(f, "screen=reader\n");
+  } else {
+    std::fprintf(f, "screen=menu\n");
+  }
+
   if (reader_active && reader->has_path())
     std::fprintf(f, "book_path=%s\n", reader->get_path().c_str());
 
@@ -200,6 +226,8 @@ void microreader::Application::save_settings_() {
     std::fprintf(f, "custom_font=%s\n", custom_font_path_.c_str());
   if (!installed_font_path_.empty())
     std::fprintf(f, "inst_font=%s\n", installed_font_path_.c_str());
+  if (!sleep_image_path_.empty())
+    std::fprintf(f, "sleep_image=%s\n", sleep_image_path_.c_str());
 
   std::fclose(f);
 }
@@ -213,6 +241,7 @@ void microreader::Application::load_settings_() {
 
   char line[512];
   std::string last_screen, last_book_path, book_sel;
+  int setting_sel = 0;
   ReaderSettings& rs = reader_.reader_settings();
 
   while (std::fgets(line, sizeof(line), f)) {
@@ -225,6 +254,8 @@ void microreader::Application::load_settings_() {
     unsigned uval = 0;
     if (std::sscanf(line, "screen=%511s", sval) == 1)
       last_screen = sval;
+    else if (std::sscanf(line, "setting_sel=%d", &setting_sel) == 1)
+      ;
     else if (std::sscanf(line, "book_path=%511[^\n]", sval) == 1)
       last_book_path = sval;
     else if (std::sscanf(line, "book_sel=%511[^\n]", sval) == 1)
@@ -263,6 +294,8 @@ void microreader::Application::load_settings_() {
       custom_font_path_ = sval;
     else if (std::sscanf(line, "inst_font=%511[^\n]", sval) == 1)
       installed_font_path_ = sval;
+    else if (std::sscanf(line, "sleep_image=%511[^\n]", sval) == 1)
+      sleep_image_path_ = sval;
   }
   std::fclose(f);
   MR_LOGI("app", "Loaded settings: align=%u ph=%u pv=%u ls=%u prog=%u sel=%s", static_cast<unsigned>(rs.align_override),
@@ -273,9 +306,14 @@ void microreader::Application::load_settings_() {
   if (!book_sel.empty())
     menu_.set_initial_selection(book_sel.c_str());
 
+  // Restore settings menu selection
+  settings_.set_initial_selection(setting_sel);
+
   // Store the book to auto-open; actual push happens in start() after buf is ready.
   if (last_screen == "reader" && !last_book_path.empty())
     pending_book_path_ = last_book_path;
+
+  pending_screen_ = last_screen;
 }
 
 bool Application::running() const {

@@ -19,10 +19,19 @@ class FontManager : public microreader::FontManager {
   // font to the app immediately.  Otherwise, ensure_ready() handles it lazily
   // when the user first opens a book.
   void init() {
-    extern const uint8_t _binary_font_bundle_bin_start[];
-    extern const uint8_t _binary_font_bundle_bin_end[];
-    bundle_data_ = _binary_font_bundle_bin_start;
-    bundle_size_ = static_cast<size_t>(_binary_font_bundle_bin_end - _binary_font_bundle_bin_start);
+    extern const uint8_t _binary_bookerly_bin_start[];
+    extern const uint8_t _binary_bookerly_bin_end[];
+    extern const uint8_t _binary_alegreya_bin_start[];
+    extern const uint8_t _binary_alegreya_bin_end[];
+
+    const std::string& current = app_.custom_font_path();
+    if (current == "Alegreya") {
+      bundle_data_ = _binary_alegreya_bin_start;
+      bundle_size_ = static_cast<size_t>(_binary_alegreya_bin_end - _binary_alegreya_bin_start);
+    } else {
+      bundle_data_ = _binary_bookerly_bin_start;
+      bundle_size_ = static_cast<size_t>(_binary_bookerly_bin_end - _binary_bookerly_bin_start);
+    }
 
     if (font_part_.mmap()) {
       load_fonts_();
@@ -34,9 +43,9 @@ class FontManager : public microreader::FontManager {
           }
         }
         app_.set_reader_font(font_set());
-          if (FontPartition::needs_provisioning(bundle_data_, bundle_size_)) {
-            ESP_LOGI("font", "font needs provisioning — will install before app start");
-          }
+        if (FontPartition::needs_provisioning(bundle_data_, bundle_size_)) {
+          ESP_LOGI("font", "font needs provisioning ï¿½ will install before app start");
+        }
       } else {
         ESP_LOGW("font", "no valid Normal font found");
       }
@@ -49,8 +58,25 @@ class FontManager : public microreader::FontManager {
     const std::string& custom_font = app_.custom_font_path();
     const std::string& installed_font = app_.installed_font_path();
 
+    extern const uint8_t _binary_bookerly_bin_start[];
+    extern const uint8_t _binary_bookerly_bin_end[];
+    extern const uint8_t _binary_alegreya_bin_start[];
+    extern const uint8_t _binary_alegreya_bin_end[];
+
+    const uint8_t* target_bundle_data;
+    size_t target_bundle_size;
+    if (custom_font == "Alegreya") {
+      target_bundle_data = _binary_alegreya_bin_start;
+      target_bundle_size = static_cast<size_t>(_binary_alegreya_bin_end - _binary_alegreya_bin_start);
+    } else {
+      target_bundle_data = _binary_bookerly_bin_start;
+      target_bundle_size = static_cast<size_t>(_binary_bookerly_bin_end - _binary_bookerly_bin_start);
+    }
+
+    bool is_embedded = (custom_font == "" || custom_font == "Bookerly" || custom_font == "Alegreya");
+
     if (custom_font == installed_font &&
-        (custom_font != "" || !FontPartition::needs_provisioning(bundle_data_, bundle_size_))) {
+        (!is_embedded || !FontPartition::needs_provisioning(target_bundle_data, target_bundle_size))) {
       // If we skipped setting it in init() due to CRC checks, set it now.
       if (font_set_.valid()) {
         app_.set_reader_font(font_set());
@@ -61,12 +87,13 @@ class FontManager : public microreader::FontManager {
     buf.sync_bw_ram();
     buf.show_loading("Installing fonts...", 0);
 
-    if (custom_font == "") {
+    if (is_embedded) {
       ESP_LOGI("font", "Provisioning font from firmware (first launch or firmware update)...");
-      if (FontPartition::provision_embedded(
-              bundle_data_, bundle_size_, buf.scratch_buf1(), microreader::DrawBuffer::kBufSize, buf.scratch_buf2(),
-              microreader::DrawBuffer::kBufSize, [&buf](int pct) { buf.show_loading("Installing fonts...", pct); })) {
-        app_.set_installed_font_path("");
+      if (FontPartition::provision_embedded(target_bundle_data, target_bundle_size, buf.scratch_buf1(),
+                                            microreader::DrawBuffer::kBufSize, buf.scratch_buf2(),
+                                            microreader::DrawBuffer::kBufSize,
+                                            [&buf](int pct) { buf.show_loading("Installing fonts...", pct); })) {
+        app_.set_installed_font_path(custom_font);
         buf.reset_after_scratch();
         if (font_part_.mmap()) {
           load_fonts_();
@@ -144,5 +171,3 @@ class FontManager : public microreader::FontManager {
   const uint8_t* bundle_data_ = nullptr;
   size_t bundle_size_ = 0;
 };
-
-
