@@ -15,6 +15,7 @@
 
 #include "esp_ota_ops.h"
 #include "esp_partition.h"
+#include "esp_rom_crc.h"
 #include "esp_system.h"
 #include "miniz.h"
 #else
@@ -217,8 +218,20 @@ void SettingsScreen::on_start() {
   idx_spiffs_ = count();
   add_item("Rebuild SPIFFS");
 
-  idx_switch_ota_ = count();
-  add_item("Switch OTA");
+  {
+    auto running = esp_ota_get_running_partition();
+    auto next = esp_ota_get_next_update_partition(running);
+    if (next) {
+      esp_ota_img_states_t state = ESP_OTA_IMG_UNDEFINED;
+      esp_ota_get_state_partition(next, &state);
+      ESP_LOGI("OTA", "on_start: next=%s state=%d", next->label, (int)state);
+      if (state == ESP_OTA_IMG_VALID || state == ESP_OTA_IMG_NEW || state == ESP_OTA_IMG_PENDING_VERIFY ||
+          state == ESP_OTA_IMG_UNDEFINED) {
+        idx_switch_ota_ = count();
+        add_item("Switch OTA");
+      }
+    }
+  }
 #endif
 
   // --- Demos ---
@@ -328,7 +341,42 @@ void SettingsScreen::on_select(int index) {
   if (index == idx_switch_ota_) {
     auto running = esp_ota_get_running_partition();
     auto next = esp_ota_get_next_update_partition(running);
-    esp_ota_set_boot_partition(next);
+    ESP_LOGI("OTA", "Running: %s @ 0x%08lx", running ? running->label : "null",
+             running ? (unsigned long)running->address : 0UL);
+    ESP_LOGI("OTA", "Next:    %s @ 0x%08lx", next ? next->label : "null", next ? (unsigned long)next->address : 0UL);
+    if (!next) {
+      ESP_LOGE("OTA", "No next OTA partition found, aborting");
+      return;
+    }
+    // esp_ota_set_boot_partition validates the image header and rejects directly-flashed
+    // binaries built with older IDF versions (ESP_ERR_OTA_VALIDATE_FAILED).
+    // Write otadata directly instead, mirroring switch_partition.py.
+    const esp_partition_t* otadata =
+        esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_OTA, NULL);
+    if (!otadata) {
+      ESP_LOGE("OTA", "No otadata partition found");
+      return;
+    }
+    // seq=1 selects ota_0 (app0), seq=2 selects ota_1 (app1)
+    uint32_t seq = (next->subtype == ESP_PARTITION_SUBTYPE_APP_OTA_1) ? 2U : 1U;
+    // Build 32-byte esp_ota_select_entry_t: [ota_seq:4][seq_label:20=0xFF][ota_state:4=0xFF][crc:4]
+    // CRC is over ota_seq only (per esp_flash_partitions.h)
+    uint8_t entry[32];
+    memset(entry, 0xFF, sizeof(entry));
+    memcpy(entry, &seq, 4);
+    uint32_t crc = esp_rom_crc32_le(0xFFFFFFFFU, (const uint8_t*)&seq, 4);
+    memcpy(entry + 28, &crc, 4);
+    esp_err_t ret = esp_partition_erase_range(otadata, 0, otadata->size);
+    if (ret != ESP_OK) {
+      ESP_LOGE("OTA", "Failed to erase otadata: %s", esp_err_to_name(ret));
+      return;
+    }
+    ret = esp_partition_write(otadata, 0, entry, sizeof(entry));
+    if (ret != ESP_OK) {
+      ESP_LOGE("OTA", "Failed to write otadata: %s", esp_err_to_name(ret));
+      return;
+    }
+    ESP_LOGI("OTA", "Switching to %s (seq=%lu), restarting", next->label, (unsigned long)seq);
     esp_restart();
   }
   if (index == idx_invalidate_font_) {
