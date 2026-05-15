@@ -792,6 +792,36 @@ bool ReaderScreen::prev_page_() {
 
   layout_engine_.set_position(end);
   auto pc = layout_engine_.layout_backward();
+
+  // If the backward page would START mid-image (i.e., the result is a sliced
+  // image, like a small bottom portion of a tall image), snap the backward
+  // *end* to just past the image inside that paragraph. layout_backward then
+  // yields a page whose end aligns with where the image ends, so the page
+  // contains the FULL image plus whatever preceding content fits above it.
+  // Mirror of next_page_'s "snap to image-top" — but on the trailing edge.
+  if (pc.start.offset > 0 && chapter_src_ && pc.start.paragraph < chapter_src_->paragraph_count()) {
+    PagePosition snap_end = end;
+    bool snap = false;
+    const auto& sp = chapter_src_->paragraph(pc.start.paragraph);
+    if (sp.type == ParagraphType::Image) {
+      // Standalone image paragraph: end of image = start of next paragraph.
+      snap_end = PagePosition{static_cast<uint16_t>(pc.start.paragraph + 1), 0, 0};
+      snap = true;
+    } else if (layout_engine_.is_mid_promoted_image(pc.start)) {
+      uint16_t img_end = layout_engine_.promoted_image_end_offset(pc.start.paragraph);
+      if (img_end > 0) {
+        snap_end = PagePosition{pc.start.paragraph, img_end, 0};
+        snap = true;
+      }
+    }
+    // Only re-run if the snap actually changed the target — otherwise we'd
+    // loop on the same page.
+    if (snap && !(snap_end == end)) {
+      layout_engine_.set_position(snap_end);
+      pc = layout_engine_.layout_backward();
+    }
+  }
+
   page_pos_ = pc.start;
   return true;
 }

@@ -155,6 +155,7 @@ add_executable(microreader_tests
     integration/DebugLayoutTest.cpp
     integration/DitherComparisonTest.cpp
     integration/LinkNavigationTest.cpp
+    integration/HrBackwardTest.cpp
     unit/LinksScreenTest.cpp
 )
 target_include_directories(microreader_tests PRIVATE

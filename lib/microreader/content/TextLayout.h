@@ -234,6 +234,13 @@ class TextLayout {
   // is shown on the next page.
   bool is_mid_promoted_image(PagePosition pos) const;
 
+  // Returns the offset (in the paragraph's idx space) just past the promoted
+  // inline image of paragraph `para`, i.e. the offset where the first text
+  // line after the image begins. Returns 0 if the paragraph has no promoted
+  // image. Used by backward navigation to land on a page that contains the
+  // FULL image rather than a slice.
+  uint16_t promoted_image_end_offset(uint16_t para) const;
+
   // Uses the layout cache (with the currently configured font/options)
   // to sync `offset` (line index) based on the absolute `text_offset` of the page position.
   PagePosition resolve_stable_position(PagePosition pos) const;

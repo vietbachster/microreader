@@ -6,7 +6,44 @@
 
 #include "hyphenation/Hyphenation.h"
 
+// Set to 1 to print a step-by-step trace of forward + backward page collection.
+// Output goes to stdout; safe to enable in desktop builds while debugging.
+#ifndef MR_LAYOUT_TRACE
+#define MR_LAYOUT_TRACE 0
+#endif
+
+#if MR_LAYOUT_TRACE
+#define MR_TRACE(...)         \
+  do {                        \
+    std::printf("[layout] "); \
+    std::printf(__VA_ARGS__); \
+    std::printf("\n");        \
+  } while (0)
+#else
+#define MR_TRACE(...) ((void)0)
+#endif
+
 namespace microreader {
+
+#if MR_LAYOUT_TRACE
+static const char* trace_kind(int k) {
+  switch (k) {
+    case TextLayout::PageItem::TextLine:
+      return "Text";
+    case TextLayout::PageItem::Image:
+      return "Image";
+    case TextLayout::PageItem::Hr:
+      return "Hr";
+    case TextLayout::PageItem::PageBreak:
+      return "PgBrk";
+    case TextLayout::PageItem::Empty:
+      return "Empty";
+    case TextLayout::PageItem::Spacer:
+      return "Spacer";
+  }
+  return "?";
+}
+#endif
 
 // ---------------------------------------------------------------------------
 // PageContent typed accessors
@@ -651,21 +688,22 @@ static void spread_text_items(PageContent& page, const PageOptions& opts, const 
 
   const size_t N = idxs.size();
 
-  // Compute slack based on the last text item's baseline reaching ph.
-  // If there are no text items (only images/hr), fall back to slot-bottom semantics.
+  // Compute slack so that the LAST spreadable item lands at the page bottom.
+  //   * If the last item is a text line, anchor by its baseline (so padding_bottom
+  //     measures from screen bottom to the last text baseline).
+  //   * Otherwise (HR / image), anchor by its slot bottom — bottom-aligning the
+  //     block to ph. Anchoring by an earlier text baseline would let the spread
+  //     push trailing blocks (e.g. a chapter-end HR) below the page boundary.
   int32_t slack;
   {
-    bool found = false;
-    for (int i = static_cast<int>(N) - 1; i >= 0; --i) {
-      if (const PageTextItem* ti = std::get_if<PageTextItem>(&page.items[idxs[i]])) {
-        uint16_t last_baseline_y = item_y(page.items[idxs[i]]) + ti->baseline;
-        slack = static_cast<int32_t>(ph) - static_cast<int32_t>(last_baseline_y);
-        found = true;
-        break;
-      }
+    size_t last = idxs.back();
+    if (const PageTextItem* ti = std::get_if<PageTextItem>(&page.items[last])) {
+      uint16_t last_baseline_y = item_y(page.items[last]) + ti->baseline;
+      slack = static_cast<int32_t>(ph) - static_cast<int32_t>(last_baseline_y);
+    } else {
+      uint16_t last_bottom = item_y(page.items[last]) + item_height(page.items[last]);
+      slack = static_cast<int32_t>(ph) - static_cast<int32_t>(last_bottom);
     }
-    if (!found)
-      slack = static_cast<int32_t>(ph) - static_cast<int32_t>(y);
   }
 
   if (slack <= 0 || slack >= static_cast<int32_t>(dy) * 2)
@@ -996,6 +1034,8 @@ std::optional<Collected> TextLayout::LaidOutParagraph::collect_backward(size_t e
 static size_t collect_para_items(const LaidOut& lp, size_t start_idx, uint16_t spc, uint16_t ph, uint16_t& used,
                                  bool& has_content, bool& page_full, bool& pending_page_break, PagePosition& boundary,
                                  std::vector<PageItem>& items) {
+  MR_TRACE("  fwd para %u: start_idx=%zu spc=%u used=%u ph=%u", (unsigned)lp.para_idx, start_idx, (unsigned)spc,
+           (unsigned)used, (unsigned)ph);
   size_t break_idx = start_idx;
   for (size_t idx = start_idx; !page_full; ++idx) {
     break_idx = idx;
@@ -1012,20 +1052,28 @@ static size_t collect_para_items(const LaidOut& lp, size_t start_idx, uint16_t s
           uint32_t to = (lp.type == ParagraphType::Text && idx < lp.lines.size()) ? lp.lines[idx].text_offset : 0;
           boundary = {lp.para_idx, static_cast<uint16_t>(idx), to};
           page_full = true;
+          MR_TRACE("    fwd avail=0 -> page_full at {p=%u,off=%zu}", (unsigned)lp.para_idx, idx);
         }
       }
       break;
     }
 
     auto r = lp.collect(idx, avail);
-    if (!r)
+    if (!r) {
+      MR_TRACE("    fwd idx=%zu avail=%u -> NO FIT (exhausted or too tall)", idx, (unsigned)avail);
       break;
+    }
 
     if (r->item.kind == PageItem::PageBreak) {
       boundary = {static_cast<uint16_t>(lp.para_idx + 1), 0};
       pending_page_break = has_content;
+      MR_TRACE("    fwd PageBreak -> boundary={p=%u,0}", (unsigned)(lp.para_idx + 1));
       break;
     }
+
+    MR_TRACE("    fwd idx=%zu kind=%s h=%u bl=%u avail=%u gap=%u -> used %u->%u", idx, trace_kind(r->item.kind),
+             (unsigned)r->item.height, (unsigned)r->item.baseline, (unsigned)avail, (unsigned)gap, (unsigned)used,
+             (unsigned)(used + gap + r->item.height));
 
     used += gap + r->item.height;
     has_content |= (r->item.kind != PageItem::Empty);
@@ -1092,7 +1140,11 @@ std::vector<LayoutLine> TextLayout::layout_paragraph(const LayoutOptions& opts, 
 }
 
 PageContent TextLayout::layout() const {
+  MR_TRACE("=== layout() FORWARD from {p=%u,off=%u,to=%u} ===", (unsigned)position_.paragraph,
+           (unsigned)position_.offset, (unsigned)position_.text_offset);
   auto c = collect_page_items(position_);
+  MR_TRACE("=== forward done: items=%zu boundary={p=%u,off=%u} at_end=%d ===", c.items.size(),
+           (unsigned)c.boundary.paragraph, (unsigned)c.boundary.offset, (int)c.at_chapter_end);
   return assemble_page(c.items, position_, c.boundary, c.at_chapter_end);
 }
 
@@ -1136,6 +1188,8 @@ static size_t paragraph_end_idx(const LaidOut& lp) {
 // Returns the remaining start offset within the paragraph (0 = fully consumed).
 static size_t collect_para_items_bwd(const LaidOut& lp, size_t end_idx, uint16_t spc, uint16_t ph, uint16_t desc,
                                      uint16_t& used, bool& page_full, std::vector<PageItem>& rev_items) {
+  MR_TRACE("  bwd para %u: end_idx=%zu spc=%u used=%u ph=%u desc=%u", (unsigned)lp.para_idx, end_idx, (unsigned)spc,
+           (unsigned)used, (unsigned)ph, (unsigned)desc);
   size_t idx = end_idx;
   bool first_item = true;
   while (idx > 0 && !page_full) {
@@ -1149,8 +1203,10 @@ static size_t collect_para_items_bwd(const LaidOut& lp, size_t end_idx, uint16_t
 
     if (effective_avail == 0) {
       auto probe = lp.collect_backward(idx, ph);
-      if (probe)
+      if (probe) {
         page_full = true;
+        MR_TRACE("    bwd idx=%zu avail=0 -> page_full", idx);
+      }
       break;
     }
 
@@ -1158,12 +1214,44 @@ static size_t collect_para_items_bwd(const LaidOut& lp, size_t end_idx, uint16_t
     if (!r) {
       // Distinguish exhausted vs. item too tall for remaining space.
       auto probe = lp.collect_backward(idx, ph);
-      if (probe)
+      if (probe) {
         page_full = true;
+        MR_TRACE("    bwd idx=%zu avail=%u -> item too tall, page_full", idx, (unsigned)effective_avail);
+      } else {
+        MR_TRACE("    bwd idx=%zu -> exhausted", idx);
+      }
       break;
     }
 
-    used += gap + r->item.height;
+    // Symmetric baseline-fit rule:
+    //   * The FIRST backward-collected item is the LAST item in forward order.
+    //     If it's a text line, forward layout allows its descender to extend
+    //     past the page bottom, so backward must count only its baseline toward
+    //     `used` — otherwise the budget for items above it is too tight and a
+    //     line that forward would have placed at the top would be rejected
+    //     here (e.g. BaselineFit_ForwardBackwardRoundTrip).
+    //   * EVERY OTHER backward-collected text item must fit by its FULL line
+    //     height. Forward only tolerates descender overflow on its last item;
+    //     allowing it mid-page in backward would yield a page whose start, when
+    //     re-rendered forward, drops the bottom-most item (e.g. an HR sitting
+    //     after a tall paragraph at chapter end — see HrBackwardTest).
+    const bool is_first_on_page = rev_items.empty();
+    if (!is_first_on_page && r->item.kind == PageItem::TextLine && r->item.height > effective_avail) {
+      page_full = true;
+      MR_TRACE("    bwd idx=%zu kind=Text h=%u > avail=%u (non-first) -> REJECT, page_full", idx,
+               (unsigned)r->item.height, (unsigned)effective_avail);
+      break;
+    }
+    uint16_t consumed = r->item.height;
+    if (is_first_on_page && r->item.kind == PageItem::TextLine)
+      consumed = r->item.baseline;
+
+    MR_TRACE("    bwd idx=%zu kind=%s h=%u bl=%u avail=%u gap=%u first=%d consumed=%u -> used %u->%u next_idx=%zu", idx,
+             trace_kind(r->item.kind), (unsigned)r->item.height, (unsigned)r->item.baseline, (unsigned)effective_avail,
+             (unsigned)gap, (int)is_first_on_page, (unsigned)consumed, (unsigned)used,
+             (unsigned)(used + gap + consumed), r->next_idx);
+
+    used += gap + consumed;
     first_item = false;
     idx = r->next_idx;
     rev_items.push_back(std::move(r->item));
@@ -1270,7 +1358,11 @@ TextLayout::CollectResult TextLayout::collect_page_items_backward(PagePosition e
 }
 
 PageContent TextLayout::layout_backward() const {
+  MR_TRACE("=== layout_backward() from {p=%u,off=%u,to=%u} ===", (unsigned)position_.paragraph,
+           (unsigned)position_.offset, (unsigned)position_.text_offset);
   auto c = collect_page_items_backward(position_);
+  MR_TRACE("=== backward done: items=%zu start={p=%u,off=%u} at_end=%d ===", c.items.size(),
+           (unsigned)c.boundary.paragraph, (unsigned)c.boundary.offset, (int)c.at_chapter_end);
   return assemble_page(c.items, c.boundary, position_, c.at_chapter_end);
 }
 
@@ -1285,6 +1377,21 @@ bool TextLayout::is_mid_promoted_image(PagePosition pos) const {
     return false;
   const LaidOutParagraph& lp = get_laid_out_(pos.paragraph);
   return lp.inline_img.promoted && lp.promoted_h > 0 && (size_t)pos.offset < (size_t)lp.promoted_h;
+}
+
+uint16_t TextLayout::promoted_image_end_offset(uint16_t para) const {
+  if (!source_)
+    return 0;
+  const size_t pcnt = source_->paragraph_count();
+  if ((size_t)para >= pcnt)
+    return 0;
+  const auto& p = source_->paragraph(para);
+  if (p.type != ParagraphType::Text)
+    return 0;
+  const LaidOutParagraph& lp = get_laid_out_(para);
+  if (!lp.inline_img.promoted || lp.promoted_h == 0)
+    return 0;
+  return lp.promoted_h;
 }
 
 PagePosition TextLayout::resolve_stable_position(PagePosition pos) const {
