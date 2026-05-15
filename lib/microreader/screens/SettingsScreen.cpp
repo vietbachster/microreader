@@ -15,6 +15,7 @@
 
 #include "esp_ota_ops.h"
 #include "esp_partition.h"
+#include "esp_rom_crc.h"
 #include "esp_system.h"
 #include "miniz.h"
 #else
@@ -227,7 +228,9 @@ void SettingsScreen::on_start() {
       if (state == ESP_OTA_IMG_VALID || state == ESP_OTA_IMG_NEW || state == ESP_OTA_IMG_PENDING_VERIFY ||
           state == ESP_OTA_IMG_UNDEFINED) {
         idx_switch_ota_ = count();
-        add_item("Switch OTA");
+        char label[24];
+        std::snprintf(label, sizeof(label), "Switch to %s", next->label);
+        add_item(label);
       }
     }
   }
@@ -411,6 +414,43 @@ void SettingsScreen::on_select(int index) {
 }
 
 #ifdef ESP_PLATFORM
+// Fallback: write the otadata partition directly, bypassing esp_image_verify.
+// Mirrors what tools/switch_partition.py does from the host side.
+// Use only when esp_ota_set_boot_partition refuses an image we know is
+// good (e.g. foreign firmware whose seg0 is too large to mmap from a
+// running app on ESP32-C3).
+static esp_err_t force_switch_via_otadata_(const esp_partition_t* next) {
+  if (!next)
+    return ESP_ERR_INVALID_ARG;
+  const esp_partition_t* otadata =
+      esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_OTA, nullptr);
+  if (!otadata) {
+    ESP_LOGE("OTA", "otadata partition not found");
+    return ESP_ERR_NOT_FOUND;
+  }
+
+  // ota_seq: 1 -> ota_0 (app0), 2 -> ota_1 (app1)
+  uint32_t seq = (next->subtype == ESP_PARTITION_SUBTYPE_APP_OTA_0) ? 1u : 2u;
+  uint8_t entry[32];
+  std::memset(entry, 0xFF, sizeof(entry));
+  std::memcpy(entry, &seq, 4);
+  uint32_t crc = esp_rom_crc32_le(UINT32_MAX, reinterpret_cast<const uint8_t*>(&seq), 4);
+  std::memcpy(entry + 28, &crc, 4);
+
+  esp_err_t err = esp_partition_erase_range(otadata, 0, otadata->size);
+  if (err != ESP_OK) {
+    ESP_LOGE("OTA", "otadata erase failed: %s", esp_err_to_name(err));
+    return err;
+  }
+  err = esp_partition_write(otadata, 0, entry, sizeof(entry));
+  if (err != ESP_OK) {
+    ESP_LOGE("OTA", "otadata write failed: %s", esp_err_to_name(err));
+    return err;
+  }
+  ESP_LOGW("OTA", "Forced boot slot via otadata write (seq=%u -> %s)", (unsigned)seq, next->label);
+  return ESP_OK;
+}
+
 void SettingsScreen::switch_ota_partition_() {
   auto running = esp_ota_get_running_partition();
   auto next = esp_ota_get_next_update_partition(running);
@@ -423,12 +463,20 @@ void SettingsScreen::switch_ota_partition_() {
   }
 
   esp_err_t ret = esp_ota_set_boot_partition(next);
-  if (ret != ESP_OK) {
-    ESP_LOGE("OTA", "esp_ota_set_boot_partition failed: %s", esp_err_to_name(ret));
+  if (ret == ESP_OK) {
+    ESP_LOGI("OTA", "Switching to %s, restarting", next->label);
+    esp_restart();
     return;
   }
-  ESP_LOGI("OTA", "Switching to %s, restarting", next->label);
-  esp_restart();
+
+  ESP_LOGW("OTA", "esp_ota_set_boot_partition refused (%s); falling back to direct otadata write",
+           esp_err_to_name(ret));
+  if (force_switch_via_otadata_(next) == ESP_OK) {
+    ESP_LOGI("OTA", "Restarting into %s (unverified)", next->label);
+    esp_restart();
+  } else {
+    ESP_LOGE("OTA", "Forced switch failed; staying on %s", running ? running->label : "running");
+  }
 }
 #endif
 
