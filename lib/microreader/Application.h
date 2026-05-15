@@ -12,6 +12,7 @@
 #include "screens/ChapterSelectScreen.h"
 #include "screens/GrayscaleDemo.h"
 #include "screens/IScreen.h"
+#include "screens/LinksScreen.h"
 #include "screens/MainMenu.h"
 #include "screens/ReaderOptionsScreen.h"
 #include "screens/ReaderScreen.h"
@@ -29,6 +30,7 @@ enum class ScreenId : uint8_t {
   GrayscaleDemo,
   ReaderOptions,
   ChapterSelect,
+  Links,
 };
 
 class Application {
@@ -92,6 +94,9 @@ class Application {
   }
   ChapterSelectScreen* chapter_select() {
     return &chapter_select_;
+  }
+  LinksScreen* links_screen() {
+    return &links_screen_;
   }
   MainMenu* main_menu() {
     return &menu_;
@@ -204,6 +209,7 @@ class Application {
   GrayscaleDemo grayscale_demo_;
   ReaderOptionsScreen reader_options_;
   ChapterSelectScreen chapter_select_;
+  LinksScreen links_screen_;
   ScreenId pending_push_ = ScreenId::None;
   ScreenId pending_replace_ = ScreenId::None;
   int pending_pop_count_ = 0;

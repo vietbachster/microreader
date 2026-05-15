@@ -1,8 +1,10 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
+#include "../content/mrb/MrbReader.h"
 #include "ListMenuScreen.h"
 
 namespace microreader {
@@ -81,6 +83,13 @@ struct ReaderSettings {
   }
 };
 
+// A hyperlink found on the current reader page.
+// Used to pass link info from ReaderScreen → ReaderOptionsScreen → LinksScreen.
+struct PageLink {
+  std::string label;  // full anchor text of the link (all words concatenated)
+  std::string href;   // "path|fragment" (see EpubParser.cpp)
+};
+
 // In-reader options menu — shown when the user presses Button1 while reading.
 // Populated by ReaderScreen before being pushed so it reflects the current
 // reading context (TOC availability, page links, etc.).
@@ -110,10 +119,18 @@ class ReaderOptionsScreen final : public ListMenuScreen {
   void populate(const TableOfContents& toc, uint16_t current_chapter, uint16_t current_para,
                 const std::string& fallback_title, int progress_pct);
 
+  // Set links found on the current reader page (called after populate).
+  // spine_files maps chapter index → base filename for href resolution.
+  // mrb is used to resolve fragment anchors.
+  void set_page_links(const std::vector<PageLink>& links, const std::vector<std::string>& spine_files,
+                      const MrbReader& mrb);
+
   void update(const ButtonState& buttons, DrawBuffer& buf, IRuntime& runtime) override {
     buf_ = &buf;
     ListMenuScreen::update(buttons, buf, runtime);
   }
+
+  void start(DrawBuffer& buf, IRuntime& runtime) override;
 
  protected:
   void on_start() override;
@@ -133,9 +150,17 @@ class ReaderOptionsScreen final : public ListMenuScreen {
   int idx_pub_fonts_ = -1;
   int idx_chapters_ = -1;
   int idx_rotate_display_ = -1;
+  int idx_links_ = -1;
+
+  // Page links set by ReaderScreen before pushing this screen.
+  std::vector<PageLink> page_links_;
 
   // Re-populate item labels after an inline setting change, restoring selection.
   void refresh_items_(int restore_selection);
+
+  // Saved before rebuilding the list so on_start() can restore the correct item.
+  int prev_selected_ = 0;
+  int prev_idx_links_ = -1;
 
   std::string chapter_title_;
   int progress_pct_ = 0;

@@ -710,14 +710,30 @@ def ch_empty_elements():
 
 
 def ch_links():
-    """Chapter 24: Links and anchors."""
+    """Chapter 24: Links and anchors — comprehensive href attribution tests."""
     return make_xhtml(
         "Links",
         """\
 <h1>24. Links</h1>
-<p>A paragraph with <a href="http://example.com">a link</a> inline.</p>
-<p>Footnote reference<a href="#fn1"><sup>1</sup></a> in text.</p>
-<div id="fn1"><p><a href="#fn1">1</a> This is the footnote text.</p></div>
+
+<p>Simple inline link: before <a href="ch01_basic.xhtml">link text</a> after. Only the link should be underlined.</p>
+
+<p>Link at paragraph start: <a href="ch02_headings.xhtml">start link</a> then normal text.</p>
+
+<p>Multiple links on one line: <a href="#sec1">Section 1</a> and <a href="#sec2">Section 2</a> and <a href="#sec3">Section 3</a>.</p>
+
+<p>Footnote reference<a href="#fn1"><sup>1</sup></a> in text. More text after footnote marker.</p>
+
+<p>Link with styled content: <a href="ch03_font_sizes.xhtml"><b>bold link</b></a> and <a href="ch04_nested_font.xhtml"><i>italic link</i></a>.</p>
+
+<h2>Table of Contents (tests href attribution in table rows)</h2>
+<table>
+  <tr><td style="text-align: right;">I. </td><td style="text-align: left;"><span>First Chapter</span></td><td style="text-align: right;"><a href="ch01_basic.xhtml#Page_1">1</a></td></tr>
+  <tr><td style="text-align: right;">II. </td><td style="text-align: left;"><span>Second Chapter</span></td><td style="text-align: right;"><a href="ch02_headings.xhtml#Page_13">13</a></td></tr>
+  <tr><td style="text-align: right;">III. </td><td style="text-align: left;"><span>Third Chapter</span></td><td style="text-align: right;"><a href="ch03_font_sizes.xhtml#Page_24">24</a></td></tr>
+</table>
+
+<div id="fn1"><p><a href="#fn1">1</a> This is the footnote text. Clicking the footnote marker in the paragraph above should jump here.</p></div>
 """,
         css_link="style.css",
     )

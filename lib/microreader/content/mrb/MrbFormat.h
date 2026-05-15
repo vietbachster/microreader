@@ -31,7 +31,7 @@ namespace microreader {
 // ---------------------------------------------------------------------------
 
 static constexpr uint8_t kMrbMagic[4] = {'M', 'R', 'B', '1'};
-static constexpr uint16_t kMrbVersion = 8;  // v8: flat descriptor table replaces linked list
+static constexpr uint16_t kMrbVersion = 10;  // v10: anchor table (id→para_index for link navigation)
 
 // ---------------------------------------------------------------------------
 // Header (32 bytes, fixed)
@@ -44,7 +44,7 @@ struct MrbHeader {
   uint32_t paragraph_count;
   uint16_t chapter_count;
   uint16_t image_count;
-  uint32_t reserved;        // was index_offset in v1
+  uint32_t anchor_offset;   // file offset of anchor table (id→para for link navigation)
   uint32_t chapter_offset;  // file offset of chapter table
   uint32_t image_offset;    // file offset of image ref table
   uint32_t meta_offset;     // file offset of metadata blob

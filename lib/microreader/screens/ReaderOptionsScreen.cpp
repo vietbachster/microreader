@@ -46,6 +46,23 @@ static const char* fmt_setting(char* buf, size_t bufsz, const char* label, const
   return buf;
 }
 
+void ReaderOptionsScreen::start(DrawBuffer& buf, IRuntime& runtime) {
+  // Capture current selection and Links position before the base class
+  // calls on_start(), which rebuilds the list.
+  prev_selected_ = selected_index();
+  prev_idx_links_ = idx_links_;
+  ListMenuScreen::start(buf, runtime);
+}
+
+void ReaderOptionsScreen::set_page_links(const std::vector<PageLink>& links,
+                                         const std::vector<std::string>& spine_files, const MrbReader& mrb) {
+  page_links_ = links;
+  // Populate the links screen now while the MrbReader is still open.
+  // (ReaderScreen::stop() will close mrb before we get to on_select.)
+  if (app_)
+    app_->links_screen()->populate(links, spine_files, mrb);
+}
+
 void ReaderOptionsScreen::on_start() {
   title_ = "Options";
 
@@ -60,7 +77,7 @@ void ReaderOptionsScreen::on_start() {
 
   clear_items();
   idx_justify_ = idx_padding_h_ = idx_padding_v_ = idx_line_spacing_ = idx_progress_ = idx_chapters_ = idx_pub_fonts_ =
-      idx_rotate_display_ = -1;
+      idx_rotate_display_ = idx_links_ = -1;
 
   char tmp[40];
 
@@ -68,6 +85,14 @@ void ReaderOptionsScreen::on_start() {
   if (app_ && app_->chapter_select()->has_toc()) {
     idx_chapters_ = count();
     add_item("Chapters");
+  }
+
+  // "Links" on this page — shown only when there are hyperlinks.
+  if (!page_links_.empty()) {
+    idx_links_ = count();
+    char link_label[40];
+    snprintf(link_label, sizeof(link_label), "Links (%d)", static_cast<int>(page_links_.size()));
+    add_item(link_label);
   }
 
   // Separator between chapter navigation and text layout settings.
@@ -127,11 +152,32 @@ void ReaderOptionsScreen::on_start() {
     idx_rotate_display_ = count();
     add_item(fmt_setting(tmp, sizeof(tmp), "Display", app_ && app_->rotate_display() ? "Landscape" : "Portrait"));
   }
+
+  // Restore selection, adjusting for Links appearing or disappearing.
+  int sel = prev_selected_;
+  if (prev_idx_links_ == -1 && idx_links_ != -1) {
+    // Links appeared: everything at idx_links_ and below shifted down by 1.
+    if (sel >= idx_links_)
+      sel++;
+  } else if (prev_idx_links_ != -1 && idx_links_ == -1) {
+    // Links disappeared: cursor was on Links or below it — move up by 1.
+    if (sel >= prev_idx_links_)
+      sel--;
+  }
+  int max_sel = count() - 1;
+  if (max_sel >= 0) {
+    if (sel < 0)
+      sel = 0;
+    if (sel > max_sel)
+      sel = max_sel;
+  }
+  set_selected(sel);
 }
 
 void ReaderOptionsScreen::refresh_items_(int restore_selection) {
-  on_start();
-  set_selected(restore_selection);
+  prev_selected_ = restore_selection;
+  prev_idx_links_ = idx_links_;
+  on_start();  // on_start() applies shift correction and calls set_selected().
 }
 
 void ReaderOptionsScreen::on_select(int index) {
@@ -197,6 +243,10 @@ void ReaderOptionsScreen::on_select(int index) {
   }
   if (index == idx_chapters_) {
     app_->push_screen(ScreenId::ChapterSelect);
+    return;
+  }
+  if (index == idx_links_) {
+    app_->push_screen(ScreenId::Links);
     return;
   }
   return;

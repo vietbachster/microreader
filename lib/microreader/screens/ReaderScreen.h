@@ -54,6 +54,15 @@ class ReaderScreen final : public IScreen {
   bool is_open_ok() const;
   size_t current_chapter_index() const;
 
+  // Test accessors — expose internal state so tests can drive the real screen
+  // without duplicating its logic.
+  const std::vector<PageLink>& test_page_links() const {
+    return page_links_;
+  }
+  const MrbReader& test_mrb() const {
+    return mrb_;
+  }
+
   const char* name() const override {
     return "Reader";
   }
@@ -120,11 +129,14 @@ class ReaderScreen final : public IScreen {
   ImageSizeQuery image_size_fn_;
   bool grayscale_pending_ = false;
   bool grayscale_active_ = false;
+  std::vector<PageLink> page_links_;
 
   bool decode_image_to_buffer_(uint16_t img_key, uint32_t offset, DrawBuffer& buf, int dest_x, int dest_y,
                                uint16_t max_w, uint16_t max_h, uint16_t src_y = 0, uint16_t clip_h = 0);
   // Render page content (BW only). Sets grayscale_pending_ if font has grayscale.
   void render_page_(DrawBuffer& buf);
+  // Build page_links_ from current page_ content. Called from render_page_().
+  void collect_page_links_();
   // Deferred grayscale pass: writes LSB/MSB planes to BW/RED RAM and triggers
   // grayscale LUT refresh. Called from update() after BW refresh is committed.
   void apply_grayscale_(DrawBuffer& buf);
@@ -142,6 +154,11 @@ class ReaderScreen final : public IScreen {
   }
   const ReaderSettings& reader_settings() const {
     return reader_settings_;
+  }
+
+  // Links found on the current page (populated after render_page_()).
+  const std::vector<PageLink>& page_links() const {
+    return page_links_;
   }
 
   // Returns progress percentage 0-100 based on read characters

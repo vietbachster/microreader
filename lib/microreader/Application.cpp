@@ -39,6 +39,7 @@ void Application::start(DrawBuffer& buf, IRuntime& runtime) {
   grayscale_demo_.set_app(this);
   reader_options_.set_app(this);
   chapter_select_.set_app(this);
+  links_screen_.set_app(this);
 
   // Set up settings file path if data_dir_ is set
   if (data_dir_)
@@ -166,6 +167,8 @@ IScreen* microreader::Application::screen_for_(ScreenId id) {
       return &reader_options_;
     case ScreenId::ChapterSelect:
       return &chapter_select_;
+    case ScreenId::Links:
+      return &links_screen_;
     default:
       return nullptr;
   }

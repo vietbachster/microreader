@@ -637,3 +637,202 @@ TEST_F(MrbFormatTest, ProgressAccuracy_IntraChapterOffsets) {
   EXPECT_EQ(src.char_before_para(2), 5u);
   EXPECT_EQ(src.total_chars(), 10u);
 }
+
+// ---------------------------------------------------------------------------
+// Spine file table round-trip
+// ---------------------------------------------------------------------------
+
+TEST_F(MrbFormatTest, SpineFileTable_RoundTrip_EmptySpine) {
+  MrbWriter writer;
+  ASSERT_TRUE(writer.open(tmp_path_.c_str()));
+  writer.begin_chapter();
+  ASSERT_TRUE(writer.write_paragraph(make_text("hello")));
+  writer.end_chapter();
+  // finish() with default (empty) spine_files
+  ASSERT_TRUE(writer.finish({}, {}));
+
+  MrbReader reader;
+  ASSERT_TRUE(reader.open(tmp_path_.c_str()));
+  EXPECT_TRUE(reader.spine_files().empty());
+}
+
+TEST_F(MrbFormatTest, SpineFileTable_RoundTrip) {
+  std::vector<std::string> spine = {"cover.xhtml", "chapter01.xhtml", "chapter02.xhtml", "chapter03.xhtml"};
+
+  MrbWriter writer;
+  ASSERT_TRUE(writer.open(tmp_path_.c_str()));
+  for (int i = 0; i < 4; ++i) {
+    writer.begin_chapter();
+    ASSERT_TRUE(writer.write_paragraph(make_text("para " + std::to_string(i))));
+    writer.end_chapter();
+  }
+  ASSERT_TRUE(writer.finish({}, {}, spine));
+
+  MrbReader reader;
+  ASSERT_TRUE(reader.open(tmp_path_.c_str()));
+  ASSERT_EQ(reader.spine_files().size(), spine.size());
+  for (size_t i = 0; i < spine.size(); ++i)
+    EXPECT_EQ(reader.spine_files()[i], spine[i]) << "index " << i;
+}
+
+TEST_F(MrbFormatTest, SpineFileTable_RoundTrip_AliceStructure) {
+  // Matches alice-illustrated.epub spine: wrap + 14 numbered chapters.
+  std::vector<std::string> spine = {
+      "wrap0000.xhtml",
+      "502862557236502936_28885-h-0.htm.xhtml",
+      "502862557236502936_28885-h-1.htm.xhtml",
+      "502862557236502936_28885-h-2.htm.xhtml",
+      "502862557236502936_28885-h-3.htm.xhtml",
+  };
+
+  MrbWriter writer;
+  ASSERT_TRUE(writer.open(tmp_path_.c_str()));
+  for (size_t i = 0; i < spine.size(); ++i) {
+    writer.begin_chapter();
+    ASSERT_TRUE(writer.write_paragraph(make_text("para")));
+    writer.end_chapter();
+  }
+  ASSERT_TRUE(writer.finish({}, {}, spine));
+
+  MrbReader reader;
+  ASSERT_TRUE(reader.open(tmp_path_.c_str()));
+  ASSERT_EQ(reader.spine_files().size(), spine.size());
+  for (size_t i = 0; i < spine.size(); ++i)
+    EXPECT_EQ(reader.spine_files()[i], spine[i]);
+
+  // Verify basename matching works as LinksScreen::populate() would do it.
+  // href "OEBPS/502862557236502936_28885-h-1.htm.xhtml|Page_13" → chapter 2
+  const auto& sf = reader.spine_files();
+  std::string href = "OEBPS/502862557236502936_28885-h-1.htm.xhtml|Page_13";
+  auto pipe = href.find('|');
+  std::string path_part = href.substr(0, pipe);
+  auto slash = path_part.rfind('/');
+  std::string basename = (slash != std::string::npos) ? path_part.substr(slash + 1) : path_part;
+  uint16_t found_idx = 0xFFFF;
+  for (size_t i = 0; i < sf.size(); ++i) {
+    if (sf[i] == basename) {
+      found_idx = static_cast<uint16_t>(i);
+      break;
+    }
+  }
+  EXPECT_EQ(found_idx, 2u) << "Link to *-h-1.htm.xhtml should resolve to spine[2], not " << found_idx;
+}
+
+// ---------------------------------------------------------------------------
+// Anchor table round-trip
+// ---------------------------------------------------------------------------
+
+TEST_F(MrbFormatTest, AnchorTable_RoundTrip_NoAnchors) {
+  MrbWriter writer;
+  ASSERT_TRUE(writer.open(tmp_path_.c_str()));
+  writer.begin_chapter();
+  ASSERT_TRUE(writer.write_paragraph(make_text("text")));
+  writer.end_chapter();
+  ASSERT_TRUE(writer.finish({}, {}));
+
+  MrbReader reader;
+  ASSERT_TRUE(reader.open(tmp_path_.c_str()));
+  uint16_t para = 99;
+  EXPECT_FALSE(reader.find_anchor(0, "anything", 8, para));
+  EXPECT_EQ(para, 99u) << "para should be unchanged when find_anchor returns false";
+}
+
+TEST_F(MrbFormatTest, AnchorTable_RoundTrip_SingleAnchor) {
+  MrbWriter writer;
+  ASSERT_TRUE(writer.open(tmp_path_.c_str()));
+  writer.begin_chapter();
+  for (int i = 0; i < 8; ++i)
+    ASSERT_TRUE(writer.write_paragraph(make_text("para " + std::to_string(i))));
+  writer.end_chapter();
+  writer.add_anchor(0, 5, "section1", 8);
+  ASSERT_TRUE(writer.finish({}, {}));
+
+  MrbReader reader;
+  ASSERT_TRUE(reader.open(tmp_path_.c_str()));
+  uint16_t para = 0;
+  ASSERT_TRUE(reader.find_anchor(0, "section1", 8, para));
+  EXPECT_EQ(para, 5u);
+}
+
+TEST_F(MrbFormatTest, AnchorTable_RoundTrip_MultiChapter) {
+  MrbWriter writer;
+  ASSERT_TRUE(writer.open(tmp_path_.c_str()));
+  for (int ch = 0; ch < 3; ++ch) {
+    writer.begin_chapter();
+    for (int p = 0; p < 10; ++p)
+      ASSERT_TRUE(writer.write_paragraph(make_text("p")));
+    writer.end_chapter();
+  }
+  // Add anchors across chapters
+  writer.add_anchor(0, 2, "intro", 5);
+  writer.add_anchor(1, 7, "Page_13", 7);
+  writer.add_anchor(2, 0, "start", 5);
+  writer.add_anchor(2, 9, "end", 3);
+  ASSERT_TRUE(writer.finish({}, {}));
+
+  MrbReader reader;
+  ASSERT_TRUE(reader.open(tmp_path_.c_str()));
+
+  uint16_t para = 0;
+  ASSERT_TRUE(reader.find_anchor(0, "intro", 5, para));
+  EXPECT_EQ(para, 2u);
+  ASSERT_TRUE(reader.find_anchor(1, "Page_13", 7, para));
+  EXPECT_EQ(para, 7u);
+  ASSERT_TRUE(reader.find_anchor(2, "start", 5, para));
+  EXPECT_EQ(para, 0u);
+  ASSERT_TRUE(reader.find_anchor(2, "end", 3, para));
+  EXPECT_EQ(para, 9u);
+
+  // Non-existent anchor: wrong chapter
+  EXPECT_FALSE(reader.find_anchor(0, "Page_13", 7, para));
+  // Non-existent anchor: wrong id
+  EXPECT_FALSE(reader.find_anchor(1, "missing", 7, para));
+}
+
+TEST_F(MrbFormatTest, AnchorTable_RoundTrip_LongId) {
+  // Edge case: id at maximum length (255 bytes)
+  std::string long_id(255, 'x');
+  MrbWriter writer;
+  ASSERT_TRUE(writer.open(tmp_path_.c_str()));
+  writer.begin_chapter();
+  ASSERT_TRUE(writer.write_paragraph(make_text("p")));
+  writer.end_chapter();
+  writer.add_anchor(0, 0, long_id.c_str(), long_id.size());
+  ASSERT_TRUE(writer.finish({}, {}));
+
+  MrbReader reader;
+  ASSERT_TRUE(reader.open(tmp_path_.c_str()));
+  uint16_t para = 0;
+  ASSERT_TRUE(reader.find_anchor(0, long_id.c_str(), long_id.size(), para));
+  EXPECT_EQ(para, 0u);
+}
+
+TEST_F(MrbFormatTest, AnchorTable_SpineFiles_Together) {
+  // Both spine file table and anchor table present in the same MRB.
+  std::vector<std::string> spine = {"cover.xhtml", "part1.xhtml", "part2.xhtml"};
+
+  MrbWriter writer;
+  ASSERT_TRUE(writer.open(tmp_path_.c_str()));
+  for (size_t i = 0; i < spine.size(); ++i) {
+    writer.begin_chapter();
+    ASSERT_TRUE(writer.write_paragraph(make_text("chapter " + std::to_string(i))));
+    writer.end_chapter();
+  }
+  writer.add_anchor(1, 0, "ch1start", 8);
+  writer.add_anchor(2, 3, "section2", 8);
+  ASSERT_TRUE(writer.finish({}, {}, spine));
+
+  MrbReader reader;
+  ASSERT_TRUE(reader.open(tmp_path_.c_str()));
+  ASSERT_EQ(reader.spine_files().size(), spine.size());
+  EXPECT_EQ(reader.spine_files()[0], "cover.xhtml");
+  EXPECT_EQ(reader.spine_files()[1], "part1.xhtml");
+  EXPECT_EQ(reader.spine_files()[2], "part2.xhtml");
+
+  uint16_t para = 0;
+  ASSERT_TRUE(reader.find_anchor(1, "ch1start", 8, para));
+  EXPECT_EQ(para, 0u);
+  ASSERT_TRUE(reader.find_anchor(2, "section2", 8, para));
+  EXPECT_EQ(para, 3u);
+  EXPECT_FALSE(reader.find_anchor(0, "ch1start", 8, para));
+}

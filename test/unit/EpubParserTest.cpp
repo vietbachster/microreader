@@ -1175,3 +1175,316 @@ INSTANTIATE_TEST_SUITE_P(AllEpubs, EpubAllFixturesTest,
                          ::testing::Values("basic.epub", "multi_chapter.epub", "with_css.epub", "with_images.epub",
                                            "stored.epub", "nested_dirs.epub", "special_chars.epub",
                                            "large_chapter.epub"));
+
+// ============================================================
+// Hyperlink href parsing tests (XhtmlHref)
+// ============================================================
+
+namespace {
+// Collect all runs from all text paragraphs in the given paragraph list.
+static std::vector<Run> collect_runs(const std::vector<Paragraph>& paragraphs) {
+  std::vector<Run> result;
+  for (const auto& p : paragraphs) {
+    if (p.type == ParagraphType::Text) {
+      for (const auto& run : p.text.runs) {
+        result.push_back(run);
+      }
+    }
+  }
+  return result;
+}
+}  // namespace
+
+// A simple inline link: "Before <a href='...'>link text</a> after"
+// Verifies: "Before" has no href, "link text" has correct href, "after" has no href.
+TEST(XhtmlHref, SimpleInlineLink) {
+  const char* xhtml =
+      "<html><body>"
+      "<p>Before <a href=\"../Text/ch2.xhtml#sec1\">link text</a> after</p>"
+      "</body></html>";
+
+  ZipReader dummy_zip;
+  std::vector<Paragraph> paragraphs;
+  parse_xhtml_body(reinterpret_cast<const uint8_t*>(xhtml), std::strlen(xhtml), nullptr, nullptr, "OEBPS/Text/",
+                   dummy_zip, paragraphs);
+
+  auto runs = collect_runs(paragraphs);
+  ASSERT_GE(runs.size(), 2u);
+
+  bool found_before = false, found_link = false, found_after = false;
+  for (size_t i = 0; i < runs.size(); ++i) {
+    const std::string& text = runs[i].text;
+    const std::string& href = runs[i].href;
+    if (text.find("Before") != std::string::npos) {
+      EXPECT_TRUE(href.empty()) << "'Before' text should have no href; got: '" << href << "'";
+      found_before = true;
+    }
+    if (text.find("link text") != std::string::npos) {
+      EXPECT_FALSE(href.empty()) << "'link text' run should have an href";
+      EXPECT_NE(href.find("ch2.xhtml"), std::string::npos) << "href should contain ch2.xhtml; got: '" << href << "'";
+      EXPECT_NE(href.find("sec1"), std::string::npos) << "href should contain fragment sec1; got: '" << href << "'";
+      found_link = true;
+    }
+    if (text.find("after") != std::string::npos) {
+      EXPECT_TRUE(href.empty()) << "'after' text should have no href; got: '" << href << "'";
+      found_after = true;
+    }
+  }
+  EXPECT_TRUE(found_before) << "Expected a run containing 'Before'";
+  EXPECT_TRUE(found_link) << "Expected a run containing 'link text'";
+  EXPECT_TRUE(found_after) << "Expected a run containing 'after'";
+}
+
+// Text accumulated before <a> in the same run must NOT get the href.
+// Regression for: "I. Down the Rabbit-hole " + "1" where "1" was inside <a>
+// but the whole buffer got the href because flush_text wasn't called before setting current_href_.
+TEST(XhtmlHref, PreLinkTextHasNoHref) {
+  const char* xhtml =
+      "<html><body>"
+      "<p>leading text <a href=\"target.xhtml\">linked</a></p>"
+      "</body></html>";
+
+  ZipReader dummy_zip;
+  std::vector<Paragraph> paragraphs;
+  parse_xhtml_body(reinterpret_cast<const uint8_t*>(xhtml), std::strlen(xhtml), nullptr, nullptr, "OEBPS/", dummy_zip,
+                   paragraphs);
+
+  auto runs = collect_runs(paragraphs);
+  ASSERT_GE(runs.size(), 1u);
+
+  for (size_t i = 0; i < runs.size(); ++i) {
+    const std::string& text = runs[i].text;
+    const std::string& href = runs[i].href;
+    if (text.find("leading") != std::string::npos) {
+      EXPECT_TRUE(href.empty()) << "Text before <a> must not inherit the href; got: '" << href << "'";
+    }
+    if (text.find("linked") != std::string::npos) {
+      EXPECT_FALSE(href.empty()) << "Text inside <a> should have href";
+    }
+  }
+}
+
+// Table-style TOC row: "I. | Chapter Name | 1(link)"
+// Only the page number "1" (inside <a>) should get the href.
+// The roman numeral "I." and chapter name must have empty href.
+// This is the Alice TOC regression: all three cells are on one line,
+// so the pre-link text was being mixed with the linked text into one run.
+TEST(XhtmlHref, TableTocRowOnlyLinkedCellGetsHref) {
+  const char* xhtml =
+      "<html><body>"
+      "<table>"
+      "<tr>"
+      "<td>I. </td>"
+      "<td>Down the Rabbit-hole</td>"
+      "<td><a href=\"ch01.xhtml#Page_1\">1</a></td>"
+      "</tr>"
+      "<tr>"
+      "<td>II. </td>"
+      "<td>The Pool of Tears</td>"
+      "<td><a href=\"ch02.xhtml#Page_13\">13</a></td>"
+      "</tr>"
+      "</table>"
+      "</body></html>";
+
+  ZipReader dummy_zip;
+  std::vector<Paragraph> paragraphs;
+  parse_xhtml_body(reinterpret_cast<const uint8_t*>(xhtml), std::strlen(xhtml), nullptr, nullptr, "OEBPS/", dummy_zip,
+                   paragraphs);
+
+  auto runs = collect_runs(paragraphs);
+  ASSERT_GE(runs.size(), 4u);
+
+  for (size_t i = 0; i < runs.size(); ++i) {
+    const std::string& text = runs[i].text;
+    const std::string& href = runs[i].href;
+    if (text.find("I.") != std::string::npos || text.find("Rabbit") != std::string::npos ||
+        text.find("Tears") != std::string::npos || text.find("II.") != std::string::npos) {
+      EXPECT_TRUE(href.empty()) << "Non-link cell '" << text << "' should have no href; got: '" << href << "'";
+    }
+    if (text == "1") {
+      if (!href.empty()) {
+        EXPECT_NE(href.find("ch01.xhtml"), std::string::npos)
+            << "Page 1 href should point to ch01; got: '" << href << "'";
+      }
+    }
+    if (text == "13") {
+      if (!href.empty()) {
+        EXPECT_NE(href.find("ch02.xhtml"), std::string::npos)
+            << "Page 13 href should point to ch02; got: '" << href << "'";
+      }
+    }
+  }
+}
+
+// Consecutive links separated by text: "<a>Nr.1</a>, <a>Nr.2</a>, <a>Nr.3</a>, <a>Nr.4</a>"
+// Separator ", " text between the links must have NO href.
+// Each linked run must have its own distinct href.
+TEST(XhtmlHref, ConsecutiveLinksWithTextSeparators) {
+  const char* xhtml =
+      "<html><body>"
+      "<p id=\"rnw1\">"
+      "<a href=\"content-6.xhtml#bild1\">Nr. 1</a>, "
+      "<a href=\"content-6.xhtml#bild2\">Nr. 2</a>, "
+      "<a href=\"content-7.xhtml#bild3\">Nr. 3</a>, "
+      "<a href=\"content-7.xhtml#bild4\">Nr. 4</a>"
+      "</p>"
+      "</body></html>";
+
+  ZipReader dummy_zip;
+  std::vector<Paragraph> paragraphs;
+  parse_xhtml_body(reinterpret_cast<const uint8_t*>(xhtml), std::strlen(xhtml), nullptr, nullptr, "OEBPS/Text/",
+                   dummy_zip, paragraphs);
+
+  auto runs = collect_runs(paragraphs);
+  ASSERT_GE(runs.size(), 4u);
+
+  int linked_count = 0;
+  for (size_t i = 0; i < runs.size(); ++i) {
+    const std::string& text = runs[i].text;
+    const std::string& href = runs[i].href;
+    // Separator commas/spaces must not have an href
+    if (text.find(",") != std::string::npos || text == " " || text == ", ") {
+      EXPECT_TRUE(href.empty()) << "Separator '" << text << "' should have no href; got: '" << href << "'";
+    }
+    // Each "Nr." run should have an href
+    if (text.find("Nr.") != std::string::npos) {
+      EXPECT_FALSE(href.empty()) << "Linked run '" << text << "' should have an href";
+      ++linked_count;
+    }
+  }
+  EXPECT_EQ(linked_count, 4) << "Expected 4 linked 'Nr.' runs";
+}
+
+// A footnote reference: text, superscript link number, more text.
+// Only the superscript "1" should have an href.
+TEST(XhtmlHref, TextBeforeAndAfterLink) {
+  const char* xhtml =
+      "<html><body>"
+      "<p>Some text<a href=\"notes.xhtml#fn1\"><sup>1</sup></a> and more text.</p>"
+      "</body></html>";
+
+  ZipReader dummy_zip;
+  std::vector<Paragraph> paragraphs;
+  parse_xhtml_body(reinterpret_cast<const uint8_t*>(xhtml), std::strlen(xhtml), nullptr, nullptr, "OEBPS/", dummy_zip,
+                   paragraphs);
+
+  auto runs = collect_runs(paragraphs);
+  ASSERT_GE(runs.size(), 1u);
+
+  for (size_t i = 0; i < runs.size(); ++i) {
+    const std::string& text = runs[i].text;
+    const std::string& href = runs[i].href;
+    if (text.find("Some text") != std::string::npos) {
+      EXPECT_TRUE(href.empty()) << "'Some text' should have no href; got: '" << href << "'";
+    }
+    if (text == "1" || text.find("1") != std::string::npos) {
+      if (!href.empty()) {
+        EXPECT_NE(href.find("notes.xhtml"), std::string::npos) << "Footnote href should point to notes.xhtml";
+      }
+    }
+    if (text.find("and more text") != std::string::npos) {
+      EXPECT_TRUE(href.empty()) << "'and more text' should have no href; got: '" << href << "'";
+    }
+  }
+}
+
+// An absolute (http://) link should be captured verbatim in the href field.
+TEST(XhtmlHref, ExternalLinkCaptured) {
+  const char* xhtml =
+      "<html><body>"
+      "<p><a href=\"http://example.com/page\">Visit site</a></p>"
+      "</body></html>";
+
+  ZipReader dummy_zip;
+  std::vector<Paragraph> paragraphs;
+  parse_xhtml_body(reinterpret_cast<const uint8_t*>(xhtml), std::strlen(xhtml), nullptr, nullptr, "OEBPS/", dummy_zip,
+                   paragraphs);
+
+  auto runs = collect_runs(paragraphs);
+  ASSERT_GE(runs.size(), 1u);
+
+  for (size_t i = 0; i < runs.size(); ++i) {
+    const std::string& text = runs[i].text;
+    const std::string& href = runs[i].href;
+    if (text.find("Visit") != std::string::npos) {
+      EXPECT_FALSE(href.empty()) << "'Visit site' should have an href";
+      EXPECT_NE(href.find("example.com"), std::string::npos)
+          << "External href should be preserved; got: '" << href << "'";
+    }
+  }
+}
+
+// A fragment-only href "#section2" should be stored (possibly resolved relative to base).
+TEST(XhtmlHref, FragmentOnlyHref) {
+  const char* xhtml =
+      "<html><body>"
+      "<p><a href=\"#section2\">Go to section 2</a></p>"
+      "</body></html>";
+
+  ZipReader dummy_zip;
+  std::vector<Paragraph> paragraphs;
+  parse_xhtml_body(reinterpret_cast<const uint8_t*>(xhtml), std::strlen(xhtml), nullptr, nullptr, "OEBPS/", dummy_zip,
+                   paragraphs);
+
+  auto runs = collect_runs(paragraphs);
+  ASSERT_GE(runs.size(), 1u);
+
+  for (size_t i = 0; i < runs.size(); ++i) {
+    const std::string& text = runs[i].text;
+    const std::string& href = runs[i].href;
+    if ((text.find("section 2") != std::string::npos || text.find("section") != std::string::npos) && !href.empty()) {
+      EXPECT_NE(href.find("section2"), std::string::npos) << "Fragment-only href should contain anchor name";
+    }
+  }
+}
+
+// Multi-word link text like "Rechtenachweis Nr. 1" must be captured as a SINGLE Run
+// with the full text and the href set. The parser must NOT split it into separate runs
+// that lose the href. This is the exact structure from real EPUBs like ohler.epub where
+// consecutive image credits appear as:
+//   <a href="..#bild1">Rechtenachweis Nr. 1</a>, <a href="..#bild2">Rechtenachweis Nr. 2</a>, ...
+TEST(XhtmlHref, MultiWordLinkTextFullyCaptures) {
+  const char* xhtml =
+      "<html><body>"
+      "<p class=\"rechte\" id=\"rnw1\">"
+      "<a class=\"pcalibre4\" href=\"../Text/content-6.xhtml#bild1\">Rechtenachweis Nr. 1</a>, "
+      "<a class=\"pcalibre4\" href=\"../Text/content-6.xhtml#bild2\">Rechtenachweis Nr. 2</a>, "
+      "<a class=\"pcalibre4\" href=\"../Text/content-7.xhtml#bild3\">Rechtenachweis Nr. 3</a>, "
+      "<a class=\"pcalibre4\" href=\"../Text/content-7.xhtml#bild4\">Rechtenachweis Nr. 4</a>"
+      "</p>"
+      "</body></html>";
+
+  ZipReader dummy_zip;
+  std::vector<Paragraph> paragraphs;
+  parse_xhtml_body(reinterpret_cast<const uint8_t*>(xhtml), std::strlen(xhtml), nullptr, nullptr, "OEBPS/Text/",
+                   dummy_zip, paragraphs);
+
+  auto runs = collect_runs(paragraphs);
+  ASSERT_GE(runs.size(), 4u);
+
+  // Each "Rechtenachweis Nr. N" should be ONE run with full text and an href.
+  // Separator ", " runs should have no href.
+  int linked_count = 0;
+  for (size_t i = 0; i < runs.size(); ++i) {
+    const std::string& text = runs[i].text;
+    const std::string& href = runs[i].href;
+
+    if (text.find("Rechtenachweis") != std::string::npos) {
+      // The full "Rechtenachweis Nr. N" must appear in a single run — not split.
+      EXPECT_NE(text.find("Nr."), std::string::npos)
+          << "Multi-word link text must not be split; 'Nr.' missing from run '" << text << "'";
+      EXPECT_FALSE(href.empty()) << "Run '" << text << "' inside <a> must have an href";
+      if (!href.empty()) {
+        EXPECT_NE(href.find("content-"), std::string::npos)
+            << "href should reference content-N.xhtml; got: '" << href << "'";
+      }
+      ++linked_count;
+    }
+
+    // Separators (the literal ", " between links) must have no href.
+    if (text == ", " || text == ",") {
+      EXPECT_TRUE(href.empty()) << "Separator '" << text << "' should have no href; got: '" << href << "'";
+    }
+  }
+  EXPECT_EQ(linked_count, 4) << "Expected 4 'Rechtenachweis' linked runs";
+}

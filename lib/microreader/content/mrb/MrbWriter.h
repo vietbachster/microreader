@@ -84,8 +84,13 @@ class MrbWriter {
     return idx < images_.size() && (images_[idx].width != 0 || images_[idx].height != 0);
   }
 
-  // Finalize: write index tables, metadata, TOC, and fix up header.
-  bool finish(const EpubMetadata& meta, const TableOfContents& toc);
+  // Add an anchor (id → paragraph) for runtime link fragment navigation.
+  // Call after all chapters are written, before finish().
+  void add_anchor(uint16_t chapter_idx, uint16_t para_index, const char* id, size_t id_len);
+
+  // Finalize: write index tables, metadata, TOC, spine file table, and fix up header.
+  // spine_files: base filenames of each spine item (index = chapter index).
+  bool finish(const EpubMetadata& meta, const TableOfContents& toc, const std::vector<std::string>& spine_files = {});
 
  private:
   BufferedFileWriter bw_;
@@ -105,6 +110,14 @@ class MrbWriter {
     uint32_t char_offset;
   };
   std::vector<ParaDesc> para_descriptors_;
+
+  // Anchor table: id → (chapter_idx, para_index) for runtime link fragment navigation.
+  struct AnchorEntry {
+    uint16_t chapter_idx;
+    uint16_t para_idx;
+    std::string id;  // element id attribute value
+  };
+  std::vector<AnchorEntry> anchors_;
 
   // Reusable serialization buffer (avoids per-paragraph heap allocation).
   std::vector<uint8_t> serialize_buf_;

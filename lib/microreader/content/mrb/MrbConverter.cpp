@@ -94,6 +94,11 @@ bool convert_epub_to_mrb_streaming(Book& book, const char* output_path, uint8_t*
   }
 
   // Context for the streaming paragraph + ID sinks.
+  struct AnchorEntry {
+    uint16_t chapter_idx;
+    uint16_t para_idx;
+    std::string id;
+  };
   struct SinkCtx {
     MrbWriter* writer;
     std::vector<ImageMapping>* image_map;
@@ -103,11 +108,15 @@ bool convert_epub_to_mrb_streaming(Book& book, const char* output_path, uint8_t*
     std::vector<FragmentNeed>* fragment_needs;
     TableOfContents* toc_work;
     uint16_t current_zip_file_idx;
+    uint16_t current_chapter_idx;
+    // Anchor collection: all id→para mappings for runtime link navigation.
+    std::vector<AnchorEntry>* anchors;
 #ifdef ESP_PLATFORM
     int64_t write_us;  // time in write_paragraph (MRB I/O)
     size_t para_count;
 #endif
   };
+  std::vector<AnchorEntry> anchors;
   SinkCtx ctx{};
   ctx.writer = &writer;
   ctx.image_map = &image_map;
@@ -116,6 +125,8 @@ bool convert_epub_to_mrb_streaming(Book& book, const char* output_path, uint8_t*
   ctx.fragment_needs = &fragment_needs;
   ctx.toc_work = &toc_work;
   ctx.current_zip_file_idx = 0;
+  ctx.current_chapter_idx = 0;
+  ctx.anchors = &anchors;
 #ifdef ESP_PLATFORM
   ctx.write_us = 0;
   ctx.para_count = 0;
@@ -125,22 +136,23 @@ bool convert_epub_to_mrb_streaming(Book& book, const char* output_path, uint8_t*
   int64_t last_log_us = esp_timer_get_time();
 #endif
 
-  // ID sink: maps element id attributes to paragraph indices for TOC fragments.
-  // Assigned only when there are fragments to resolve; takes same ctx pointer as para sink.
-  IdSink id_sink = nullptr;
-  if (!fragment_needs.empty()) {
-    id_sink = [](void* raw_ctx, const char* id_p, size_t id_len, uint32_t para_idx) {
-      auto& c = *static_cast<SinkCtx*>(raw_ctx);
-      for (auto& need : *c.fragment_needs) {
-        if (need.zip_file_idx == c.current_zip_file_idx && need.fragment.size() == id_len &&
-            std::memcmp(need.fragment.data(), id_p, id_len) == 0) {
-          auto& entry = c.toc_work->entries[need.toc_entry_idx];
-          if (entry.para_index == 0)  // only record first match per entry
-            entry.para_index = static_cast<uint16_t>(para_idx < 0xFFFFu ? para_idx : 0xFFFFu);
-        }
+  // ID sink: always active.
+  // Resolves TOC fragment anchors AND collects all id→para mappings for runtime link navigation.
+  IdSink id_sink = [](void* raw_ctx, const char* id_p, size_t id_len, uint32_t para_idx) {
+    auto& c = *static_cast<SinkCtx*>(raw_ctx);
+    // TOC fragment resolution.
+    for (auto& need : *c.fragment_needs) {
+      if (need.zip_file_idx == c.current_zip_file_idx && need.fragment.size() == id_len &&
+          std::memcmp(need.fragment.data(), id_p, id_len) == 0) {
+        auto& entry = c.toc_work->entries[need.toc_entry_idx];
+        if (entry.para_index == 0)  // only record first match per entry
+          entry.para_index = static_cast<uint16_t>(para_idx < 0xFFFFu ? para_idx : 0xFFFFu);
       }
-    };
-  }
+    }
+    // Anchor collection: record all id→para for runtime fragment navigation.
+    if (id_len > 0 && id_len <= 255 && para_idx < 0xFFFFu)
+      c.anchors->push_back({c.current_chapter_idx, static_cast<uint16_t>(para_idx), std::string(id_p, id_len)});
+  };
 
   // Non-text paragraph sink: remap image keys and write to MRB.
   auto sink = [](void* raw_ctx, Paragraph&& para) {
@@ -169,6 +181,7 @@ bool convert_epub_to_mrb_streaming(Book& book, const char* output_path, uint8_t*
 #endif
 
     ctx.current_zip_file_idx = static_cast<uint16_t>(book.epub().spine()[ci].file_idx);
+    ctx.current_chapter_idx = static_cast<uint16_t>(ci);
     book.load_chapter_streaming(ci, sink, &ctx, work_buf, xml_buf, id_sink, &ctx);
     if (ctx.error)
       return false;
@@ -208,7 +221,23 @@ bool convert_epub_to_mrb_streaming(Book& book, const char* output_path, uint8_t*
       }
     }
   }
-  bool ok = writer.finish(book.metadata(), toc_work);
+
+  // Build spine filename table: base filename of each spine item for href resolution at runtime.
+  std::vector<std::string> spine_files;
+  spine_files.reserve(spine.size());
+  for (const auto& si : spine) {
+    std::string_view entry_name = zip.entry(si.file_idx).name;
+    auto slash_pos = entry_name.rfind('/');
+    std::string basename =
+        (slash_pos != std::string_view::npos) ? std::string(entry_name.substr(slash_pos + 1)) : std::string(entry_name);
+    spine_files.push_back(std::move(basename));
+  }
+
+  // Write anchor table: all id→para mappings collected during conversion.
+  for (const auto& a : anchors)
+    writer.add_anchor(a.chapter_idx, a.para_idx, a.id.c_str(), a.id.size());
+
+  bool ok = writer.finish(book.metadata(), toc_work, spine_files);
   writer.close();  // explicit close so fclose() happens before we return
 
 #ifdef ESP_PLATFORM

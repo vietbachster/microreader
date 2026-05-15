@@ -92,6 +92,7 @@ add_library(microreader_core STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/../lib/microreader/screens/SettingsScreen.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../lib/microreader/screens/ChapterSelectScreen.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../lib/microreader/screens/ReaderOptionsScreen.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/microreader/screens/LinksScreen.cpp
 )
 target_include_directories(microreader_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/../lib
@@ -153,6 +154,8 @@ add_executable(microreader_tests
     integration/HtmlExportTest.cpp
     integration/DebugLayoutTest.cpp
     integration/DitherComparisonTest.cpp
+    integration/LinkNavigationTest.cpp
+    unit/LinksScreenTest.cpp
 )
 target_include_directories(microreader_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/support

@@ -211,7 +211,18 @@ void MrbWriter::update_image_size(uint16_t idx, uint16_t width, uint16_t height)
   }
 }
 
-bool MrbWriter::finish(const EpubMetadata& meta, const TableOfContents& toc) {
+void MrbWriter::add_anchor(uint16_t chapter_idx, uint16_t para_index, const char* id, size_t id_len) {
+  if (id_len == 0 || id_len > 255)
+    return;
+  AnchorEntry e{};
+  e.chapter_idx = chapter_idx;
+  e.para_idx = para_index;
+  e.id.assign(id, id_len);
+  anchors_.push_back(std::move(e));
+}
+
+bool MrbWriter::finish(const EpubMetadata& meta, const TableOfContents& toc,
+                       const std::vector<std::string>& spine_files) {
   if (!bw_.is_open())
     return false;
 
@@ -263,6 +274,35 @@ bool MrbWriter::finish(const EpubMetadata& meta, const TableOfContents& toc) {
     write_bytes(buf, 5);
   }
 
+  // --- Write spine file table ---
+  // Allows runtime resolution of href filenames → chapter indices.
+  {
+    uint16_t spine_count = static_cast<uint16_t>(spine_files.size());
+    uint8_t sc_buf[2];
+    mrb_write_u16(sc_buf, spine_count);
+    write_bytes(sc_buf, 2);
+    for (const auto& name : spine_files)
+      write_string(name);
+  }
+
+  // --- Write anchor table ---
+  // Format: [count:u16] then count × [chapter_idx:u16][para_idx:u16][id_len:u8][id_bytes]
+  uint32_t anchor_offset = bw_.tell();
+  {
+    uint16_t anchor_count = static_cast<uint16_t>(anchors_.size());
+    uint8_t ac_buf[2];
+    mrb_write_u16(ac_buf, anchor_count);
+    write_bytes(ac_buf, 2);
+    for (const auto& a : anchors_) {
+      uint8_t hdr_buf[5];
+      mrb_write_u16(hdr_buf, a.chapter_idx);
+      mrb_write_u16(hdr_buf + 2, a.para_idx);
+      hdr_buf[4] = static_cast<uint8_t>(a.id.size());
+      write_bytes(hdr_buf, 5);
+      write_bytes(a.id.c_str(), a.id.size());
+    }
+  }
+
   // --- Fix up header ---
   MrbHeader hdr{};
   std::memcpy(hdr.magic, kMrbMagic, 4);
@@ -271,7 +311,7 @@ bool MrbWriter::finish(const EpubMetadata& meta, const TableOfContents& toc) {
   hdr.paragraph_count = paragraph_count_;
   hdr.chapter_count = static_cast<uint16_t>(chapters_.size());
   hdr.image_count = static_cast<uint16_t>(images_.size());
-  hdr.reserved = 0;
+  hdr.anchor_offset = anchor_offset;
   hdr.chapter_offset = chapter_offset;
   hdr.image_offset = image_offset;
   hdr.meta_offset = meta_offset;
@@ -296,13 +336,17 @@ void MrbWriter::serialize_text(const TextParagraph& text, uint16_t spacing) {
   //   run_count(2) +
   //   per run: style(1) + size_pct(1) + vertical_align(1) + flags(1) +
   //            margin_left(2) + margin_right(2) + text_len(4) + text[text_len]
+  //            [if flags & 0x02: href_len(2) + href[href_len]]
 
   // Pre-compute total size to avoid repeated resizes.
   static constexpr size_t kHeaderSize = 1 + 2 + 2 + 2 + 2 + 1 + 2 + 2 + 2 + 2;  // 18 bytes
   static constexpr size_t kRunHeaderSize = 1 + 1 + 1 + 1 + 2 + 2 + 4;           // 12 bytes per run
   size_t total = kHeaderSize;
-  for (const auto& run : text.runs)
+  for (const auto& run : text.runs) {
     total += kRunHeaderSize + run.text.size();
+    if (!run.href.empty())
+      total += 2 + run.href.size();  // href_len(2) + href bytes
+  }
 
   serialize_buf_.resize(total);
   uint8_t* p = serialize_buf_.data();
@@ -345,7 +389,10 @@ void MrbWriter::serialize_text(const TextParagraph& text, uint16_t spacing) {
     *p++ = static_cast<uint8_t>(run.style);
     *p++ = run.size_pct;
     *p++ = static_cast<uint8_t>(run.vertical_align);
-    *p++ = run.breaking ? 0x01 : 0x00;
+    uint8_t flags = run.breaking ? 0x01 : 0x00;
+    if (!run.href.empty())
+      flags |= 0x02;
+    *p++ = flags;
     mrb_write_u16(p, run.margin_left);
     p += 2;
     mrb_write_u16(p, run.margin_right);
@@ -355,6 +402,13 @@ void MrbWriter::serialize_text(const TextParagraph& text, uint16_t spacing) {
     p += 4;
     std::memcpy(p, run.text.data(), text_len);
     p += text_len;
+    if (!run.href.empty()) {
+      uint16_t href_len = static_cast<uint16_t>(run.href.size());
+      mrb_write_u16(p, href_len);
+      p += 2;
+      std::memcpy(p, run.href.data(), href_len);
+      p += href_len;
+    }
   }
 }
 

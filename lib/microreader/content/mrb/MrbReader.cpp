@@ -80,6 +80,25 @@ bool MrbReader::open(const char* path) {
     }
   }
 
+  // v9+: Read spine file table (chapter filename → index mapping for href resolution).
+  {
+    uint8_t sc_buf[2];
+    if (read_bytes(sc_buf, 2)) {
+      uint16_t spine_count = mrb_read_u16(sc_buf);
+      spine_files_.resize(spine_count);
+      for (uint16_t i = 0; i < spine_count; ++i)
+        spine_files_[i] = read_string();
+    }
+  }
+
+  // v10+: Read anchor table header (count only; entries are seeked on demand).
+  anchor_offset_ = header_.anchor_offset;
+  if (anchor_offset_ != 0) {
+    uint8_t ac_buf[2];
+    if (fseek(f_, static_cast<long>(anchor_offset_), SEEK_SET) == 0 && read_bytes(ac_buf, 2))
+      anchor_count_ = mrb_read_u16(ac_buf);
+  }
+
   return true;
 }
 
@@ -95,6 +114,9 @@ void MrbReader::close() {
   header_ = {};
   metadata_ = {};
   toc_ = {};
+  spine_files_.clear();
+  anchor_offset_ = 0;
+  anchor_count_ = 0;
 }
 
 uint32_t MrbReader::chapter_para_table_offset(uint16_t chapter_idx) const {
@@ -120,6 +142,35 @@ uint64_t MrbReader::total_char_count() const {
   for (const auto& ch : chapters_)
     total += ch.char_count;
   return total;
+}
+
+bool MrbReader::find_anchor(uint16_t chapter_idx, const char* fragment, size_t frag_len, uint16_t& para_idx) const {
+  if (!f_ || anchor_count_ == 0 || frag_len == 0 || frag_len > 255)
+    return false;
+
+  // Anchor table layout: [count:u16] then entries:
+  //   [chapter_idx:u16][para_idx:u16][id_len:u8][id_bytes]
+  // anchor_offset_ points to the count field; entries start 2 bytes later.
+  if (fseek(f_, static_cast<long>(anchor_offset_ + 2), SEEK_SET) != 0)
+    return false;
+
+  char id_buf[256];
+  for (uint16_t i = 0; i < anchor_count_; ++i) {
+    uint8_t hdr_buf[5];
+    if (fread(hdr_buf, 1, 5, f_) != 5)
+      return false;
+    uint16_t ch_idx = mrb_read_u16(hdr_buf);
+    uint16_t para = mrb_read_u16(hdr_buf + 2);
+    uint8_t id_len = hdr_buf[4];
+    if (fread(id_buf, 1, id_len, f_) != id_len)
+      return false;
+    if (ch_idx == chapter_idx && id_len == static_cast<uint8_t>(frag_len) &&
+        std::memcmp(id_buf, fragment, frag_len) == 0) {
+      para_idx = para;
+      return true;
+    }
+  }
+  return false;
 }
 
 MrbReader::LoadResult MrbReader::load_paragraph(uint32_t file_offset, Paragraph& out) {
@@ -272,6 +323,18 @@ bool MrbReader::deserialize_text(const uint8_t* data, size_t size, Paragraph& ou
       return false;
     run.text.assign(reinterpret_cast<const char*>(data + pos), text_len);
     pos += text_len;
+
+    // v9+: href string follows text bytes when flags bit 0x02 is set.
+    if (flags & 0x02) {
+      if (pos + 2 > size)
+        return false;
+      uint16_t href_len = mrb_read_u16(data + pos);
+      pos += 2;
+      if (pos + href_len > size)
+        return false;
+      run.href.assign(reinterpret_cast<const char*>(data + pos), href_len);
+      pos += href_len;
+    }
   }
 
   return true;

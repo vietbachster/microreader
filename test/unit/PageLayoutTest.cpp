@@ -2016,12 +2016,126 @@ TEST(PageLayout, IsMidStandaloneImage_FalseAtExactBoundary) {
   // Right now is_mid_promoted_image only handles inline images! It returns false automatically for type=Image.
   // But ReaderScreen incorrectly checks `type == Image && next.offset > 0`.
   // If `page1.end` is {0, 100}, the screen thinks it is mid-image!
-  
+
   if (page1.end.paragraph == 0) {
-      EXPECT_EQ(page1.end.offset, 100u);
-      std::cout << "END IS 0, 100!" << std::endl;
+    EXPECT_EQ(page1.end.offset, 100u);
+    std::cout << "END IS 0, 100!" << std::endl;
   } else {
-      std::cout << "END IS " << page1.end.paragraph << ", " << page1.end.offset << std::endl;
+    std::cout << "END IS " << page1.end.paragraph << ", " << page1.end.offset << std::endl;
   }
 }
 
+// ---------------------------------------------------------------------------
+// Link label collection from Runs (mirrors ReaderScreen::collect_page_links_)
+// ---------------------------------------------------------------------------
+
+// Mirrors the run-based logic of ReaderScreen::collect_page_links_().
+// Links are collected from Run.href/Run.text — not from layout words — so
+// hyphenation and line-breaking never corrupt labels.
+struct TestPageLink {
+  std::string label;
+  std::string href;
+};
+
+static constexpr size_t kTestMaxLabel = 64;
+
+static std::vector<TestPageLink> collect_links_from_runs(const std::vector<Paragraph>& paragraphs) {
+  std::vector<TestPageLink> result;
+  for (const auto& para : paragraphs) {
+    if (para.type != ParagraphType::Text)
+      continue;
+    for (const auto& run : para.text.runs) {
+      if (run.href.empty() || run.text.empty())
+        continue;
+      bool found = false;
+      for (auto& existing : result) {
+        if (existing.href == run.href) {
+          found = true;
+          if (existing.label.size() < kTestMaxLabel) {
+            if (!existing.label.empty() && existing.label.back() != ' ')
+              existing.label += ' ';
+            const size_t room = kTestMaxLabel - existing.label.size();
+            existing.label.append(run.text, 0, room);
+          }
+          break;
+        }
+      }
+      if (!found) {
+        std::string label = run.text.size() > kTestMaxLabel ? run.text.substr(0, kTestMaxLabel) : run.text;
+        result.push_back({std::move(label), run.href});
+      }
+    }
+  }
+  return result;
+}
+
+// A link whose anchor text spans multiple styled runs (e.g. <a><em>word</em> more</a>)
+// must have all runs concatenated into a single label, regardless of how the layout
+// engine later word-wraps or hyphenates that text.
+TEST(PageLayout, MultiWordLinkLabelIsFullyAccumulated) {
+  // Single run: "Rechtenachweis Nr. 1" — all one anchor text.
+  std::vector<Paragraph> paragraphs;
+  TextParagraph tp;
+  microreader::Run r("Rechtenachweis Nr. 1");
+  r.href = "OEBPS/Text/content-6.xhtml|bild1";
+  tp.runs.push_back(std::move(r));
+  paragraphs.push_back(Paragraph::make_text(std::move(tp)));
+
+  auto links = collect_links_from_runs(paragraphs);
+  ASSERT_EQ(links.size(), 1u) << "Expected exactly one distinct href";
+  EXPECT_EQ(links[0].label, "Rechtenachweis Nr. 1")
+      << "Full run text must be the label; got: '" << links[0].label << "'";
+  EXPECT_NE(links[0].href.find("bild1"), std::string::npos);
+}
+
+// A link with styled inner content produces multiple runs sharing one href;
+// all must be concatenated into one label entry.
+TEST(PageLayout, MultiRunLinkConcatenatesLabel) {
+  std::vector<Paragraph> paragraphs;
+  TextParagraph tp;
+  microreader::Run r1("Rechtenachweis");
+  r1.href = "OEBPS/Text/content-6.xhtml|bild1";
+  r1.style = FontStyle::Italic;
+  tp.runs.push_back(std::move(r1));
+  microreader::Run r2("Nr. 1");
+  r2.href = "OEBPS/Text/content-6.xhtml|bild1";  // same href
+  tp.runs.push_back(std::move(r2));
+  paragraphs.push_back(Paragraph::make_text(std::move(tp)));
+
+  auto links = collect_links_from_runs(paragraphs);
+  ASSERT_EQ(links.size(), 1u) << "Two runs with the same href must produce one label";
+  EXPECT_EQ(links[0].label, "Rechtenachweis Nr. 1") << "Concatenated label; got: '" << links[0].label << "'";
+}
+
+// Consecutive links separated by a plain-text run each get their own full label.
+TEST(PageLayout, ConsecutiveMultiWordLinksGetSeparateLabels) {
+  std::vector<Paragraph> paragraphs;
+  TextParagraph tp;
+  microreader::Run r1("Rechtenachweis Nr. 1");
+  r1.href = "OEBPS/Text/content-6.xhtml|bild1";
+  tp.runs.push_back(std::move(r1));
+  tp.runs.push_back(microreader::Run(", "));  // separator — no href
+  microreader::Run r2("Rechtenachweis Nr. 2");
+  r2.href = "OEBPS/Text/content-6.xhtml|bild2";
+  tp.runs.push_back(std::move(r2));
+  paragraphs.push_back(Paragraph::make_text(std::move(tp)));
+
+  auto links = collect_links_from_runs(paragraphs);
+  ASSERT_EQ(links.size(), 2u) << "Expected two distinct hrefs";
+  EXPECT_EQ(links[0].label, "Rechtenachweis Nr. 1") << "First link label; got: '" << links[0].label << "'";
+  EXPECT_EQ(links[1].label, "Rechtenachweis Nr. 2") << "Second link label; got: '" << links[1].label << "'";
+}
+
+// Labels longer than kMaxLabel bytes are capped to prevent heap waste.
+TEST(PageLayout, LongLinkLabelIsCappedAt64) {
+  std::vector<Paragraph> paragraphs;
+  TextParagraph tp;
+  microreader::Run r(std::string(100, 'x'));
+  r.href = "OEBPS/Text/content-6.xhtml|anchor";
+  tp.runs.push_back(std::move(r));
+  paragraphs.push_back(Paragraph::make_text(std::move(tp)));
+
+  auto links = collect_links_from_runs(paragraphs);
+  ASSERT_EQ(links.size(), 1u);
+  EXPECT_LE(links[0].label.size(), kTestMaxLabel) << "Label must be capped";
+}

@@ -194,6 +194,7 @@ static std::vector<LayoutLine> layout_para_lines(const IFont& font, const Layout
     uint8_t eff_size_pct = opts.override_publisher_fonts ? 100 : run.size_pct;
     const char* text = run.text.c_str();
     const size_t text_len = run.text.size();
+    const char* run_href = run.href.empty() ? nullptr : run.href.c_str();
     const uint16_t line_width = (run.margin_right < max_width) ? (max_width - run.margin_right) : max_width;
     cur_line_width = line_width;
 
@@ -240,6 +241,7 @@ static std::vector<LayoutLine> layout_para_lines(const IFont& font, const Layout
             x += space_width;
           current.words.push_back(LayoutWord{word_ptr, word_len, x, run.style, eff_size_pct, run.vertical_align,
                                              !needs_space && !current.words.empty()});
+          current.words.back().href = run_href;
           x += word_w;
           break;
         }
@@ -258,9 +260,11 @@ static std::vector<LayoutLine> layout_para_lines(const IFont& font, const Layout
             x += space_width;
           current.words.push_back(LayoutWord{word_ptr, static_cast<uint16_t>(split), x, run.style, eff_size_pct,
                                              run.vertical_align, false});
+          current.words.back().href = run_href;
           x += prefix_w;
           if (!prefix_has_hyphen) {
             current.words.push_back(LayoutWord{"-", 1, x, run.style, eff_size_pct, run.vertical_align, true});
+            current.words.back().href = run_href;
             x += hyphen_w;
           }
           current.hyphenated = true;
@@ -278,6 +282,7 @@ static std::vector<LayoutLine> layout_para_lines(const IFont& font, const Layout
           // No hyphenation and line is empty — force placement to avoid infinite loop.
           current.words.push_back(
               LayoutWord{word_ptr, word_len, x, run.style, eff_size_pct, run.vertical_align, false});
+          current.words.back().href = run_href;
           x += word_w;
           break;
         }

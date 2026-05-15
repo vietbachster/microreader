@@ -72,6 +72,13 @@ class MrbReader {
   const TableOfContents& toc() const {
     return toc_;
   }
+  const std::vector<std::string>& spine_files() const {
+    return spine_files_;
+  }
+
+  // Find the paragraph index for a fragment anchor (element id) within a chapter.
+  // Returns true and sets para_idx if found; returns false if not found.
+  bool find_anchor(uint16_t chapter_idx, const char* fragment, size_t frag_len, uint16_t& para_idx) const;
 
  private:
   FILE* f_ = nullptr;
@@ -80,6 +87,9 @@ class MrbReader {
   std::vector<MrbImageRef> images_;
   EpubMetadata metadata_;
   TableOfContents toc_;
+  std::vector<std::string> spine_files_;
+  uint32_t anchor_offset_ = 0;  // file offset of anchor table
+  uint16_t anchor_count_ = 0;   // number of anchor entries
 
   bool read_bytes(void* buf, size_t size);
   bool read_at(uint32_t offset, void* buf, size_t size);

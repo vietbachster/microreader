@@ -27,6 +27,7 @@ struct LayoutWord {
   uint8_t size_pct = 100;
   VerticalAlign vertical_align = VerticalAlign::Baseline;
   bool continues_prev = false;  // true if placed adjacent to previous word (no inter-word gap)
+  const char* href = nullptr;   // hyperlink target (pointer into Run.href; nullptr = no link)
 };
 
 struct LayoutLine {

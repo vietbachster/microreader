@@ -279,12 +279,16 @@ void ReaderScreen::start(DrawBuffer& buf, IRuntime& runtime) {
   chapter_idx_ = 0;
   page_pos_ = PagePosition{0, 0};
   image_size_fn_ = make_image_size_query(mrb_, path_, static_cast<uint16_t>(buf.width()));
-  // Restore position: if the user selected a chapter from the TOC, jump there;
+  // Restore position: if the user selected a chapter from the TOC or links list, jump there;
   // otherwise load saved bookmark from disk.
   if (app_ && app_->chapter_select()->has_pending()) {
     saved_chapter_idx_ = app_->chapter_select()->pending_chapter();
     saved_page_pos_ = PagePosition{app_->chapter_select()->pending_para_index(), 0, 0};
     app_->chapter_select()->clear_pending();
+  } else if (app_ && app_->links_screen()->has_pending()) {
+    saved_chapter_idx_ = app_->links_screen()->pending_chapter();
+    saved_page_pos_ = PagePosition{app_->links_screen()->pending_para(), 0, 0};
+    app_->links_screen()->clear_pending();
   } else {
     load_position_();
   }
@@ -383,6 +387,7 @@ void ReaderScreen::update(const ButtonState& buttons, DrawBuffer& buf, IRuntime&
           app_->reader_options()->set_settings(&reader_settings_);
           app_->reader_options()->populate(mrb_.toc(), static_cast<uint16_t>(chapter_idx_), page_pos_.paragraph,
                                            mrb_.metadata().title, progress_pct());
+          app_->reader_options()->set_page_links(page_links_, mrb_.spine_files(), mrb_);
           app_->push_screen(ScreenId::ReaderOptions);
           return;
         default:
@@ -437,6 +442,64 @@ void ReaderScreen::load_chapter_(size_t idx) {
   }
 }
 
+void ReaderScreen::collect_page_links_() {
+  page_links_.clear();
+  if (!chapter_src_)
+    return;
+
+  // Collect the paragraph indices that actually appear on this page from the layout items.
+  // We use page_.items (not page_.start/end) so we get exactly the paragraphs rendered —
+  // no ambiguity about partial paragraphs at page boundaries.
+  uint16_t seen_paras[32];
+  int seen_count = 0;
+  for (const auto& ci : page_.items) {
+    const PageTextItem* item = std::get_if<PageTextItem>(&ci);
+    if (!item)
+      continue;
+    const uint16_t pi = item->paragraph_index;
+    bool already = false;
+    for (int k = 0; k < seen_count; ++k)
+      if (seen_paras[k] == pi) {
+        already = true;
+        break;
+      }
+    if (!already && seen_count < 32)
+      seen_paras[seen_count++] = pi;
+  }
+
+  // Walk each visible paragraph's runs. Use Run.text and Run.href directly —
+  // not layout words — so labels are never split by hyphenation or line breaks.
+  static constexpr size_t kMaxLabel = 64;
+  for (int k = 0; k < seen_count; ++k) {
+    const Paragraph& para = chapter_src_->paragraph(seen_paras[k]);
+    if (para.type != ParagraphType::Text)
+      continue;
+    for (const auto& run : para.text.runs) {
+      if (run.href.empty() || run.text.empty())
+        continue;
+
+      bool found = false;
+      for (auto& existing : page_links_) {
+        if (existing.href == run.href) {
+          found = true;
+          // Append run text to accumulate the full anchor text (e.g. styled spans).
+          if (existing.label.size() < kMaxLabel) {
+            if (!existing.label.empty() && existing.label.back() != ' ')
+              existing.label += ' ';
+            const size_t room = kMaxLabel - existing.label.size();
+            existing.label.append(run.text, 0, room);
+          }
+          break;
+        }
+      }
+      if (!found) {
+        std::string label = run.text.size() > kMaxLabel ? run.text.substr(0, kMaxLabel) : run.text;
+        page_links_.push_back({std::move(label), run.href});
+      }
+    }
+  }
+}
+
 void ReaderScreen::render_page_(DrawBuffer& buf) {
   const int W = buf.width();
   const int H = buf.height();
@@ -481,8 +544,7 @@ void ReaderScreen::render_page_(DrawBuffer& buf) {
   layout_engine_.set_position(page_pos_);
 
   page_ = layout_engine_.layout();
-
-  // ── Collect image positions from layout
+  collect_page_links_();
   // ─────────────────────────────────
   struct ImageToDraw {
     uint16_t key;
@@ -650,6 +712,12 @@ void ReaderScreen::render_text_(DrawBuffer& buf, const BitmapFontSet& fset, Gray
       text[tlen] = '\0';
       buf.draw_text_plane(render, x, baseline_y, text, static_cast<size_t>(tlen), fset, plane, white, w.style,
                           w.size_pct);
+      // Draw underline for hyperlinks.
+      if (w.href != nullptr && plane == GrayPlane::BW) {
+        uint16_t word_w = fset.word_width(w.text, w.len, w.style, w.size_pct);
+        int underline_y = static_cast<int>(item->y_offset) + item->height - 2;
+        buf.fill_rect(x, underline_y, static_cast<int>(word_w), 1, !white);
+      }
     }
   }
 }
