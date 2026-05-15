@@ -2,6 +2,7 @@
 
 #include <cstring>
 
+#include "asset_blob.h"
 #include "esp_log.h"
 #include "font_partition.h"
 #include "microreader/Application.h"
@@ -10,29 +11,25 @@
 // ESP32 font manager: extends the core FontManager with spiffs partition
 // provisioning.  Declare as `static FontManager font_mgr(app)` in app_main
 // to keep objects in BSS (not on the stack).
+//
+// Font bundles live in the appended asset blob (see asset_blob.h) so they
+// don't consume DROM at boot.  We mmap on demand only during provisioning
+// (~5 s, once per firmware update), then unmap so the MMU pages are free.
 class FontManager : public microreader::FontManager {
  public:
   explicit FontManager(microreader::Application& app) : app_(app) {}
 
-  // Call once after epd.begin().  Mmaps the spiffs font partition and loads
-  // fonts into the BitmapFont slots.  If already provisioned, advertises the
-  // font to the app immediately.  Otherwise, ensure_ready() handles it lazily
-  // when the user first opens a book.
+  // Returns the asset name for the currently selected built-in font, or
+  // nullptr if the user selected a custom (SD-card) font.
+  static const char* embedded_asset_for(const std::string& font_name) {
+    if (font_name == "Alegreya")
+      return "alegreya.bin";
+    if (font_name == "" || font_name == "Bookerly")
+      return "bookerly.bin";
+    return nullptr;
+  }
+
   void init() {
-    extern const uint8_t _binary_bookerly_bin_start[];
-    extern const uint8_t _binary_bookerly_bin_end[];
-    extern const uint8_t _binary_alegreya_bin_start[];
-    extern const uint8_t _binary_alegreya_bin_end[];
-
-    const std::string& current = app_.custom_font_path();
-    if (current == "Alegreya") {
-      bundle_data_ = _binary_alegreya_bin_start;
-      bundle_size_ = static_cast<size_t>(_binary_alegreya_bin_end - _binary_alegreya_bin_start);
-    } else {
-      bundle_data_ = _binary_bookerly_bin_start;
-      bundle_size_ = static_cast<size_t>(_binary_bookerly_bin_end - _binary_bookerly_bin_start);
-    }
-
     if (font_part_.mmap()) {
       load_fonts_();
       if (font_set_.valid()) {
@@ -43,8 +40,12 @@ class FontManager : public microreader::FontManager {
           }
         }
         app_.set_reader_font(font_set());
-        if (FontPartition::needs_provisioning(bundle_data_, bundle_size_)) {
-          ESP_LOGI("font", "font needs provisioning � will install before app start");
+        const char* target_asset = embedded_asset_for(app_.custom_font_path());
+        if (target_asset) {
+          uint32_t expected_crc = asset_blob::g_assets.crc(target_asset);
+          if (FontPartition::needs_provisioning(expected_crc)) {
+            ESP_LOGI("font", "font needs provisioning \u2014 will install before app start");
+          }
         }
       } else {
         ESP_LOGW("font", "no valid Normal font found");
@@ -58,25 +59,11 @@ class FontManager : public microreader::FontManager {
     const std::string& custom_font = app_.custom_font_path();
     const std::string& installed_font = app_.installed_font_path();
 
-    extern const uint8_t _binary_bookerly_bin_start[];
-    extern const uint8_t _binary_bookerly_bin_end[];
-    extern const uint8_t _binary_alegreya_bin_start[];
-    extern const uint8_t _binary_alegreya_bin_end[];
+    const char* target_asset = embedded_asset_for(custom_font);
+    bool is_embedded = (target_asset != nullptr);
+    uint32_t target_crc = is_embedded ? asset_blob::g_assets.crc(target_asset) : 0;
 
-    const uint8_t* target_bundle_data;
-    size_t target_bundle_size;
-    if (custom_font == "Alegreya") {
-      target_bundle_data = _binary_alegreya_bin_start;
-      target_bundle_size = static_cast<size_t>(_binary_alegreya_bin_end - _binary_alegreya_bin_start);
-    } else {
-      target_bundle_data = _binary_bookerly_bin_start;
-      target_bundle_size = static_cast<size_t>(_binary_bookerly_bin_end - _binary_bookerly_bin_start);
-    }
-
-    bool is_embedded = (custom_font == "" || custom_font == "Bookerly" || custom_font == "Alegreya");
-
-    if (custom_font == installed_font &&
-        (!is_embedded || !FontPartition::needs_provisioning(target_bundle_data, target_bundle_size))) {
+    if (custom_font == installed_font && (!is_embedded || !FontPartition::needs_provisioning(target_crc))) {
       // If we skipped setting it in init() due to CRC checks, set it now.
       if (font_set_.valid()) {
         app_.set_reader_font(font_set());
@@ -88,11 +75,21 @@ class FontManager : public microreader::FontManager {
     buf.show_loading("Installing fonts...", 0);
 
     if (is_embedded) {
-      ESP_LOGI("font", "Provisioning font from firmware (first launch or firmware update)...");
-      if (FontPartition::provision_embedded(target_bundle_data, target_bundle_size, buf.scratch_buf1(),
-                                            microreader::DrawBuffer::kBufSize, buf.scratch_buf2(),
-                                            microreader::DrawBuffer::kBufSize,
-                                            [&buf](int pct) { buf.show_loading("Installing fonts...", pct); })) {
+      ESP_LOGI("font", "Provisioning font \"%s\" from firmware...", target_asset);
+
+      size_t mapped_size = 0;
+      esp_partition_mmap_handle_t mmap_h = 0;
+      const uint8_t* data = static_cast<const uint8_t*>(asset_blob::g_assets.map(target_asset, mapped_size, mmap_h));
+      if (!data) {
+        ESP_LOGE("font", "failed to map asset %s", target_asset);
+        return;
+      }
+      bool ok = FontPartition::provision_embedded(
+          data, mapped_size, target_crc, buf.scratch_buf1(), microreader::DrawBuffer::kBufSize, buf.scratch_buf2(),
+          microreader::DrawBuffer::kBufSize, [&buf](int pct) { buf.show_loading("Installing fonts...", pct); });
+      asset_blob::g_assets.unmap(mmap_h);
+
+      if (ok) {
         app_.set_installed_font_path(custom_font);
         buf.reset_after_scratch();
         if (font_part_.mmap()) {
@@ -168,6 +165,4 @@ class FontManager : public microreader::FontManager {
 
   microreader::Application& app_;
   FontPartition font_part_;
-  const uint8_t* bundle_data_ = nullptr;
-  size_t bundle_size_ = 0;
 };

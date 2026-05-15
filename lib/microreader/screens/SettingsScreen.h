@@ -52,6 +52,9 @@ class SettingsScreen final : public ListMenuScreen {
   int sleep_image_sel_idx_ = 0;
 
   void clear_cache_();
+#ifdef ESP_PLATFORM
+  void switch_ota_partition_();
+#endif
 };
 
 }  // namespace microreader

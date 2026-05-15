@@ -55,9 +55,10 @@ struct FontPartition {
     return esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_SPIFFS, "spiffs");
   }
 
-  // Returns true if the partition does NOT already contain the font matching
-  // the given compressed bytes.  Cheap: reads 12 bytes + CRC32 computation.
-  static bool needs_provisioning(const uint8_t* compressed_data, size_t compressed_size) {
+  // Returns true if the partition does NOT already contain the font with the
+  // given expected CRC32.  Cheap: reads 12 bytes from the partition header.
+  // The expected CRC comes from the asset blob manifest (see asset_blob.h).
+  static bool needs_provisioning(uint32_t expected_crc) {
     const esp_partition_t* part = find();
     if (!part)
       return true;
@@ -69,8 +70,7 @@ struct FontPartition {
     uint32_t stored_crc = header[8] | (header[9] << 8) | (header[10] << 16) | (header[11] << 24);
     if (stored_crc == 0)
       return true;  // invalidated or old format — treat as stale
-    uint32_t embedded_crc = static_cast<uint32_t>(mz_crc32(MZ_CRC32_INIT, compressed_data, compressed_size));
-    return stored_crc != embedded_crc;
+    return stored_crc != expected_crc;
   }
 
   // Copy an uncompressed .mbf/.bin file from the SD card to the SPIFFS partition
@@ -161,9 +161,9 @@ struct FontPartition {
   // The function heap-allocates ~45 KB for tinfl work + 4 KB write buffer,
   // then frees them before returning.  Call this before loading book content
   // to ensure sufficient heap headroom.
-  static bool provision_embedded(const uint8_t* compressed_data, size_t compressed_size, uint8_t* work_buf_ext,
-                                 size_t work_buf_ext_size, uint8_t* write_buf_ext, size_t write_buf_ext_size,
-                                 std::function<void(int)> on_progress = nullptr) {
+  static bool provision_embedded(const uint8_t* compressed_data, size_t compressed_size, uint32_t expected_crc,
+                                 uint8_t* work_buf_ext, size_t work_buf_ext_size, uint8_t* write_buf_ext,
+                                 size_t write_buf_ext_size, std::function<void(int)> on_progress = nullptr) {
     const esp_partition_t* part = find();
     if (!part) {
       ESP_LOGE(kFontPartTag, "provision: spiffs partition not found");
@@ -217,9 +217,6 @@ struct FontPartition {
       ESP_LOGE(kFontPartTag, "provision: font_bundle.bin too small");
       return false;
     }
-    // Save original pointers for CRC (must match what needs_provisioning() computes).
-    const uint8_t* crc_data = compressed_data;
-    size_t crc_size = compressed_size;
     uint32_t uncompressed_size =
         compressed_data[0] | (compressed_data[1] << 8) | (compressed_data[2] << 16) | (compressed_data[3] << 24);
     // Advance past the 4-byte prefix — the rest is pure zlib.
@@ -357,7 +354,7 @@ struct FontPartition {
 
     // Write the 12-byte header into sector 0 (already erased above).
     {
-      uint32_t embedded_crc = static_cast<uint32_t>(mz_crc32(MZ_CRC32_INIT, crc_data, crc_size));
+      uint32_t embedded_crc = expected_crc;
       uint8_t hdr[kFontPartHeaderBytes] = {};
       memcpy(hdr, kFontPartMagic, 4);
       hdr[4] = decompressed_size & 0xFF;
@@ -467,9 +464,9 @@ struct FontPartition {
       return false;
     }
 
-    // Read header to check magic and get size.
-    uint8_t header[kFontPartHeaderSize];
-    if (esp_partition_read(part, 0, header, kFontPartHeaderSize) != ESP_OK) {
+    // Read header to check magic and get size (only need the first 12 bytes).
+    uint8_t header[kFontPartHeaderBytes];
+    if (esp_partition_read(part, 0, header, kFontPartHeaderBytes) != ESP_OK) {
       ESP_LOGW(kFontPartTag, "failed to read header");
       return false;
     }

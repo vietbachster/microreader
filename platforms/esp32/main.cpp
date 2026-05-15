@@ -1,5 +1,6 @@
 #include <cstdio>
 
+#include "asset_blob.h"
 #include "driver/gpio.h"
 #include "driver/usb_serial_jtag.h"
 #include "epd.h"
@@ -75,7 +76,7 @@ static void verify_wakeup_press() {
 
   // Short press — go back to sleep; wake again on power button press.
   ESP_LOGI("pwr", "Short press on wakeup (held %lu ms) — returning to sleep", (unsigned long)held_ms);
-  esp_deep_sleep_enable_gpio_wakeup(1ULL << kPowerPin, ESP_GPIO_WAKEUP_GPIO_LOW);
+  esp_sleep_enable_gpio_wakeup_on_hp_periph_powerdown(1ULL << kPowerPin, ESP_GPIO_WAKEUP_GPIO_LOW);
   esp_deep_sleep_start();
 #endif
 }
@@ -83,6 +84,10 @@ static void verify_wakeup_press() {
 extern "C" void app_main(void) {
   verify_ota();
   verify_wakeup_press();
+
+  // Initialise the appended asset blob (fonts, sleep images, ...).
+  // Must happen before FontManager::init() and any sleep-image rendering.
+  asset_blob::g_assets.init();
 
   static Esp32InputSource input;
   static EInkDisplay epd;
@@ -238,7 +243,7 @@ extern "C" void app_main(void) {
 
 #ifndef QEMU_BUILD
   // Enter deep sleep; wake on power button press (active LOW, GPIO 3).
-  esp_deep_sleep_enable_gpio_wakeup(1ULL << kPowerPin, ESP_GPIO_WAKEUP_GPIO_LOW);
+  esp_sleep_enable_gpio_wakeup_on_hp_periph_powerdown(1ULL << kPowerPin, ESP_GPIO_WAKEUP_GPIO_LOW);
   esp_deep_sleep_start();
 #endif  // QEMU_BUILD
 }

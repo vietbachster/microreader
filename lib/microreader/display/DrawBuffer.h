@@ -9,6 +9,10 @@
 #include "../content/BitmapFont.h"
 #include "ui_font_small.h"
 
+#ifdef ESP_PLATFORM
+#include "asset_blob.h"
+#endif
+
 namespace microreader {
 
 enum class Rotation { Deg0 = 0, Deg90 = 90 };
@@ -504,52 +508,37 @@ class DrawBuffer {
 
   bool show_sleep_image_embedded(int idx = 0) {
 #ifdef ESP_PLATFORM
-    const uint8_t* start = nullptr;
-    const uint8_t* end = nullptr;
+    // Sleep images live in the appended asset blob (see asset_blob.h).  Mmap
+    // on demand so they don't occupy MMU pages outside this call.
+    const char* name = (idx == 1) ? "sleep_1.mgr" : (idx == 2) ? "sleep_2.mgr" : "sleep_0.mgr";
 
-    extern const uint8_t _binary_sleep_0_mgr_start[] asm("_binary_sleep_0_mgr_start");
-    extern const uint8_t _binary_sleep_0_mgr_end[] asm("_binary_sleep_0_mgr_end");
-    extern const uint8_t _binary_sleep_1_mgr_start[] asm("_binary_sleep_1_mgr_start");
-    extern const uint8_t _binary_sleep_1_mgr_end[] asm("_binary_sleep_1_mgr_end");
-    extern const uint8_t _binary_sleep_2_mgr_start[] asm("_binary_sleep_2_mgr_start");
-    extern const uint8_t _binary_sleep_2_mgr_end[] asm("_binary_sleep_2_mgr_end");
+    size_t size = 0;
+    esp_partition_mmap_handle_t mmap_h = 0;
+    const uint8_t* start = static_cast<const uint8_t*>(asset_blob::g_assets.map(name, size, mmap_h));
+    if (!start)
+      return false;
 
-    if (idx == 1) {
-      start = _binary_sleep_1_mgr_start;
-      end = _binary_sleep_1_mgr_end;
-    } else if (idx == 2) {
-      start = _binary_sleep_2_mgr_start;
-      end = _binary_sleep_2_mgr_end;
-    } else {
-      start = _binary_sleep_0_mgr_start;
-      end = _binary_sleep_0_mgr_end;
+    bool ok = false;
+    if (size >= 8 && std::memcmp(start, "MGR1", 4) == 0) {
+      uint16_t w = start[4] | (start[5] << 8);
+      uint16_t h = start[6] | (start[7] << 8);
+      size_t plane_bytes = static_cast<size_t>((w + 7) / 8) * h;
+      if (size >= 8 + plane_bytes * 3) {
+        const uint8_t* bw = start + 8;
+        const uint8_t* lsb = bw + plane_bytes;
+        const uint8_t* msb = lsb + plane_bytes;
+
+        fill(true);
+        draw_image(bw, 0, 0, w, h);
+        draw_text_centered(kWidth / 2, kHeight - 24, "sleeping...", true);
+        full_refresh(RefreshMode::Full, false);
+
+        show_grayscale_image(lsb, msb, w, h);
+        ok = true;
+      }
     }
-
-    size_t size = end - start;
-    if (size < 8)
-      return false;
-
-    if (std::memcmp(start, "MGR1", 4) != 0)
-      return false;
-
-    uint16_t w = start[4] | (start[5] << 8);
-    uint16_t h = start[6] | (start[7] << 8);
-
-    size_t plane_bytes = static_cast<size_t>((w + 7) / 8) * h;
-    if (size < 8 + plane_bytes * 3)
-      return false;
-
-    const uint8_t* bw = start + 8;
-    const uint8_t* lsb = bw + plane_bytes;
-    const uint8_t* msb = lsb + plane_bytes;
-
-    fill(true);
-    draw_image(bw, 0, 0, w, h);
-    draw_text_centered(kWidth / 2, kHeight - 24, "sleeping...", true);
-    full_refresh(RefreshMode::Full, false);
-
-    show_grayscale_image(lsb, msb, w, h);
-    return true;
+    asset_blob::g_assets.unmap(mmap_h);
+    return ok;
 #else
     // Desktop emulator uses the resources folder relative file
     char path[64];
