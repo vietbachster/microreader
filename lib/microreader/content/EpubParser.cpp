@@ -818,6 +818,13 @@ class BodyParser {
         continue;
       }
 
+      // UTF-8 BOM / zero-width no-break space (U+FEFF = 0xEF 0xBB 0xBF) — silently skip.
+      if (uc == 0xEF && i + 2 < tlen && static_cast<unsigned char>(t[i + 1]) == 0xBB &&
+          static_cast<unsigned char>(t[i + 2]) == 0xBF) {
+        i += 3;
+        continue;
+      }
+
       // UTF-8 non-breaking space (0xC2 0xA0)
       if (uc == 0xC2 && i + 1 < tlen && static_cast<unsigned char>(t[i + 1]) == 0xA0) {
         in_space = true;
@@ -840,7 +847,9 @@ class BodyParser {
         while (i < tlen) {
           unsigned char nc = static_cast<unsigned char>(t[i]);
           if (nc == '&' || std::isspace(nc) ||
-              (nc == 0xC2 && i + 1 < tlen && static_cast<unsigned char>(t[i + 1]) == 0xA0))
+              (nc == 0xC2 && i + 1 < tlen && static_cast<unsigned char>(t[i + 1]) == 0xA0) ||
+              (nc == 0xEF && i + 2 < tlen && static_cast<unsigned char>(t[i + 1]) == 0xBB &&
+               static_cast<unsigned char>(t[i + 2]) == 0xBF))
             break;
           ++i;
         }

@@ -433,8 +433,10 @@ ImageError decode_png_from_entry(IZipFile& file, const ZipEntry& entry, uint16_t
       return ImageError::UnsupportedFormat;
   }
 
-  // ---- Scan for PLTE, then first IDAT ----
+  // ---- Scan for PLTE/tRNS, then first IDAT ----
   uint8_t palette_grey[256] = {};
+  uint8_t palette_alpha[256];
+  std::memset(palette_alpha, 255, sizeof(palette_alpha));
   uint32_t first_idat_len = 0;
   for (;;) {
     if (!zip_read_exact(inp, chunk_hdr, 8))
@@ -459,9 +461,32 @@ ImageError decode_png_from_entry(IZipFile& file, const ZipEntry& entry, uint16_t
       for (size_t i = 0; i < to_read / 3; ++i) {
         palette_grey[i] = rgb_to_grey(plte_scratch[i * 3], plte_scratch[i * 3 + 1], plte_scratch[i * 3 + 2]);
       }
+    } else if (std::memcmp(ctype, "tRNS", 4) == 0) {
+      if (hdr.color_type == kColorPalette && clen <= 256) {
+        // Per-entry alpha for palette images
+        uint8_t trns[256];
+        if (!zip_read_exact(inp, trns, clen))
+          return ImageError::ReadError;
+        std::memcpy(palette_alpha, trns, clen);
+        // entries beyond clen remain fully opaque (255)
+      } else {
+        if (!zip_skip(inp, clen))
+          return ImageError::ReadError;
+      }
+      // CRC
+      if (!zip_skip(inp, 4))
+        return ImageError::ReadError;
     } else {
       if (!zip_skip(inp, clen + 4))
         return ImageError::ReadError;
+    }
+  }
+
+  // Apply tRNS alpha to palette: blend each entry against white background.
+  if (hdr.color_type == kColorPalette) {
+    for (int i = 0; i < 256; ++i) {
+      if (palette_alpha[i] != 255)
+        palette_grey[i] = blend_white(palette_grey[i], palette_alpha[i]);
     }
   }
 
