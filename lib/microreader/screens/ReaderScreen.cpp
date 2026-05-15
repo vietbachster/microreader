@@ -447,56 +447,59 @@ void ReaderScreen::collect_page_links_() {
   if (!chapter_src_)
     return;
 
-  // Collect the paragraph indices that actually appear on this page from the layout items.
-  // We use page_.items (not page_.start/end) so we get exactly the paragraphs rendered —
-  // no ambiguity about partial paragraphs at page boundaries.
-  uint16_t seen_paras[32];
+  // Collect the unique hrefs that appear in rendered layout words.
+  // Using the layout words (not raw runs) means we only see links from lines
+  // actually on this page — no off-screen content from paragraphs that span
+  // a page boundary.
+  static constexpr int kMaxLinks = 32;
+  const char* seen_hrefs[kMaxLinks];
+  uint16_t seen_para[kMaxLinks];
   int seen_count = 0;
   for (const auto& ci : page_.items) {
     const PageTextItem* item = std::get_if<PageTextItem>(&ci);
     if (!item)
       continue;
-    const uint16_t pi = item->paragraph_index;
-    bool already = false;
-    for (int k = 0; k < seen_count; ++k)
-      if (seen_paras[k] == pi) {
-        already = true;
-        break;
-      }
-    if (!already && seen_count < 32)
-      seen_paras[seen_count++] = pi;
-  }
-
-  // Walk each visible paragraph's runs. Use Run.text and Run.href directly —
-  // not layout words — so labels are never split by hyphenation or line breaks.
-  static constexpr size_t kMaxLabel = 64;
-  for (int k = 0; k < seen_count; ++k) {
-    const Paragraph& para = chapter_src_->paragraph(seen_paras[k]);
-    if (para.type != ParagraphType::Text)
-      continue;
-    for (const auto& run : para.text.runs) {
-      if (run.href.empty() || run.text.empty())
+    for (const auto& w : item->line.words) {
+      if (!w.href)
         continue;
-
-      bool found = false;
-      for (auto& existing : page_links_) {
-        if (existing.href == run.href) {
-          found = true;
-          // Append run text to accumulate the full anchor text (e.g. styled spans).
-          if (existing.label.size() < kMaxLabel) {
-            if (!existing.label.empty() && existing.label.back() != ' ')
-              existing.label += ' ';
-            const size_t room = kMaxLabel - existing.label.size();
-            existing.label.append(run.text, 0, room);
-          }
+      bool already = false;
+      for (int k = 0; k < seen_count; ++k)
+        if (seen_hrefs[k] == w.href) {
+          already = true;
           break;
         }
-      }
-      if (!found) {
-        std::string label = run.text.size() > kMaxLabel ? run.text.substr(0, kMaxLabel) : run.text;
-        page_links_.push_back({std::move(label), run.href});
+      if (!already && seen_count < kMaxLinks) {
+        seen_hrefs[seen_count] = w.href;
+        seen_para[seen_count] = item->paragraph_index;
+        ++seen_count;
       }
     }
+  }
+
+  // Now build labels from the source runs so the text is never split by
+  // hyphenation or line-wrap — but only for hrefs we confirmed are on screen.
+  static constexpr size_t kMaxLabel = 64;
+  for (int k = 0; k < seen_count; ++k) {
+    const char* href_ptr = seen_hrefs[k];
+    const Paragraph& para = chapter_src_->paragraph(seen_para[k]);
+    if (para.type != ParagraphType::Text)
+      continue;
+    std::string label;
+    std::string href_str;
+    for (const auto& run : para.text.runs) {
+      if (run.href.empty() || run.href.c_str() != href_ptr)
+        continue;
+      if (href_str.empty())
+        href_str = run.href;
+      if (label.size() < kMaxLabel) {
+        if (!label.empty() && label.back() != ' ')
+          label += ' ';
+        const size_t room = kMaxLabel - label.size();
+        label.append(run.text, 0, room);
+      }
+    }
+    if (!href_str.empty())
+      page_links_.push_back({std::move(label), std::move(href_str)});
   }
 }
 
@@ -695,30 +698,8 @@ void ReaderScreen::render_text_(DrawBuffer& buf, const BitmapFontSet& fset, Gray
     const PageTextItem* item = std::get_if<PageTextItem>(&ci);
     if (!item)
       continue;
-    for (const auto& w : item->line.words) {
-      if (w.len == 0)
-        continue;
-      int x = left_padding + w.x;
-      int baseline_y = static_cast<int>(item->y_offset) + item->baseline;
-      if (w.vertical_align == VerticalAlign::Super)
-        baseline_y -= fset.y_advance(w.size_pct) * 20 / 100;
-      else if (w.vertical_align == VerticalAlign::Sub)
-        baseline_y += fset.y_advance(w.size_pct) * 20 / 100;
-      char text[64];
-      int tlen = static_cast<int>(w.len);
-      if (tlen > 63)
-        tlen = 63;
-      std::memcpy(text, w.text, tlen);
-      text[tlen] = '\0';
-      buf.draw_text_plane(render, x, baseline_y, text, static_cast<size_t>(tlen), fset, plane, white, w.style,
-                          w.size_pct);
-      // Draw underline for hyperlinks.
-      if (w.href != nullptr && plane == GrayPlane::BW) {
-        uint16_t word_w = fset.word_width(w.text, w.len, w.style, w.size_pct);
-        int underline_y = static_cast<int>(item->y_offset) + item->height - 2;
-        buf.fill_rect(x, underline_y, static_cast<int>(word_w), 1, !white);
-      }
-    }
+    int baseline_y = static_cast<int>(item->y_offset) + item->baseline;
+    buf.draw_layout_line(render, left_padding, baseline_y, item->line, fset, plane, white);
   }
 }
 

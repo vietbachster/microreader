@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "../content/BitmapFont.h"
+#include "../content/TextLayout.h"
 #include "ui_font_small.h"
 
 #ifdef ESP_PLATFORM
@@ -368,6 +369,12 @@ class DrawBuffer {
   // Render text from a specific grayscale plane into an explicit buffer.
   int draw_text_plane(uint8_t* buf, int x, int baseline_y, const char* text, size_t len, const BitmapFontSet& fonts,
                       GrayPlane plane, bool white, FontStyle style = FontStyle::Regular, uint8_t size_pct = 100);
+
+  // Render all words of a LayoutLine and — on the BW plane only — draw continuous
+  // underline decorations spanning each run of consecutive linked words. This is the
+  // correct level of abstraction: underlines are line decorations, not per-word.
+  void draw_layout_line(uint8_t* buf, int x_offset, int baseline_y, const LayoutLine& line, const BitmapFontSet& fonts,
+                        GrayPlane plane, bool white);
 
   // -- Grayscale display operations
   // -------------------------------------
@@ -893,6 +900,57 @@ inline int DrawBuffer::draw_text_plane(uint8_t* buf, int x, int baseline_y, cons
     return x;
   const RenderTarget t{buf, DisplayFrame::kStride, 0, 0, DisplayFrame::kPhysicalWidth, DisplayFrame::kPhysicalHeight};
   return draw_text_impl_(t, x, baseline_y, text, len, *f, plane, white, style, rotation_);
+}
+
+inline void DrawBuffer::draw_layout_line(uint8_t* buf, int x_offset, int baseline_y, const LayoutLine& line,
+                                         const BitmapFontSet& fonts, GrayPlane plane, bool white) {
+  const RenderTarget t{buf, DisplayFrame::kStride, 0, 0, DisplayFrame::kPhysicalWidth, DisplayFrame::kPhysicalHeight};
+
+  // State for the current underline span (BW plane only).
+  int ul_x0 = 0, ul_x1 = 0, ul_y = 0, ul_h = 0;
+  const char* ul_href = nullptr;
+
+  auto flush_ul = [&]() {
+    if (!ul_href || ul_x1 <= ul_x0)
+      return;
+    if (rotation_ == Rotation::Deg0)
+      fill_rect_physical_(t, ul_x0, ul_y, ul_x1 - ul_x0, ul_h, white);
+    else
+      fill_rect_physical_(t, ul_y, DisplayFrame::kPhysicalHeight - ul_x0 - (ul_x1 - ul_x0), ul_h, ul_x1 - ul_x0, white);
+    ul_href = nullptr;
+  };
+
+  for (const auto& w : line.words) {
+    if (w.len == 0)
+      continue;
+    const BitmapFont* f = fonts.get(w.size_pct);
+    if (!f || !f->valid())
+      continue;
+    int x = x_offset + w.x;
+    int word_baseline = baseline_y;
+    if (w.vertical_align == VerticalAlign::Super)
+      word_baseline -= static_cast<int>(fonts.y_advance(w.size_pct)) * 20 / 100;
+    else if (w.vertical_align == VerticalAlign::Sub)
+      word_baseline += static_cast<int>(fonts.y_advance(w.size_pct)) * 20 / 100;
+    int end_x = draw_text_impl_(t, x, word_baseline, w.text, w.len, *f, plane, white, w.style, rotation_);
+
+    if (plane == GrayPlane::BW) {
+      if (w.href) {
+        if (w.href != ul_href) {
+          flush_ul();
+          ul_href = w.href;
+          ul_x0 = x;
+          ul_y = word_baseline + static_cast<int>(f->underline_pos());
+          ul_h = static_cast<int>(f->underline_thickness());
+        }
+        ul_x1 = end_x;
+      } else {
+        flush_ul();
+      }
+    }
+  }
+  if (plane == GrayPlane::BW)
+    flush_ul();
 }
 
 }  // namespace microreader

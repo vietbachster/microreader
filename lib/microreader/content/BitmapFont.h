@@ -160,6 +160,14 @@ class BitmapFont : public IFont {
     return header_ ? header_->baseline : 0;
   }
 
+  int8_t underline_pos(uint8_t /*size_pct*/ = 100) const override {
+    return header_ ? header_->underline_pos : 1;
+  }
+
+  uint8_t underline_thickness(uint8_t /*size_pct*/ = 100) const override {
+    return header_ ? std::max<uint8_t>(1, header_->underline_thickness) : 1;
+  }
+
   // ── Glyph data access (for rendering) ───────────────────────────────────
 
   int8_t get_kerning_q(char32_t left, char32_t right, FontStyle style = FontStyle::Regular) const {
@@ -409,6 +417,16 @@ class BitmapFontSet : public IFont {
   uint16_t baseline(uint8_t size_pct = 100) const override {
     const BitmapFont* best = resolve_(size_pct);
     return best ? best->baseline(100) : 0;
+  }
+
+  int8_t underline_pos(uint8_t size_pct = 100) const override {
+    const BitmapFont* best = resolve_(size_pct);
+    return best ? best->underline_pos(100) : 1;
+  }
+
+  uint8_t underline_thickness(uint8_t size_pct = 100) const override {
+    const BitmapFont* best = resolve_(size_pct);
+    return best ? best->underline_thickness(100) : 1;
   }
 
   // ── Glyph data (for rendering) ─────────────────────────────────────────

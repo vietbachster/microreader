@@ -1,6 +1,6 @@
 #pragma once
 
-// MBF (Microreader Bitmap Font) binary format — version 2.
+// MBF (Microreader Bitmap Font) binary format — version 4.
 //
 // Each MBF file contains one font at one pixel size, with up to 4 styles
 // (Regular + optional Bold, Italic, BoldItalic) and optional 2-bit grayscale
@@ -38,12 +38,12 @@
 
 namespace microreader {
 
-static constexpr uint32_t kMbfMagic = 0x3346424D;  // "MBF3" little-endian
-static constexpr uint8_t kMbfVersion = 3;
+static constexpr uint32_t kMbfMagic = 0x3446424D;  // "MBF4" little-endian
+static constexpr uint8_t kMbfVersion = 4;
 
 #pragma pack(push, 1)
 
-// File header — 40 bytes, all fields little-endian.
+// File header — 50 bytes, all fields little-endian.
 struct MbfHeader {
   uint32_t magic;               //  0: must be kMbfMagic
   uint8_t version;              //  4: must be kMbfVersion
@@ -63,8 +63,10 @@ struct MbfHeader {
   uint32_t kerning_offset;      // 36: file offset to Regular style kerning data
   uint32_t gray_lsb_offset;     // 40: file offset to grayscale LSB bitmap data (0 = absent)
   uint32_t gray_msb_offset;     // 44: file offset to grayscale MSB bitmap data (0 = absent)
+  int8_t underline_pos;         // 48: distance below baseline to underline top (px, positive = below)
+  uint8_t underline_thickness;  // 49: underline height in pixels (>= 1)
 };
-static_assert(sizeof(MbfHeader) == 48, "MbfHeader must be 48 bytes");
+static_assert(sizeof(MbfHeader) == 50, "MbfHeader must be 50 bytes");
 
 // Style section preamble — appears at bold_offset / italic_offset / bold_italic_offset.
 // Immediately followed by MbfRange[num_ranges] then MbfGlyph[num_glyphs] then MbfClassKerning data block.

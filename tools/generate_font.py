@@ -505,9 +505,16 @@ def build_mbf(face_info, size, codepoint_ranges, bw_only=False, fallback_face=No
     baseline = ascender
     default_advance = (size // 2) * 4  # Scale by 4 for quarter-pixel precision
 
+    # Underline metrics from the font's post table (in font design units).
+    em = face.units_per_EM or 1000
+    ul_pos_raw = getattr(face, 'underline_position', -100)
+    ul_thick_raw = getattr(face, 'underline_thickness', 50)
+    underline_pos = max(1, round(-ul_pos_raw * size / em))   # positive = below baseline
+    underline_thickness = max(1, round(ul_thick_raw * size / em))
+
     num_ranges = len(ranges)
     num_glyphs = len(all_glyphs)
-    header_size = 48
+    header_size = 50
     ranges_size = num_ranges * 8
     glyphs_size = num_glyphs * 10
     
@@ -522,9 +529,9 @@ def build_mbf(face_info, size, codepoint_ranges, bw_only=False, fallback_face=No
     buf = bytearray()
     buf.extend(
         struct.pack(
-            "<IBBBBBBHHHIIIIIIII",
-            0x3346424D,  # MBF3
-            3,  # version 3
+            "<IBBBBBBHHHIIIIIIIIbB",
+            0x3446424D,  # MBF4
+            4,  # version 4
             max_glyph_height & 0xFF,
             baseline & 0xFF,
             y_advance & 0xFF,
@@ -541,6 +548,8 @@ def build_mbf(face_info, size, codepoint_ranges, bw_only=False, fallback_face=No
             kerning_offset,
             gray_lsb_offset,
             gray_msb_offset,
+            underline_pos,
+            underline_thickness,
         )
     )
     buf.extend(_encode_ranges_and_glyphs(ranges, all_glyphs, 0))
@@ -590,13 +599,20 @@ def build_multi_style_mbf(faces, size, codepoint_ranges, bw_only=False, fallback
     baseline = ascender
     default_advance = (size // 2) * 4  # Scale by 4 for quarter-pixel precision
 
+    # Underline metrics from the font's post table (in font design units).
+    em = reg_face.units_per_EM or 1000
+    ul_pos_raw = getattr(reg_face, 'underline_position', -100)
+    ul_thick_raw = getattr(reg_face, 'underline_thickness', 50)
+    underline_pos = max(1, round(-ul_pos_raw * size / em))   # positive = below baseline
+    underline_thickness = max(1, round(ul_thick_raw * size / em))
+
     max_glyph_height = max(d[5] for d in style_data.values())
 
     # Compute layout sizes
     reg = style_data["regular"]
     reg_ranges, reg_glyphs, reg_bw, reg_lsb, reg_msb, _, reg_kerning = reg
 
-    header_size = 48
+    header_size = 50
     reg_ranges_size = len(reg_ranges) * 8
     reg_glyphs_size = len(reg_glyphs) * 10
     
@@ -667,9 +683,9 @@ def build_multi_style_mbf(faces, size, codepoint_ranges, bw_only=False, fallback
     buf = bytearray()
     buf.extend(
         struct.pack(
-            "<IBBBBBBHHHIIIIIIII",
-            0x3346424D,  # MBF3
-            3,  # version 3
+            "<IBBBBBBHHHIIIIIIIIbB",
+            0x3446424D,  # MBF4
+            4,  # version 4
             max_glyph_height & 0xFF,
             baseline & 0xFF,
             y_advance & 0xFF,
@@ -686,6 +702,8 @@ def build_multi_style_mbf(faces, size, codepoint_ranges, bw_only=False, fallback
             kerning_offset,
             gray_lsb_offset,
             gray_msb_offset,
+            underline_pos,
+            underline_thickness,
         )
     )
 

@@ -46,7 +46,6 @@ void LinksScreen::populate(const std::vector<PageLink>& links, const std::vector
 }
 
 void LinksScreen::on_start() {
-  set_alignment_left(true);
   title_ = !entries_.empty() ? "Links" : "No links";
   for (const auto& e : entries_) {
     std::string display = e.label;
