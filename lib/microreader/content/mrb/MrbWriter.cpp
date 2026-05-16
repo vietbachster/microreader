@@ -79,6 +79,12 @@ bool MrbWriter::open(const char* path) {
   if (!bw_.open(path))
     return false;
 
+  // Open a temp file to stream anchor entries during conversion (zero RAM usage).
+  std::snprintf(anchor_tmp_path_, sizeof(anchor_tmp_path_), "%s.tmp", path);
+  anchor_tmp_ = std::fopen(anchor_tmp_path_, "w+b");
+  // anchor_tmp_ failure is non-fatal: add_anchor() will silently skip.
+  anchor_count_ = 0;
+
   // Write placeholder header (will be fixed up in finish()).
   MrbHeader hdr{};
   std::memcpy(hdr.magic, kMrbMagic, 4);
@@ -92,6 +98,14 @@ bool MrbWriter::open(const char* path) {
 
 void MrbWriter::close() {
   bw_.close();
+  if (anchor_tmp_) {
+    std::fclose(anchor_tmp_);
+    anchor_tmp_ = nullptr;
+    if (anchor_tmp_path_[0])
+      std::remove(anchor_tmp_path_);
+    anchor_tmp_path_[0] = '\0';
+  }
+  anchor_count_ = 0;
   paragraph_count_ = 0;
   chapters_.clear();
   images_.clear();
@@ -212,13 +226,14 @@ void MrbWriter::update_image_size(uint16_t idx, uint16_t width, uint16_t height)
 }
 
 void MrbWriter::add_anchor(uint16_t chapter_idx, uint16_t para_index, const char* id, size_t id_len) {
-  if (id_len == 0 || id_len > 255)
+  if (id_len == 0 || id_len > 255 || !anchor_tmp_)
     return;
-  AnchorEntry e{};
-  e.chapter_idx = chapter_idx;
-  e.para_idx = para_index;
-  e.id.assign(id, id_len);
-  anchors_.push_back(std::move(e));
+  uint8_t hdr_buf[5];
+  mrb_write_u16(hdr_buf, chapter_idx);
+  mrb_write_u16(hdr_buf + 2, para_index);
+  hdr_buf[4] = static_cast<uint8_t>(id_len);
+  if (std::fwrite(hdr_buf, 1, 5, anchor_tmp_) == 5 && std::fwrite(id, 1, id_len, anchor_tmp_) == id_len)
+    ++anchor_count_;
 }
 
 bool MrbWriter::finish(const EpubMetadata& meta, const TableOfContents& toc,
@@ -289,17 +304,16 @@ bool MrbWriter::finish(const EpubMetadata& meta, const TableOfContents& toc,
   // Format: [count:u16] then count × [chapter_idx:u16][para_idx:u16][id_len:u8][id_bytes]
   uint32_t anchor_offset = bw_.tell();
   {
-    uint16_t anchor_count = static_cast<uint16_t>(anchors_.size());
     uint8_t ac_buf[2];
-    mrb_write_u16(ac_buf, anchor_count);
+    mrb_write_u16(ac_buf, static_cast<uint16_t>(anchor_count_));
     write_bytes(ac_buf, 2);
-    for (const auto& a : anchors_) {
-      uint8_t hdr_buf[5];
-      mrb_write_u16(hdr_buf, a.chapter_idx);
-      mrb_write_u16(hdr_buf + 2, a.para_idx);
-      hdr_buf[4] = static_cast<uint8_t>(a.id.size());
-      write_bytes(hdr_buf, 5);
-      write_bytes(a.id.c_str(), a.id.size());
+    // Copy streamed anchor entries from temp file.
+    if (anchor_tmp_ && anchor_count_ > 0) {
+      std::rewind(anchor_tmp_);
+      uint8_t copy_buf[128];
+      size_t n;
+      while ((n = std::fread(copy_buf, 1, sizeof(copy_buf), anchor_tmp_)) > 0)
+        write_bytes(copy_buf, n);
     }
   }
 

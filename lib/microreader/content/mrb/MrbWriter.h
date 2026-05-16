@@ -111,13 +111,11 @@ class MrbWriter {
   };
   std::vector<ParaDesc> para_descriptors_;
 
-  // Anchor table: id → (chapter_idx, para_index) for runtime link fragment navigation.
-  struct AnchorEntry {
-    uint16_t chapter_idx;
-    uint16_t para_idx;
-    std::string id;  // element id attribute value
-  };
-  std::vector<AnchorEntry> anchors_;
+  // Anchor table: streamed directly to a temp file during conversion to avoid
+  // large contiguous RAM allocation. Copied into the MRB at finish().
+  FILE* anchor_tmp_ = nullptr;
+  char anchor_tmp_path_[260] = {};
+  uint32_t anchor_count_ = 0;
 
   // Reusable serialization buffer (avoids per-paragraph heap allocation).
   std::vector<uint8_t> serialize_buf_;

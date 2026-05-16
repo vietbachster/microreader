@@ -94,11 +94,6 @@ bool convert_epub_to_mrb_streaming(Book& book, const char* output_path, uint8_t*
   }
 
   // Context for the streaming paragraph + ID sinks.
-  struct AnchorEntry {
-    uint16_t chapter_idx;
-    uint16_t para_idx;
-    std::string id;
-  };
   struct SinkCtx {
     MrbWriter* writer;
     std::vector<ImageMapping>* image_map;
@@ -109,14 +104,12 @@ bool convert_epub_to_mrb_streaming(Book& book, const char* output_path, uint8_t*
     TableOfContents* toc_work;
     uint16_t current_zip_file_idx;
     uint16_t current_chapter_idx;
-    // Anchor collection: all id→para mappings for runtime link navigation.
-    std::vector<AnchorEntry>* anchors;
+    // (anchors are written directly to the MrbWriter as they arrive)
 #ifdef ESP_PLATFORM
     int64_t write_us;  // time in write_paragraph (MRB I/O)
     size_t para_count;
 #endif
   };
-  std::vector<AnchorEntry> anchors;
   SinkCtx ctx{};
   ctx.writer = &writer;
   ctx.image_map = &image_map;
@@ -126,7 +119,6 @@ bool convert_epub_to_mrb_streaming(Book& book, const char* output_path, uint8_t*
   ctx.toc_work = &toc_work;
   ctx.current_zip_file_idx = 0;
   ctx.current_chapter_idx = 0;
-  ctx.anchors = &anchors;
 #ifdef ESP_PLATFORM
   ctx.write_us = 0;
   ctx.para_count = 0;
@@ -149,9 +141,9 @@ bool convert_epub_to_mrb_streaming(Book& book, const char* output_path, uint8_t*
           entry.para_index = static_cast<uint16_t>(para_idx < 0xFFFFu ? para_idx : 0xFFFFu);
       }
     }
-    // Anchor collection: record all id→para for runtime fragment navigation.
+    // Anchor collection: write directly to MRB to avoid buffering all anchors in RAM.
     if (id_len > 0 && id_len <= 255 && para_idx < 0xFFFFu)
-      c.anchors->push_back({c.current_chapter_idx, static_cast<uint16_t>(para_idx), std::string(id_p, id_len)});
+      c.writer->add_anchor(c.current_chapter_idx, static_cast<uint16_t>(para_idx), id_p, id_len);
   };
 
   // Non-text paragraph sink: remap image keys and write to MRB.
@@ -232,10 +224,6 @@ bool convert_epub_to_mrb_streaming(Book& book, const char* output_path, uint8_t*
         (slash_pos != std::string_view::npos) ? std::string(entry_name.substr(slash_pos + 1)) : std::string(entry_name);
     spine_files.push_back(std::move(basename));
   }
-
-  // Write anchor table: all id→para mappings collected during conversion.
-  for (const auto& a : anchors)
-    writer.add_anchor(a.chapter_idx, a.para_idx, a.id.c_str(), a.id.size());
 
   bool ok = writer.finish(book.metadata(), toc_work, spine_files);
   writer.close();  // explicit close so fclose() happens before we return
